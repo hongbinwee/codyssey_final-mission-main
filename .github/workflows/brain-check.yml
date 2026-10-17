@@ -1,0 +1,110 @@
+name: Brain core isolated QA
+
+on:
+  pull_request:
+    paths:
+      - "src/brain/**"
+      - "src/agent.ts"
+      - "src/server.ts"
+      - "scripts/brain-migrate.ts"
+      - "db/brain/**"
+      - "tests/brain-sandbox/**"
+      - "tests/brain-db/**"
+      - "tests/brain-browser/**"
+      - "eval/brain/**"
+      - "scripts/brain-intent-eval.ts"
+      - "scripts/brain-eval-audit.ts"
+      - "src/web/components/BrainPreview.tsx"
+      - "tests/unit/brain-*.test.ts"
+      - "experiments/langgraph/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/brain-check.yml"
+      - "docs/BRAIN_V7_DISTRIBUTED_RECOVERY_ERASURE.md"
+      - "docs/BRAIN_V8_FENCING_FAILURE_QA.md"
+      - "docs/BRAIN_V9_FENCED_CHECKPOINTS_QA.md"
+      - "docs/BRAIN_M10_M13_HANDOFF.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  brain-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: brain_ci
+          POSTGRES_PASSWORD: ci_brain_only_never_for_Commerce
+          POSTGRES_DB: brain_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U brain_ci -d brain_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      BRAIN_DATABASE_URL: postgresql://brain_ci:ci_brain_only_never_for_Commerce@127.0.0.1:5432/brain_ci
+      BRAIN_MIGRATE_APPROVED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install committed dependencies without mutation
+        run: npm ci
+      - name: Typecheck full TypeScript repository
+        run: npm run check
+      - name: Build unchanged frontend
+        run: npm run build
+      - name: Brain isolated regression and API tests
+        run: node --experimental-strip-types --test --test-concurrency=1 tests/brain-sandbox/*.test.mjs tests/unit/brain-*.test.ts
+      - name: Deterministic Shopping Brain intent goldset (not live model accuracy)
+        run: |
+          mkdir -p /tmp/brain-eval
+          BRAIN_EVAL_REPORT_PATH=/tmp/brain-eval/gold-replay-v1.json node --experimental-strip-types scripts/brain-intent-eval.ts --gold-replay --dataset=v1
+          BRAIN_EVAL_REPORT_PATH=/tmp/brain-eval/gold-replay-v2.json node --experimental-strip-types scripts/brain-intent-eval.ts --gold-replay --dataset=v2
+      - name: Brain v2 evaluation provenance and holdout integrity audit
+        run: node --experimental-strip-types scripts/brain-eval-audit.ts
+      - name: Legacy Commerce unit audit (known fixture/env blockers, non-gating)
+        continue-on-error: true
+        run: |
+          echo '::notice::restricted-reset.test.ts requires historical protected dump absent in clean CI; status NOT_RUN'
+          mapfile -t suites < <(find tests/unit -name '*.test.ts' ! -name 'restricted-reset.test.ts' | sort)
+          node --test "${suites[@]}"
+      - name: Prepare strictly isolated disposable brain_ci PostgreSQL schema
+        run: node scripts/brain-migrate.ts
+      - name: Real PostgreSQL tenant and checkpoint regression
+        run: timeout --signal=TERM --kill-after=5s 150s node --experimental-strip-types --test --test-concurrency=1 tests/brain-db/brain-pg.test.mjs tests/brain-db/brain-lock-loss.test.mjs tests/brain-db/brain-fencing-prototype.test.mjs tests/brain-db/brain-worker-kill.test.mjs tests/brain-db/brain-checkpoint-failure.test.mjs tests/brain-db/brain-model-recovery.test.mjs tests/brain-db/brain-fenced-v9.test.mjs tests/brain-db/brain-fenced-v9-recovery.test.mjs tests/brain-db/brain-fenced-v9-publish-ack.test.mjs tests/brain-db/brain-erasure-inventory.test.mjs tests/brain-db/brain-legacy-migration-audit.test.mjs tests/brain-db/brain-rate-limit.test.mjs tests/brain-db/brain-retention-audit.test.mjs
+      - name: HTTP session and Brain API with local Responses mock
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=5s 70s node --experimental-strip-types --test tests/brain-db/brain-http.test.mjs > /tmp/brain-http.log 2>&1
+          status=$?
+          cat /tmp/brain-http.log
+          exit "$status"
+      - name: Authenticated RAG E2E with two users and preference reversal
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=5s 70s node --experimental-strip-types --test tests/brain-db/brain-rag-http.test.mjs > /tmp/brain-rag-http.log 2>&1
+          status=$?
+          cat /tmp/brain-rag-http.log
+          exit "$status"
+      - name: Install isolated Chromium browser for Brain UI
+        run: npx playwright install --with-deps chromium
+      - name: Browser E2E for memory, personalized ranking and retry
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=5s 140s node --experimental-strip-types --test tests/brain-browser/brain-browser.test.mjs > /tmp/brain-browser.log 2>&1
+          status=$?
+          cat /tmp/brain-browser.log
+          exit "$status"
+      - name: Real LangGraph MemorySaver smoke
+        run: node --experimental-strip-types --test experiments/langgraph/smoke.test.mjs
+      - name: Verify dependency lock and package were not modified
+        run: git diff --exit-code -- package.json package-lock.json

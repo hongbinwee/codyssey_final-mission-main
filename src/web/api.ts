@@ -45,7 +45,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<ApiResul
   const r = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...init,
-    signal: withTimeout(init?.signal, path === "/api/agent/turn" ? AGENT_TIMEOUT_MS : API_TIMEOUT_MS),
+    signal: withTimeout(init?.signal, (path === "/api/agent/turn" || /^\/api\/brain\/conversations\/[^/]+\/turn$/.test(path)) ? AGENT_TIMEOUT_MS : API_TIMEOUT_MS),
   });
   const j: unknown = await r.json();
   if (!isEnvelope(j)) throw new Error("BAD_ENVELOPE");

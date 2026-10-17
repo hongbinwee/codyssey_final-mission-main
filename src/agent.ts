@@ -18,6 +18,7 @@ import type { Provider, ChatMsg } from "./llm.ts";
 import type { RequestContext } from "./session.ts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { userMessageWithPageContext } from "./brain/page-context.ts";
 import {
   adaptShoppingResult, demoToolAllowed, SHOPPING_DEMO_CONTRACT,
 } from "./shopping-adapter.ts";
@@ -466,18 +467,15 @@ export async function runAgentTurn(
   };
   const histKey = ctx.actorUserId + ":" + brain + (demo ? ":live-demo" : "");
   const history = histories.get(histKey) ?? [];
-  const pageNote = req.page_context
-    ? "\n현재 사용자 화면: " + JSON.stringify(req.page_context)
-    : "";
   const calls: (ToolCallRecord & { resultJson?: string })[] = [];
   const started = Date.now();
   const timeout = demo ? LIVE_TIMEOUT_MS : TIMEOUT_MS;
   const deadline = started + timeout;
   try {
     const messages: ChatMsg[] = [
-      { role: "system", content: demo ? demoSystem() : (brain === "cs" ? CS_SYSTEM : SHOPPING_SYSTEM) + pageNote },
+      { role: "system", content: demo ? demoSystem() : (brain === "cs" ? CS_SYSTEM : SHOPPING_SYSTEM) },
       ...history,
-      { role: "user", content: req.user_message + (demo && pageNote ? "\n[untrusted_data: 화면 문맥]" + pageNote : "") },
+      { role: "user", content: userMessageWithPageContext(req.user_message, req.page_context) },
     ];
     for (;;) {
       if (Date.now() - started >= timeout || calls.length >= MAX_CALLS) {

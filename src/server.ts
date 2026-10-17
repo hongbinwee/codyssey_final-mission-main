@@ -19,6 +19,7 @@ import { getActionResult } from "./actions.ts";
 import { runAgentTurn } from "./agent.ts";
 import { getProvider } from "./llm.ts";
 import { createAiDemoGate } from "./ai-demo-access.ts";
+import {brainMutationAllowed} from "./brain/csrf.ts";
 import {
   isolatedEnvTouched,
   planIsolatedConnect,
@@ -153,6 +154,21 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
   });
   const provider = getProvider();
   const aiDemo = env.AI_LIVE_DEMO === "1";
+  if (aiDemo && env.BRAIN_ENABLED === "1")
+    throw new Error("new Brain API cannot run in the existing read-only live demo");
+  // Never open AI storage unless explicitly enabled. No edits to Commerce DB.
+  const brainRuntime = env.BRAIN_ENABLED === "1"
+    ? await (await import("./brain/runtime.ts")).createBrainRuntime({
+        brainDatabaseUrl: env.BRAIN_DATABASE_URL ?? "",
+        commerceDatabaseUrl: env.DATABASE_URL,
+        provider,
+        rag: env.BRAIN_RAG_URL ? {
+          endpoint:env.BRAIN_RAG_URL,
+          auditId:env.BRAIN_RAG_AUDIT_ID ?? "",
+          token:env.BRAIN_RAG_TOKEN,
+        } : undefined,
+      })
+    : null;
   const aiGate = createAiDemoGate();
   const aiCalls = createAiDemoGate(30, 15);
 
@@ -208,8 +224,9 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
           return res.end("Not found");
         }
         try {
+          const bytes = await readFile(filePath);
           res.writeHead(200, { "content-type": MIME[extname(filePath)] ?? "application/octet-stream" });
-          return res.end(await readFile(filePath));
+          return res.end(bytes);
         } catch {
           res.writeHead(404);
           return res.end("Not found");
@@ -222,6 +239,30 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
       if (aiDemo && p.startsWith("/api/") && p !== "/api/agent/turn" &&
           !(req.method === "GET" && /^\/api\/products(?:\/[^/]+(?:\/reviews)?)?$/.test(p)))
         return json(res, 403, { ok: false, error: { code: "READ_ONLY_DEMO", message: "이 AI 시연에서는 상품·리뷰 조회만 제공해요. 일반 쇼핑은 기존 3105 앱을 이용해 주세요." } });
+
+      if (p === "/api/brain" || p.startsWith("/api/brain/")) {
+        if (!brainRuntime)
+          return json(res, 404, { ok: false, error: { code: "NOT_FOUND", message: "Brain API is disabled" } });
+        const mutating = req.method === "POST" || req.method === "DELETE";
+        if(mutating&&!brainMutationAllowed(req.headers,env.BRAIN_PUBLIC_ORIGIN))
+          return json(res,403,{ok:false,error:{code:"CSRF_REJECTED",message:"허용되지 않은 요청 출처"}});
+        if(mutating){
+          const isTurn=req.method==="POST" && p.startsWith("/api/brain/conversations/") && p.endsWith("/turn");
+          // Shared across all replicas. Fails closed if AI PostgreSQL is down.
+          let quota;
+          try{quota=await brainRuntime.takeRate(ctx.actorUserId,isTurn?"turn":"mutation");}
+          catch{
+            return json(res,503,{ok:false,error:{code:"BRAIN_RATE_UNAVAILABLE",
+              message:"Brain 요청 제한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요"}});
+          }
+          if(!quota.ok)return json(res,429,{
+            ok:false,error:{code:"BRAIN_RATE_LIMIT",message:"Brain 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요"}
+          },{"retry-after":String(quota.retryAfterSeconds)});
+        }
+        const submitted = req.method === "POST" ? await body(req) : {};
+        const reply = await brainRuntime.handle(req.method ?? "", p, ctx.actorUserId, submitted);
+        return json(res, reply.status, reply.body);
+      }
 
       if (p === "/api/products" && req.method === "GET") {
         return send(res, await searchProducts({
@@ -401,6 +442,9 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
       res.writeHead(404);
       res.end("Not found");
     } catch {
+      // Static asset read failures may happen after writeHead(200). Never send
+      // a second header: close the incomplete response instead.
+      if (res.headersSent) { res.destroy(); return; }
       json(res, 500, { ok: false, error: { code: "INTERNAL", message: "요청을 처리하지 못했습니다" } });
     }
   });
@@ -412,6 +456,7 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         ? server.listen(port, host, resolve)
         : server.listen(port, resolve),
   );
+  if (brainRuntime) server.on("close", () => { void brainRuntime.close(); });
   return server;
 }
 

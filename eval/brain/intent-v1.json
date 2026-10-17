@@ -1,0 +1,369 @@
+{
+  "version": "brain-intent-eval-v1",
+  "provenance": "hand-authored synthetic task examples, NOT real LLM observations",
+  "cases": [
+    {
+      "id": "NEW_BUDGET",
+      "group": "single_turn",
+      "message": "모니터 50만원 이하 FHD 필수로 추천해줘",
+      "previous": null,
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {}
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {},
+        "queryMode": "SET",
+        "budgetMode": "SET",
+        "requirementsMode": "REPLACE"
+      }
+    },
+    {
+      "id": "FOLLOWUP_KEEP",
+      "group": "multi_turn",
+      "message": "눈 피로도 중요해",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {},
+        "revision": 1
+      },
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {
+          "eye_comfort": "important"
+        }
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {
+          "eye_comfort": "important"
+        },
+        "queryMode": "KEEP",
+        "budgetMode": "KEEP",
+        "requirementsMode": "KEEP"
+      }
+    },
+    {
+      "id": "BUDGET_UPDATE",
+      "group": "multi_turn",
+      "message": "예산을 30만원으로 낮춰줘",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {},
+        "revision": 2
+      },
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": 300000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {}
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": 300000,
+        "requiredConditions": [],
+        "currentPreferences": {},
+        "queryMode": "KEEP",
+        "budgetMode": "SET",
+        "requirementsMode": "KEEP"
+      }
+    },
+    {
+      "id": "NEW_CATEGORY",
+      "group": "multi_turn",
+      "message": "이제 헤드폰 알아볼래",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {},
+        "revision": 2
+      },
+      "expected": {
+        "query": "headphones",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {}
+      },
+      "goldOutput": {
+        "query": "headphones",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {},
+        "queryMode": "SET",
+        "budgetMode": "CLEAR",
+        "requirementsMode": "CLEAR",
+        "preferencesMode": "CLEAR"
+      }
+    },
+    {
+      "id": "EXPLICIT_CLEAR",
+      "group": "multi_turn",
+      "message": "예산 제한 없애줘",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {},
+        "revision": 1
+      },
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": null,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {}
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {},
+        "queryMode": "KEEP",
+        "budgetMode": "CLEAR",
+        "requirementsMode": "KEEP"
+      }
+    },
+    {
+      "id": "REPLACE_REQUIREMENT",
+      "group": "multi_turn",
+      "message": "FHD 대신 QHD 필수로",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD"
+        ],
+        "currentPreferences": {},
+        "revision": 1
+      },
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "QHD"
+        ],
+        "currentPreferences": {}
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": null,
+        "requiredConditions": [
+          "QHD"
+        ],
+        "currentPreferences": {},
+        "queryMode": "KEEP",
+        "budgetMode": "KEEP",
+        "requirementsMode": "REPLACE"
+      }
+    },
+    {
+      "id": "ADD_REQUIREMENT",
+      "group": "multi_turn",
+      "message": "USB-C도 필수야",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "QHD"
+        ],
+        "currentPreferences": {},
+        "revision": 2
+      },
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "QHD",
+          "USB-C"
+        ],
+        "currentPreferences": {}
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": null,
+        "requiredConditions": [
+          "USB-C"
+        ],
+        "currentPreferences": {},
+        "queryMode": "KEEP",
+        "budgetMode": "KEEP",
+        "requirementsMode": "ADD"
+      }
+    },
+    {
+      "id": "CURRENT_OVERRIDES_MEMORY",
+      "group": "multi_turn",
+      "message": "이번에는 가격보다 성능",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [],
+        "currentPreferences": {},
+        "revision": 1
+      },
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [],
+        "currentPreferences": {
+          "price_priority": "performance"
+        }
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {
+          "price_priority": "performance"
+        },
+        "queryMode": "KEEP",
+        "budgetMode": "KEEP",
+        "requirementsMode": "KEEP"
+      }
+    },
+    {
+      "id": "NO_INVENT_BUDGET",
+      "group": "single_turn",
+      "message": "이어폰 추천해줘",
+      "previous": null,
+      "expected": {
+        "query": "earphones",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {}
+      },
+      "goldOutput": {
+        "query": "earphones",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {},
+        "queryMode": "SET",
+        "budgetMode": "CLEAR",
+        "requirementsMode": "REPLACE"
+      }
+    },
+    {
+      "id": "CLEAR_REQUIREMENTS",
+      "group": "multi_turn",
+      "message": "필수 조건은 다 취소",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [
+          "FHD",
+          "USB-C"
+        ],
+        "currentPreferences": {},
+        "revision": 3
+      },
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [],
+        "currentPreferences": {}
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {},
+        "queryMode": "KEEP",
+        "budgetMode": "KEEP",
+        "requirementsMode": "CLEAR"
+      }
+    },
+    {
+      "id": "NO_HARD_FROM_PREFERENCE",
+      "group": "multi_turn",
+      "message": "소음에 민감해",
+      "previous": {
+        "query": "headphones",
+        "maxTotalWon": 250000,
+        "requiredConditions": [],
+        "currentPreferences": {},
+        "revision": 1
+      },
+      "expected": {
+        "query": "headphones",
+        "maxTotalWon": 250000,
+        "requiredConditions": [],
+        "currentPreferences": {
+          "noise_sensitivity": "important"
+        }
+      },
+      "goldOutput": {
+        "query": "headphones",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {
+          "noise_sensitivity": "important"
+        },
+        "queryMode": "KEEP",
+        "budgetMode": "KEEP",
+        "requirementsMode": "KEEP"
+      }
+    },
+    {
+      "id": "NO_LEGACY_PREF_OVERRIDE",
+      "group": "multi_turn",
+      "message": "전에는 가성비였지만 이번엔 균형",
+      "previous": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [],
+        "currentPreferences": {},
+        "revision": 1
+      },
+      "expected": {
+        "query": "monitor",
+        "maxTotalWon": 500000,
+        "requiredConditions": [],
+        "currentPreferences": {
+          "price_priority": "balanced"
+        }
+      },
+      "goldOutput": {
+        "query": "monitor",
+        "maxTotalWon": null,
+        "requiredConditions": [],
+        "currentPreferences": {
+          "price_priority": "balanced"
+        },
+        "queryMode": "KEEP",
+        "budgetMode": "KEEP",
+        "requirementsMode": "KEEP"
+      }
+    }
+  ]
+}

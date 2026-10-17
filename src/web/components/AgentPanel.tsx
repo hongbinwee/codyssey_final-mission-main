@@ -1,5 +1,6 @@
 // A01 공통 AI 대화·비교 패널
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { BrainPreview } from "./BrainPreview.tsx";
 import { apiSafe, fmtWon, newActionKey, type AgentBrain } from "../api.ts";
 import type { CompareCard } from "../../contracts.ts";
 import { AGENT_TURN_ENABLED, sendAgentTurn } from "../agent-gate.ts";
@@ -89,6 +90,17 @@ export function AgentPanel({
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const supported = AGENT_TURN_ENABLED && brain === "shopping";
+  const [useBrainPreview,setUseBrainPreview]=useState(false);
+  useEffect(()=>{
+    let mounted=true;
+    if(brain==="shopping"){
+      void apiSafe<{enabled:boolean}>("/api/brain/status").then(r=>{
+        if(mounted&&r.ok&&r.data.enabled)setUseBrainPreview(true);
+      });
+    }
+    return ()=>{mounted=false;};
+  },[brain]);
+
 
   async function send() {
     const text = input.trim();
@@ -144,6 +156,9 @@ export function AgentPanel({
       setBusy(false);
     }
   }
+
+  if(useBrainPreview&&brain==="shopping")
+    return <BrainPreview onOpenProduct={onOpenProduct} onClose={onClose}/>;
 
   return (
     <aside className="agent-panel">
