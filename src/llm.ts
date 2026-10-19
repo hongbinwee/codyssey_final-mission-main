@@ -461,7 +461,7 @@ export function stubProvider(): Provider {
 export function hermesDeepProvider(env:Record<string,string|undefined>):Provider {
   const model=env.HERMES_DEEP_MODEL?.trim();
   if(!model)throw Error("HERMES_DEEP_MODEL is required");
-  const rawFormat=env.HERMES_DEEP_API_FORMAT?.trim()||config.llmApiFormat;
+  const rawFormat=env.HERMES_DEEP_API_FORMAT?.trim()||(model.startsWith("claude-")?"anthropic_messages":config.llmApiFormat);
   if(!["responses","chat_completions","anthropic_messages"].includes(rawFormat))
     throw Error("invalid HERMES_DEEP_API_FORMAT");
   const apiFormat=rawFormat as LiveProviderOptions["apiFormat"];
