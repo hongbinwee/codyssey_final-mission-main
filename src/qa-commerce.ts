@@ -75,3 +75,10 @@ export function qaCommerceRequestAllowed(method: string, path: string): boolean 
     (["PATCH", "DELETE"].includes(method) && /^\/api\/cart\/items\/[^/]+$/.test(path)) ||
     (method === "PUT" && /^\/api\/wishlist\/[^/]+$/.test(path));
 }
+
+/** Only enabled by HERMES_QA_ENABLED on an already verified isolated QA database. */
+export function hermesQaRequestAllowed(method:string,path:string):boolean {
+ return (method==="GET"&&(/^\/api\/orders(?:\/[^/]+(?:\/shipping|\/cancel\/(?:eligibility|quote))?)?$/.test(path)||
+   path==="/api/checkout/quote"))||
+  (method==="POST"&&(path==="/api/checkout/quote"||path==="/api/checkout/confirm"));
+}

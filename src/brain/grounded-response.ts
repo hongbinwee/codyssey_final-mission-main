@@ -315,7 +315,7 @@ function finish(selection:Selection,selected:PreparedCandidate,summary?:string,
  const simulated=c.isSimulated&&includeNotice?"표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요. ":"";
  const sourceLabel=selection.sourceKind==="SYNTHETIC"?"합성 리뷰":"수집 리뷰";
  const sourceNotice=includeNotice?(selection.sourceKind==="SYNTHETIC"&&!selected.ranked
-   ?"시연 데이터 참고 내용이에요. ":`${sourceLabel} 의견을 바탕으로 한 상품 정보예요. `):"";
+   ?"시연 데이터 참고 내용이에요. 합성 리뷰 의견이 포함되어 있어요. ":`${sourceLabel} 의견을 바탕으로 한 상품 정보예요. `):"";
  const quoted=summary??`“${selection.quote}”라는 의견이 있어요.`;
   if(selection.sourceKind==="SYNTHETIC")return {kind:selected.ranked?"LLM_GROUNDED":"REFERENCE_ONLY",
     items:selected.ranked?[{productId:c.productId,variantId:c.variantId,name,totalPriceWon:c.totalPriceWon,

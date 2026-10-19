@@ -1,4 +1,5 @@
 import {guardBrainMessage} from './routing.ts';
+import {runHermesReadLoop} from "./hermes-tools.ts";
 import {interviewAnswer,needsInterview,rememberInterview} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
 import {AsyncLocalStorage} from "node:async_hooks";
@@ -38,6 +39,14 @@ export function createPersistentResearchGraph(
  if(fencing&&!turnLock)throw Error("fenced Brain requires distributed turn lock");
  const activeLease=new AsyncLocalStorage<TurnLease>();
  const verify=async()=>{await activeLease.getStore()?.assertHeld();};
+ const unavailable=(request:GraphRequest,prepared:PreparedTurn,plan:ShoppingPlan,route:BrainRoute)=>({
+   researchResult:{conversationId:request.conversationId,messageId:prepared.messageId,clientActionId:request.clientActionId,
+     intentKind:route.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,
+     ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
+     explanation:{kind:'NO_MATCH',text:'상품 정보를 불러오는 연결에 문제가 생겼어요.\n\n말씀하신 조건은 그대로 보관했어요. 잠시 후 다시 찾아볼까요?',items:[],limitations:[],failure:{code:'RETRIEVAL_UNAVAILABLE'}},
+     trace:{memoryMs:prepared.memoryMs,intentMs:0,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-prepared.startedAt}} as ResearchResult,
+   evidence:[] as EvidenceRecord[],
+ });
  const compiled=new StateGraph(State)
    .addNode("prepare",async state=>{
      const prepared=await prepareTurn(state.request,deps);
@@ -79,18 +88,66 @@ export function createPersistentResearchGraph(
      const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},explanation:{kind:"CLARIFICATION",text:questions[0]?.text??"원하는 조건을 알려주세요.",items:[],limitations:[],clarification:{questions}},trace:{memoryMs:state.prepared.memoryMs,intentMs:performance.now()-state.prepared.startedAt-state.prepared.memoryMs,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
      await verify();return {shoppingPlan:plan,researchResult,evidence:[]};
    })
+   .addNode("deep",async state=>{
+     if(!deps.hermes)throw Error("Hermes provider unavailable");
+     let fetched:Awaited<ReturnType<typeof retrieveTurn>>|null=null;
+     const refersToPurchase=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
+     const recent=refersToPurchase?await deps.hermes.history(state.request.actorUserId):[];
+     const noProductKind=!state.shoppingPlan.category&&/^(전에|이전에|지난번|그|구매|산 것)/.test(state.shoppingPlan.query);
+     const samePurchasedKind=recent[0]&&state.shoppingPlan.query.replace(/\s/g,"").length>=2&&
+       recent[0].productName.replace(/\s/g,"").includes(state.shoppingPlan.query.replace(/\s/g,""));
+     const effectivePlan=recent[0]&&(noProductKind||samePurchasedKind)?{...state.shoppingPlan,
+       ...(noProductKind?{query:recent[0].productName}:{}),category:recent[0].category,
+       ...(state.shoppingPlan.category!==recent[0].category?{attributePreferences:[]}:{}),
+     }:state.shoppingPlan;
+     let decision:Awaited<ReturnType<typeof runHermesReadLoop>>={calls:[],searched:false,purchases:[],answer:null};
+     try{decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
+       effectivePlan,state.prepared.memories,{
+         purchases:()=>recent.length?Promise.resolve(recent):deps.hermes!.history(state.request.actorUserId),
+         search:async()=>{
+           fetched=await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
+           await verify();
+           return {products:fetched.result.ranking.ranked.slice(0,3).map(row=>({
+             productId:row.candidate.productId,variantId:row.candidate.variantId,
+             totalPriceWon:(row.candidate.unitPriceWon??0)+(row.candidate.shippingFeeWon??0),
+             reviewCount:row.candidate.wholeReviewCountVerified?row.candidate.wholeReviewCount:null
+           }))};
+         }
+       });}catch{/* Continue through verified RAG if the deep model is unavailable. */}
+     // Search remains mandatory for recommendations; the LLM never supplies ranking.
+     let result;
+     try{result=fetched??await retrieveTurn(state.request,state.prepared,effectivePlan,deps);}
+     catch(error){
+       if(!(error instanceof RetrievalUnavailableError))throw error;
+       await verify();return {shoppingPlan:effectivePlan,...unavailable(state.request,state.prepared,effectivePlan,state.intentRoute)};
+     }
+     const cheaper=/(저렴|더 싸|보다 싸|가격.*낮)/.test(state.request.userMessage);
+     const moreReviews=/(리뷰.*많|후기.*많|리뷰 수|후기 수)/.test(state.request.userMessage);
+     const comparePast=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
+     if(comparePast&&(cheaper||moreReviews)){
+       const ownedPurchases=decision.purchases.length?decision.purchases:recent.length?recent:await deps.hermes.history(state.request.actorUserId);
+       const past=ownedPurchases[0];
+       const earlierCount=past&&moreReviews?await deps.hermes.reviewCount(past.productId):null;
+       const selected=result.result.ranking.ranked.filter(row=>{
+         const c=row.candidate;
+         return !!past&&c.productId!==past.productId&&
+           (!cheaper||(c.unitPriceWon!==null&&c.unitPriceWon<past.unitPriceWon))&&
+           (!moreReviews||(earlierCount!==null&&c.wholeReviewCountVerified&&
+             c.wholeReviewCount!==null&&c.wholeReviewCount>earlierCount));
+       });
+       result.result.ranking={...result.result.ranking,ranked:selected,referenceOnly:[]};
+     }
+     await verify();
+     return {shoppingPlan:effectivePlan,researchResult:{...result.result,intentKind:state.intentRoute.kind,
+       trace:{...result.result.trace,hermesToolCalls:decision.calls.length}},evidence:result.evidence};
+   })
    .addNode("retrieve",async state=>{
      let fetched;
      try{fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);}
      catch(error){
        if(!(error instanceof RetrievalUnavailableError))throw error;
        await verify();
-       const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,clientActionId:state.request.clientActionId,
-         intentKind:state.intentRoute.kind,shoppingPlan:state.shoppingPlan,datasetVersion:deps.datasetVersion,
-         ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
-         explanation:{kind:'NO_MATCH',text:'상품 정보를 불러오는 연결에 문제가 생겼어요.\n\n말씀하신 조건은 그대로 보관했어요. 잠시 후 다시 찾아볼까요?',items:[],limitations:[],failure:{code:'RETRIEVAL_UNAVAILABLE'}},
-         trace:{memoryMs:state.prepared.memoryMs,intentMs:0,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
-       return {researchResult,evidence:[]};
+       return unavailable(state.request,state.prepared,state.shoppingPlan,state.intentRoute);
      }
      // A lost advisory session must not let stale RAG data finish this node.
      await verify();
@@ -118,9 +175,10 @@ export function createPersistentResearchGraph(
    .addEdge("prepare","route")
    .addConditionalEdges("route",state=>state.intentRoute.search?"plan":"converse",["plan","converse"])
    .addEdge("converse",END)
-   .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":"retrieve",["clarify","retrieve"])
+   .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes&&(/전에|이전에|구매|주문|후기|리뷰|비교/.test(state.request.userMessage))?"deep":"retrieve",["clarify","deep","retrieve"])
    .addEdge("clarify",END)
    .addConditionalEdges("retrieve",state=>state.researchResult.explanation?.failure?.code==='RETRIEVAL_UNAVAILABLE'?END:'respond',[END,'respond'])
+   .addConditionalEdges("deep",state=>state.researchResult.explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE"?END:"respond",[END,"respond"])
    .addEdge("respond",END)
    .compile({checkpointer});
  // One-process deduplication ONLY; production multi-replica requires a DB lock.

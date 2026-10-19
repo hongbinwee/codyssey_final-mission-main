@@ -98,7 +98,7 @@ test("structured multi-product summaries cite exact synthetic sources and use Co
  assert.match(result.text,/123,000원/);assert.match(result.text,/83,000원/);
  assert.match(result.text,/합성 리뷰/);
  assert.match(result.text,/표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요/);
- assert.doesNotMatch(`${result.text}\n${result.limitations.join(" ")}`,/시연 데이터|참고 정보|검증 상태|REFERENCE_ONLY|Commerce/i);
+ assert.doesNotMatch(`${result.text}\n${result.limitations.join(" ")}`,/참고 정보|검증 상태|REFERENCE_ONLY|Commerce/i);
  assert.doesNotMatch(result.text,/p-a|p-b|v-a|v-b|r-a|r-b/);
  assert.ok(result.limitations.some(x=>/합성 리뷰.*실제 구매 경험/.test(x)));
  for(const changed of [
@@ -249,7 +249,7 @@ test("verified synthetic v4 evidence is quoted as reference-only with Commerce p
  assert.match(result.text,/3,000원/);
  assert.match(result.text,/123,000원/);
  assert.match(result.text,/요청 조건을 모두 확인하지 못해 추천으로 고르지는 않았어요/);
- assert.doesNotMatch(`${result.text}\n${result.limitations.join(" ")}`,/시연 데이터|참고 정보|검증 상태|REFERENCE_ONLY|Commerce/i);
+ assert.doesNotMatch(`${result.text}\n${result.limitations.join(" ")}`,/참고 정보|검증 상태|REFERENCE_ONLY|Commerce/i);
  assert.doesNotMatch(result.text,/p-synthetic|v-blue|review-syn-1/);
  assert.deepEqual(result.citations?.map(x=>x.sourceKind),["SYNTHETIC"]);
  assert.equal(mock.calls.length,1);

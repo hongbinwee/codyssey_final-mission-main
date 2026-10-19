@@ -8,9 +8,10 @@ import { assertServiceRole, connectDb, sql, type Q } from "./db.ts";
 import { ensureDevDb } from "./devdb.ts";
 import { contextFromRequest, signSession } from "./session.ts";
 import {createQaAuth,readQaAuthFile} from "./qa-auth.ts";
-import {qaCommerceEnabled, qaCommerceRequestAllowed, qaCommerceIdentity, qaCommerceConnectedIdentityMatches} from "./qa-commerce.ts";
+import {qaCommerceEnabled, qaCommerceRequestAllowed, qaCommerceIdentity, qaCommerceConnectedIdentityMatches,hermesQaRequestAllowed} from "./qa-commerce.ts";
 import { catalogRequestAllowed, catalogSource, createCatalog } from "./catalog.ts";
 import {openExternalCatalog} from './external-catalog.ts';
+import {createHermesQaCatalog} from "./hermes-qa-catalog.ts";
 import { addToCart, getCart, removeCartItem, updateCartQuantity } from "./cart.ts";
 import { getWishlist, parseWishlistPut, setWishlist } from "./wishlist.ts";
 import { checkoutQuote, confirmCheckout } from "./checkout.ts";
@@ -20,7 +21,7 @@ import {
 } from "./cancellation.ts";
 import { getActionResult } from "./actions.ts";
 import { runAgentTurn } from "./agent.ts";
-import { getProvider } from "./llm.ts";
+import { getProvider,liveProvider } from "./llm.ts";
 import { createAiDemoGate } from "./ai-demo-access.ts";
 import {brainMutationAllowed} from "./brain/csrf.ts";
 import {
@@ -259,6 +260,10 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
   try{externalCatalog=await (deps.openExternalCatalog??openExternalCatalog)(env,source);}
   catch(error){await businessDb.end();throw error;}
   const catalog = externalCatalog?.catalog??createCatalog(source, businessDb);
+  const hermesQa=env.HERMES_QA_ENABLED==="1";
+  if(hermesQa&&(!qaCommerce||source!=="test_items2"||!externalCatalog||!qa))
+    throw Error("Hermes purchase requires isolated QA Commerce, QA authentication and external test_items2 catalog");
+  const hermesBridge=hermesQa&&externalCatalog?createHermesQaCatalog(externalCatalog.db,externalCatalog.catalog,businessDb):null;
   await buildBundle({
     entryPoints: ["src/web/app.tsx"],
     bundle: true,
@@ -277,6 +282,8 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         brainDatabaseUrl: env.BRAIN_DATABASE_URL ?? "",
         commerceDatabaseUrl: env.DATABASE_URL,
         provider,
+        hermesEnabled:env.HERMES_AGENT_ENABLED==="1",
+        ...(env.HERMES_AGENT_ENABLED==="1"&&env.HERMES_DEEP_MODEL?.trim()?{hermesProvider:liveProvider(env.HERMES_DEEP_MODEL)}:{}),
         rag: ragConnection,
         catalogSource: source,
         catalog,
@@ -365,17 +372,17 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
       // 아래부터는 인증 필요
       const ctx = await requestContext(req);
       if (!ctx) return json(res, 401, { ok: false, error: { code: "UNAUTHENTICATED", message: "로그인이 필요합니다" } });
-      if (!catalogRequestAllowed(source, req.method ?? "", p) && !(qaCommerce && qaCommerceRequestAllowed(req.method ?? "", p)))
+      if (!catalogRequestAllowed(source, req.method ?? "", p) && !(qaCommerce && qaCommerceRequestAllowed(req.method ?? "", p)) && !(hermesBridge && hermesQaRequestAllowed(req.method ?? "",p)))
         return json(res, 403, {ok:false,error:{code:"READ_ONLY_CATALOG",
           message:qaCommerce?"v4 QA에서는 찜·장바구니 저장만 지원하며 주문·결제는 제공하지 않습니다.":"v4 테스트 상품은 시연용 가격·재고이며 장바구니·찜·주문·결제를 제공하지 않습니다."}});
-      if(externalCatalog&&req.method!=='GET'&&qaCommerceRequestAllowed(req.method??'',p))
+      if(externalCatalog&&!hermesBridge&&req.method!=='GET'&&qaCommerceRequestAllowed(req.method??'',p))
         return json(res,403,{ok:false,error:{code:'CATALOG_WRITES_PAUSED',message:'외부 상품과 로컬 저장소의 정합성 확인 전에는 찜·장바구니 변경을 잠시 지원하지 않습니다.'}});
-      if (qaCommerce && qaCommerceRequestAllowed(req.method ?? "", p) && req.method !== "GET" &&
+      if (qaCommerce && (qaCommerceRequestAllowed(req.method ?? "", p)||hermesBridge&&hermesQaRequestAllowed(req.method ?? "",p)) && req.method !== "GET" &&
           !brainMutationAllowed(req.headers, env.BRAIN_PUBLIC_ORIGIN))
         return json(res,403,{ok:false,error:{code:"CSRF_REJECTED",message:"허용되지 않은 요청 출처"}});
       if (p === "/api/catalog/context" && req.method === "GET")
         return json(res,200,{ok:true,data:{source,read_only:catalogReadOnly,is_simulated:catalogReadOnly,
-          ...(qaCommerce?{cart_enabled:!externalCatalog,wishlist_enabled:!externalCatalog,checkout_enabled:false}:{})}});
+          ...(qaCommerce?{cart_enabled:!externalCatalog||!!hermesBridge,wishlist_enabled:!externalCatalog||!!hermesBridge,checkout_enabled:!!hermesBridge}:{})}});
       if (aiDemo && p.startsWith("/api/") && p !== "/api/agent/turn" &&
           !(req.method === "GET" && /^\/api\/products(?:\/[^/]+(?:\/reviews)?)?$/.test(p)))
         return json(res, 403, { ok: false, error: { code: "READ_ONLY_DEMO", message: "이 AI 시연에서는 상품·리뷰 조회만 제공해요. 일반 쇼핑은 기존 3105 앱을 이용해 주세요." } });
@@ -414,16 +421,17 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
           limit: url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined,
         }));
 
-      if (p === "/api/cart" && req.method === "GET") return send(res, await getCart(ctx));
+      if (p === "/api/cart" && req.method === "GET") {if(hermesBridge)await hermesBridge.refreshCart(ctx.actorUserId);return send(res, await getCart(ctx));}
       if (p === "/api/cart/items" && req.method === "POST") {
         const b = (await body(req)) as { variant_id?: string; quantity?: number; expected_cart_version?: number; expected_variant_version?: number; idempotency_key?: string };
         if (!b.idempotency_key)
           return json(res, 400, { ok: false, error: { code: "VALIDATION", message: "idempotency_key가 필요합니다" } });
+        const localVariantVersion=hermesBridge?await hermesBridge.ensureVariant(String(b.variant_id??""),Number(b.expected_variant_version)):undefined;
         return send(res, await addToCart({
           variant_id: String(b.variant_id ?? ""),
           quantity: Number(b.quantity),
           expected_cart_version: Number(b.expected_cart_version),
-          expected_variant_version: Number(b.expected_variant_version),
+          expected_variant_version: localVariantVersion??Number(b.expected_variant_version),
         }, ctx, "ui-" + b.idempotency_key));
       }
 
@@ -461,6 +469,7 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         const parsed = parseWishlistPut(await body(req));
         if (!parsed.ok)
           return json(res, 400, { ok: false, error: { code: "VALIDATION", message: parsed.error } });
+        if(hermesBridge)await hermesBridge.ensureProduct(decodeURIComponent(m[1]));
         return send(res, await setWishlist(
           { product_id: decodeURIComponent(m[1]), saved: parsed.saved },
           ctx,
@@ -479,12 +488,18 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         }));
 
       // W04 견적/확인 — UI 전용. Agent Tool registry에 없으므로 A01이 호출할 수 없다.
-      if (p === "/api/checkout/quote" && req.method === "GET")
+      if (p === "/api/checkout/quote" && req.method === "GET") {
+        if(hermesBridge)await hermesBridge.refreshCart(ctx.actorUserId);
         return send(res, await checkoutQuote(ctx));
+      }
       // 선택 주문/바로 구매 견적 [PMQA-067]. source 필드는 서비스가 검증한다 —
       // 생략·알 수 없는 값은 전체 카트로 추정하지 않고 거절한다.
       if (p === "/api/checkout/quote" && req.method === "POST") {
         const b = (await body(req)) as Record<string, unknown> | null;
+        if(hermesBridge){
+          if(b?.source==="DIRECT")await hermesBridge.ensureVariant(String(b.variant_id??""));
+          else await hermesBridge.refreshCart(ctx.actorUserId);
+        }
         return send(res, await checkoutQuote(ctx, {
           kind: b?.source,
           cart_item_ids: b?.cart_item_ids,
@@ -496,6 +511,7 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         const b = (await body(req)) as { quote_token?: string; idempotency_key?: string };
         if (!b.quote_token || !b.idempotency_key)
           return json(res, 400, { ok: false, error: { code: "VALIDATION", message: "quote_token과 idempotency_key가 필요합니다" } });
+        if(hermesBridge)await hermesBridge.refreshCart(ctx.actorUserId);
         return send(res, await confirmCheckout(b.quote_token, ctx, "ui-" + b.idempotency_key));
       }
 

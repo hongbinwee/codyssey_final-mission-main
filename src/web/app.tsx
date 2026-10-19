@@ -520,7 +520,7 @@ function App() {
             }}>{loggingOut?"로그아웃 중…":"로그아웃"}</button>
             {logoutError&&<p role="alert">{logoutError}</p>}
           </div>
-          <CatalogNotice />
+          <CatalogNotice checkoutEnabled={checkoutEnabled} />
         </>}
         {route.name === "shop" && (
           <Shopping

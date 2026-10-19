@@ -7,6 +7,7 @@ import {PostgresSaver} from "@langchain/langgraph-checkpoint-postgres";
 import {createCatalog,type CatalogSource} from "../catalog.ts";
 import {sql} from "../db.ts";
 import {readCommerceActivity} from "./commerce-signals.ts";
+import {purchaseSnapshots} from "./purchase-history.ts";
 import {qaCommerceDatabaseIdentityMatches} from "../qa-commerce.ts";
 import {assertServiceRole} from "../db.ts";
 import {verifiedRagRetriever,localRagFetcher,type LocalRagSearch,type RagConnection} from "./rag-adapter.ts";
@@ -156,7 +157,7 @@ export async function verifyPreparedBrainStorage(db:SchemaProbe):Promise<void>{
 }
 
 export async function createBrainRuntime(options:{
- brainDatabaseUrl:string;commerceDatabaseUrl?:string;provider:Provider;rag?:RagConnection;
+ brainDatabaseUrl:string;commerceDatabaseUrl?:string;provider:Provider;hermesProvider?:Provider;hermesEnabled?:boolean;rag?:RagConnection;
  catalogSource?:CatalogSource;
  catalog?:ReturnType<typeof createCatalog>;
  qaEnvironment?:string;
@@ -226,6 +227,9 @@ export async function createBrainRuntime(options:{
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:options.rag?.contract!=="v4",datasetVersion:options.rag?.datasetVersion,
+     ...(options.hermesEnabled?{hermes:{provider:options.hermesProvider??options.provider,
+       history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId),
+       reviewCount:async(productId:string)=>{const result=await catalog.getReviews({product_id:productId,limit:1});return result.ok?result.data.total_matching:null;}}}:{}),
      ...(ownQaCommerce?{activity:(actorUserId:string)=>readCommerceActivity(sql,actorUserId)}:{}),
      retriever:options.rag?verifiedRagRetriever({...options.rag,catalogSource:options.catalogSource??"public"},catalog.getProduct,
        options.rag.mode==="local"?localRagFetcher(localSearch!):undefined,catalog.getReviewsByIds):commerceRetriever(catalog.searchProducts),
