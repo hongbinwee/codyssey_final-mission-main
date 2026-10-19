@@ -237,6 +237,10 @@ async function recommend(input:GroundedResponseInput,provider:Pick<Provider,"cha
    if(prepared.length>1&&p.totalPriceWon===cheapest)
      f.set('lower_cost','표시한 상품 중 배송비 포함 가격이 가장 낮아요.');
    if(p.shippingFeeWon===0)f.set('shipping','확인된 배송비가 0원이에요.');
+   const verified=input.ranking.ranked.find(item=>item.candidate.productId===p.productId&&item.candidate.variantId===p.variantId)?.candidate;
+   if(verified?.wholeReviewCountVerified===true&&verified.wholeReviewCount!==null&&
+     Number.isSafeInteger(verified.wholeReviewCount)&&verified.wholeReviewCount>=0)
+     f.set('reviews',`상품 전체 리뷰 ${verified.wholeReviewCount.toLocaleString('ko-KR')}개가 확인돼요.`);
    input.plan.requiredConditions.forEach((condition,index)=>f.set(`condition-${index}`,`필수 조건인 ‘${condition}’을 상품 정보로 확인했어요.`));
    const seen=new Set<string>();
    for(const e of input.evidence){
@@ -250,8 +254,12 @@ async function recommend(input:GroundedResponseInput,provider:Pick<Provider,"cha
  }
  // Useful recommendations survive a slow/unavailable model or invalid output.
  const fallback=(failure?:GroundedExplanation['failure']):GroundedExplanation=>({...base,
-   items:base.items.map(item=>({...item,reason:[facts.get(item.productId)?.get('budget')??facts.get(item.productId)?.get('price'),
-     facts.get(item.productId)?.get('lower_cost')].filter(Boolean).join(' ')})),...(failure?{failure}:{})});
+   items:base.items.map(item=>({...item,reason:[
+     facts.get(item.productId)?.get('budget')??facts.get(item.productId)?.get('price'),
+     facts.get(item.productId)?.get('lower_cost'),
+     facts.get(item.productId)?.get('reviews'),
+     [...(facts.get(item.productId)??new Map())].find(([id])=>id.startsWith('spec-'))?.[1]
+   ].filter(Boolean).join(' ')})),...(failure?{failure}:{})});
  let content:string|null,tools:unknown;
  try{
    const timeoutMs=Math.min(40_000,Math.max(5_000,Number(process.env.HERMES_EXPLANATION_TIMEOUT_MS)||25_000));
