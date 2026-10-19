@@ -50,6 +50,7 @@ export function explainPreviousRecommendation(
  const reason=matched?.reason?.trim();
  if(reason&&reason.length<=1000)notes.push(reason);
  else notes.push("당시 요청 조건과 검증된 상품 정보를 기준으로 추천 목록에 포함했어요.");
- return {...previous.explanation,kind:"CONVERSATION",
+ const {failure:_previousModelFailure,...safeExplanation}=previous.explanation;
+ return {...safeExplanation,kind:"CONVERSATION",
   text:`${position+1}순위 ${name}을 추천한 이유를 설명해 드릴게요.\n\n${notes.join(" ")}`};
 }
