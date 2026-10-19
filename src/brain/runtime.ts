@@ -8,6 +8,7 @@ import {createCatalog,type CatalogSource} from "../catalog.ts";
 import {sql} from "../db.ts";
 import {readCommerceActivity} from "./commerce-signals.ts";
 import {purchaseSnapshots} from "./purchase-history.ts";
+import {getWishlist} from "../wishlist.ts";
 import {qaCommerceDatabaseIdentityMatches} from "../qa-commerce.ts";
 import {assertServiceRole} from "../db.ts";
 import {verifiedRagRetriever,localRagFetcher,type LocalRagSearch,type RagConnection} from "./rag-adapter.ts";
@@ -129,7 +130,7 @@ export async function readBrainHistory(db:SchemaProbe,actorUserId:string,convers
      throw new Error("invalid canonical Brain receipt");
    result=currentDatasetResult(result,datasetVersion);
    return [{clientActionId:row.client_action_id,text:row.content,reply:{conversation_id:id,message_id:result.messageId,read_only:true,
-     ranking:result.ranking,shopping_plan:result.shoppingPlan??null,intent_kind:result.intentKind,
+     ranking:result.ranking,shopping_plan:result.shoppingPlan??null,intent_kind:result.intentKind,agent_ui:result.agentUi??null,
      explanation:result.explanation,trace:result.trace??{totalMs:0}}}];
  });
  return {conversationId:id,entries};
@@ -230,6 +231,11 @@ export async function createBrainRuntime(options:{
      ...(options.hermesEnabled?{hermes:{provider:options.hermesProvider??options.provider,
        history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId),
        reviewCount:async(productId:string)=>{const result=await catalog.getReviews({product_id:productId,limit:1});return result.ok?result.data.total_matching:null;}}}:{}),
+     ...(options.hermesEnabled?{wishlist:async(actorUserId:string)=>{
+       const result=await getWishlist({actorUserId,origin:"AGENT"});
+       if(!result.ok)throw Error("wishlist unavailable");
+       return result.data.items.map(item=>({productId:item.product_id,name:item.name,active:item.active,minPriceWon:item.min_price_won}));
+     }}:{}),
      ...(ownQaCommerce?{activity:(actorUserId:string)=>readCommerceActivity(sql,actorUserId)}:{}),
      retriever:options.rag?verifiedRagRetriever({...options.rag,catalogSource:options.catalogSource??"public"},catalog.getProduct,
        options.rag.mode==="local"?localRagFetcher(localSearch!):undefined,catalog.getReviewsByIds):commerceRetriever(catalog.searchProducts),
