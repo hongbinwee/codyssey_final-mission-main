@@ -14,7 +14,7 @@ export interface HermesToolPort {
  wishlist?:()=>Promise<WishlistItem[]>;
  search:()=>Promise<{products:Array<{productId:string;variantId:string;totalPriceWon:number;reviewCount:number|null}>}>;
 }
-export type HermesLoopResult={calls:HermesToolName[];searched:boolean;purchases:PurchaseSnapshot[];answer:string|null};
+export type HermesLoopResult={calls:HermesToolName[];searched:boolean;purchases:PurchaseSnapshot[];wishlist:WishlistItem[];answer:string|null};
 const defs=[{
  type:"function",function:{name:"get_purchase_history",description:"Read the signed-in user's own historical simulated purchases to compare price and product type.",
  parameters:{type:"object",properties:{},additionalProperties:false}
@@ -28,7 +28,7 @@ export async function runHermesReadLoop(
  provider:Pick<Provider,"chat">,message:string,plan:ShoppingPlan,memories:Preference[],tools:HermesToolPort,
 ):Promise<HermesLoopResult>{
  const skill=selectShoppingSkill(plan.query);
- const system=SHOPPING_POLICY+"\n[Hermes read tools]\nYou may use only the two provided read tools. "+
+ const system=SHOPPING_POLICY+"\n[Hermes read tools]\nUse only the listed read tools. "+
   "Use purchase history when the user refers to previous purchases. Use wishlist when the user refers to saved products. Use product search when comparing or recommending. "+
   "Do not claim you placed an order. After tool results, finish without additional tools if the available evidence is sufficient. "+
   "Product recommendations, rankings, numbers and citations are generated only by the server, not by your message. "+
@@ -39,13 +39,15 @@ export async function runHermesReadLoop(
   confirmed_preferences:memories.map(m=>({key:m.key,value:m.value})).slice(0,3)});
  const messages:ChatMsg[]=[{role:"system",content:system},{role:"user",content:context}];
  const calls:HermesToolName[]=[];
- let purchases:PurchaseSnapshot[]=[],searched=false,answer:string|null=null;
+ let purchases:PurchaseSnapshot[]=[],wishlist:WishlistItem[]=[],searched=false,answer:string|null=null;
  const used=new Set<HermesToolName>();
  for(let turn=0;turn<=HERMES_TOOL_LIMIT;turn++){
   const resp=await provider.chat(messages,toolDefs,{signal:AbortSignal.timeout(20000)});
   const selected=resp.tool_calls??[];
   if(!selected.length){answer=resp.content;break;}
-  if(turn===HERMES_TOOL_LIMIT)break;
+  // A model may propose parallel calls, but our serial tool protocol must reject
+  // the whole batch rather than dispatching only the first with missing results.
+  if(turn===HERMES_TOOL_LIMIT||selected.length!==1)break;
   // One read at a time; preventing parallel or repeated dispatch bounds latency.
   const call=selected[0],name=call.name as HermesToolName;
   if(!["get_purchase_history","search_products",...(tools.wishlist?["get_wishlist"]:[])].includes(name)||used.has(name)||
@@ -58,15 +60,14 @@ export async function runHermesReadLoop(
    purchases=await tools.purchases();
    output={purchases:purchases.slice(0,20)};
   }else if(name==="get_wishlist"&&tools.wishlist){
-   output={saved_products:(await tools.wishlist()).slice(0,20)};
+   wishlist=(await tools.wishlist()).slice(0,20);
+   output={saved_products:wishlist};
   }else{
    const result=await tools.search();
    searched=true;
    output={validated_candidates:result.products.slice(0,3)};
   }
   messages.push({role:"tool",tool_call_id:call.id,name,content:JSON.stringify(output)});
-  // If the model emitted multiple calls, stop instead of sending an incomplete tool batch.
-  if(selected.length>1)break;
  }
- return {calls,searched,purchases,answer};
+ return {calls,searched,purchases,wishlist,answer};
 }
