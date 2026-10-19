@@ -37,3 +37,29 @@
 ## 검증
 `npm run check`, `npm run build`, `node --test tests/unit/brain-wishlist-task.test.ts tests/unit/brain-hermes-loop.test.ts`, Brain API/graph 회귀, 실 DB actor-isolation 및 브라우저 E2E를 실행해야 한다.
 미실행은 PASS로 표시하지 않는다. 배포 여부도 별도로 기록한다.
+
+## H1 local isolated verification — 2026-10-20
+
+Scope: exact committed blobs `wishlist-task.ts`, `hermes-tools.ts`, `dataset-state.ts` and their three test files; Git blob SHA verified against the branch. This was **not** an entire-repository checkout: the sandbox cannot resolve github.com or install this repository's dependencies. The test harness uses the real `skills.ts`, a lightweight SHOPPING_POLICY stand-in, and narrow type declarations for type-only imports.
+
+```sh
+node --experimental-strip-types --test \
+  tests/unit/brain-wishlist-task.test.ts \
+  tests/unit/brain-hermes-loop.test.ts \
+  tests/unit/brain-dataset-state.test.ts
+# 11 tests, 11 pass, 0 fail (isolated sandbox)
+tsc -p tsconfig.json
+# PASS (isolated typecheck with stand-in dependency declarations)
+```
+
+Bugs discovered and fixed while executing the tests:
+- `두 번째 상품 살게` failed ordinal purchase recognition; token patterns updated and verified.
+- Compound wishlist review/price comparisons were intercepted as list-only requests; fast-path now leaves them to planner/Tool selection.
+- Partial dispatch of a multi-tool model response could create an inconsistent transcript; whole unhandled batch is rejected.
+- Model-owned reference now returns bounded actor-owned wishlist observations for subsequent reasoning.
+- Dataset change invalidates previously displayed wishlist snapshot.
+- Wishlist route is enabled only when the actor-owned read tool is actually configured.
+
+**NOT_RUN:** full repository Typecheck/Build, full unit suite, existing CI at new HEAD, real database actor isolation, actual LLM/RAG tests, browser E2E and QA-server deployment. A mocked provider conditioned its second Tool choice on actual first Tool output; this validates the loop contract, *not* real model Tool-choice accuracy.
+
+Next priority: **H2/H3/H4** — first-class shopping Task State, additional bounded read Tools (cart/product/reviews/orders), and genuine LangGraph choose→execute→observe→replan control. The current `deep` graph can still perform mandatory retrieval; the wishlist task fast path alone does not make the whole application autonomous.
