@@ -102,7 +102,8 @@ export function createPersistentResearchGraph(
      const moreReviews=/(리뷰.*많|후기.*많|리뷰 수|후기 수)/.test(state.request.userMessage);
      const comparePast=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
      if(comparePast&&(cheaper||moreReviews)){
-       const past=decision.purchases[0];
+       const ownedPurchases=decision.purchases.length?decision.purchases:await deps.hermes.history(state.request.actorUserId);
+       const past=ownedPurchases[0];
        const earlierCount=past&&moreReviews?await deps.hermes.reviewCount(past.productId):null;
        const selected=result.result.ranking.ranked.filter(row=>{
          const c=row.candidate;
