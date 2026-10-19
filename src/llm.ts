@@ -235,8 +235,25 @@ function parseAnthropicMessage(value: unknown): ChatResponse {
   };
 }
 
-export function liveProvider(modelOverride?:string): Provider {
+export interface LiveProviderOptions {
+  apiKey?: string;
+  baseUrl?: string;
+  apiFormat?: "responses"|"chat_completions"|"anthropic_messages";
+  anthropicThinking?: "adaptive"|"";
+  anthropicEffort?: "low"|"medium"|"high"|"";
+}
+export function liveProvider(modelOverride?:string, overrides:LiveProviderOptions={}): Provider {
   const model=modelOverride?.trim()||config.llmModel;
+  const apiKey=overrides.apiKey??config.llmApiKey;
+  const apiBaseUrl=overrides.baseUrl??config.llmBaseUrl;
+  const apiFormat=overrides.apiFormat??config.llmApiFormat;
+  const anthropicThinking=overrides.anthropicThinking??config.llmAnthropicThinking;
+  const anthropicEffort=overrides.anthropicEffort??config.llmAnthropicEffort;
+  if((anthropicThinking||anthropicEffort)&&
+      (apiFormat!=="anthropic_messages"||anthropicThinking!=="adaptive"||
+       !["low","medium","high"].includes(anthropicEffort)))
+    throw Error("Anthropic adaptive thinking requires low, medium or high effort on anthropic_messages");
+  if(!apiKey.trim()||!model.trim())throw Error("live model and API key required");
   return {
     name: "live:" + model,
     async chat(messages, tools, options) {
@@ -247,11 +264,11 @@ export function liveProvider(modelOverride?:string): Provider {
         ? config.llmApiTimeoutMs : 180000;
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const chatCompletions = config.llmApiFormat === "chat_completions";
-        const anthropic = config.llmApiFormat === "anthropic_messages";
+        const chatCompletions = apiFormat === "chat_completions";
+        const anthropic = apiFormat === "anthropic_messages";
         let res: Response;
         try {
-          const baseUrl = config.llmBaseUrl.replace(/\/+$/, "");
+          const baseUrl = apiBaseUrl.replace(/\/+$/, "");
           const nativeMessages = anthropic ? anthropicMessages(messages) : undefined;
           const body = anthropic
             ? {
@@ -260,9 +277,9 @@ export function liveProvider(modelOverride?:string): Provider {
                 ...(nativeMessages?.system ? { system: nativeMessages.system } : {}),
                 messages: nativeMessages!.messages,
                 ...(tools.length ? { tools: anthropicTools(tools) } : {}),
-                ...(config.llmAnthropicThinking === "adaptive" ? {
+                ...(anthropicThinking === "adaptive" ? {
                   thinking: { type: "adaptive" },
-                  output_config: { effort: config.llmAnthropicEffort },
+                  output_config: { effort: anthropicEffort },
                 } : {}),
               }
             : chatCompletions
@@ -288,11 +305,11 @@ export function liveProvider(modelOverride?:string): Provider {
             method: "POST",
             headers: anthropic ? {
               "content-type": "application/json",
-              "x-api-key": config.llmApiKey,
+              "x-api-key": apiKey,
               "anthropic-version": "2023-06-01",
             } : {
               "content-type": "application/json",
-              authorization: "Bearer " + config.llmApiKey,
+              authorization: "Bearer " + apiKey,
             },
             signal,
             body: JSON.stringify(body),
