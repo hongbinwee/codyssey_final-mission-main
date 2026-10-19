@@ -15,7 +15,7 @@ export const isCommerceEnabled = (
 ): boolean => context != null && (context.cart_enabled === true || !context.read_only);
 
 export const isCheckoutEnabled = (context: CatalogUiContext | null | undefined): boolean =>
-  context != null && !context.read_only && context.checkout_enabled !== false;
+  context != null && (context.checkout_enabled === true || !context.read_only && context.checkout_enabled !== false);
 
 export const stockSafeErrorMessage = (code: string, message: string): string =>
   code === "OUT_OF_STOCK" ? "재고가 부족합니다. 수량이나 옵션을 다시 확인해 주세요." : message;
