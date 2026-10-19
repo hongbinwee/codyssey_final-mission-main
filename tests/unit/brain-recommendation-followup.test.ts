@@ -33,6 +33,12 @@ test("supports successive ordinal follow-ups with preserved reasons",()=>{
  assert.match(second!.text,/19,000원/);
  assert.doesNotMatch(second!.text,/상품 하나/);
 });
+test("a previous slow model must not cause another timeout banner on the reason follow-up",()=>{
+ const slow={...prior,explanation:{...prior.explanation!,failure:{code:"MODEL_TIMEOUT"}}} as ResearchResult;
+ const explanation=explainPreviousRecommendation("1순위는 왜?",slow,"set-v1");
+ assert.equal(explanation?.failure,undefined);
+ assert.match(explanation!.text,/15,000원/);
+});
 test("does not reuse stale, unavailable or unrelated recommendations",()=>{
  assert.equal(explainPreviousRecommendation("1순위는 왜 추천한 거야?",prior,"set-v2"),null);
  assert.equal(explainPreviousRecommendation("새로운 이어폰 추천해 줘",prior,"set-v1"),null);
