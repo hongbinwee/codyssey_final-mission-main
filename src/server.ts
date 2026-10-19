@@ -21,7 +21,7 @@ import {
 } from "./cancellation.ts";
 import { getActionResult } from "./actions.ts";
 import { runAgentTurn } from "./agent.ts";
-import { getProvider,liveProvider } from "./llm.ts";
+import { getProvider,hermesDeepProvider } from "./llm.ts";
 import { createAiDemoGate } from "./ai-demo-access.ts";
 import {brainMutationAllowed} from "./brain/csrf.ts";
 import {
@@ -283,7 +283,7 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         commerceDatabaseUrl: env.DATABASE_URL,
         provider,
         hermesEnabled:env.HERMES_AGENT_ENABLED==="1",
-        ...(env.HERMES_AGENT_ENABLED==="1"&&env.HERMES_DEEP_MODEL?.trim()?{hermesProvider:liveProvider(env.HERMES_DEEP_MODEL)}:{}),
+        ...(env.HERMES_AGENT_ENABLED==="1"&&env.HERMES_DEEP_MODEL?.trim()?{hermesProvider:hermesDeepProvider(env)}:{}),
         rag: ragConnection,
         catalogSource: source,
         catalog,
