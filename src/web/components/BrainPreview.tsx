@@ -227,7 +227,7 @@ export function BrainPreview({onClose,onOpenProduct}:{onClose:()=>void;onOpenPro
        {e.reply&&<><div className="brain-assistant-message"><span className="brain-avatar" aria-hidden="true">✦</span><div className="msg ai"><BrainAnswer text={e.reply.explanation?.failure
          ?e.reply.explanation.failure.code==="RETRIEVAL_UNAVAILABLE"
            ?e.reply.explanation.text.trim()||friendlyFailure(e.reply.explanation.failure.code)
-           :e.reply.explanation.items.length>0?"AI 설명이 지연되어 확인된 상품 정보로 먼저 추천드려요. "+e.reply.explanation.text
+           :e.reply.explanation.items.length>0?e.reply.explanation.text
              :friendlyFailure(e.reply.explanation.failure.code)+((e.reply.ranking.ranked.length+e.reply.ranking.referenceOnly.length)>0?" 아래 검색 결과는 확인할 수 있어요.":"")
          :e.reply.explanation?.text??"상품 정보를 확인했어요."}/></div></div>
          {isRetrievalUnavailable(e)&&<div className="brain-recovery-actions">
