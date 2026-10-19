@@ -27,3 +27,48 @@ test("Unknown tools are never dispatched",async()=>{
  assert.deepEqual(value.calls,[]);
  assert.equal(value.searched,false);
 });
+
+test("model chooses another tool only after inspecting real wishlist output",async()=>{
+ const called:string[]=[];
+ const provider={chat:async(messages:Array<{role:string;content?:string|null;name?:string}>)=>{
+  const last=messages.at(-1);
+  if(last?.role==="user")return {content:null,tool_calls:[{id:"wish",name:"get_wishlist",arguments:"{}"}]};
+  if(last?.name==="get_wishlist"){
+   const saved=JSON.parse(last.content??"{}").saved_products;
+   return saved.length?{content:null,tool_calls:[{id:"find",name:"search_products",arguments:"{}"}]}:{content:"찜 목록 없음"};
+  }
+  if(last?.name==="search_products")return {content:"상품 검증 완료"};
+  throw Error("unexpected tool transcript");
+ }};
+ const result=await runHermesReadLoop(provider,"찜한 상품과 다른 후보 비교",plan,[],{
+  purchases:async()=>{throw Error("unexpected purchase history");},
+  wishlist:async()=>{called.push("wish");return[{productId:"p1",name:"에센스",active:true,minPriceWon:10000}]},
+  search:async()=>{called.push("search");return{products:[{productId:"p1",variantId:"v1",totalPriceWon:10000,reviewCount:10}]}}
+ });
+ assert.deepEqual(called,["wish","search"]);
+ assert.deepEqual(result.calls,["get_wishlist","search_products"]);
+ assert.equal(result.wishlist[0]?.productId,"p1");
+ assert.equal(result.searched,true);
+});
+test("empty wishlist makes the model stop, not search",async()=>{
+ const result=await runHermesReadLoop({chat:async(messages:Array<{role:string;content?:string|null;name?:string}>)=>
+  messages.at(-1)?.role==="user"?{content:null,tool_calls:[{id:"w",name:"get_wishlist",arguments:"{}"}]}:{content:"찜 목록 없음"}},
+  "찜 목록 확인",plan,[],{
+   purchases:async()=>{throw Error("unexpected");},
+   wishlist:async()=>[],
+   search:async()=>{throw Error("unexpected search");}
+  });
+ assert.deepEqual(result.calls,["get_wishlist"]);
+ assert.equal(result.searched,false);
+ assert.deepEqual(result.wishlist,[]);
+});
+test("parallel model tool calls must dispatch none",async()=>{
+ const result=await runHermesReadLoop({chat:async()=>({content:null,tool_calls:[
+  {id:"a",name:"get_purchase_history",arguments:"{}"},
+  {id:"b",name:"search_products",arguments:"{}"}
+ ]})},"비교해줘",plan,[],{
+  purchases:async()=>{throw Error("unexpected");},
+  search:async()=>{throw Error("unexpected");}
+ });
+ assert.deepEqual(result.calls,[]);
+});
