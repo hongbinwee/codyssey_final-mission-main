@@ -42,8 +42,8 @@ if (llmApiFormat !== "responses" && llmApiFormat !== "chat_completions" && llmAp
 const llmAnthropicThinking = process.env.LLM_ANTHROPIC_THINKING ?? "";
 const llmAnthropicEffort = process.env.LLM_ANTHROPIC_EFFORT ?? "";
 if ((llmAnthropicThinking || llmAnthropicEffort) &&
-    (llmAnthropicThinking !== "adaptive" || llmAnthropicEffort !== "high"))
-  throw new Error("Anthropic thinking requires LLM_ANTHROPIC_THINKING=adaptive and LLM_ANTHROPIC_EFFORT=high");
+    (llmAnthropicThinking !== "adaptive" || !["low","medium","high"].includes(llmAnthropicEffort)))
+  throw new Error("Anthropic thinking requires LLM_ANTHROPIC_THINKING=adaptive and LLM_ANTHROPIC_EFFORT=low, medium or high");
 
 export const config = {
   port: Number(process.env.PORT ?? 3000),
