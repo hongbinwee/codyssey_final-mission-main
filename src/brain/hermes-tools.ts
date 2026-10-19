@@ -5,11 +5,13 @@ import type {ShoppingPlan} from "./shopping-plan.ts";
 import type {Preference} from "./contracts.ts";
 import {SHOPPING_POLICY} from "./policy.ts";
 import {selectShoppingSkill} from "./skills.ts";
+import type {WishlistItem} from "./wishlist-task.ts";
 
 export const HERMES_TOOL_LIMIT=3;
-export type HermesToolName="get_purchase_history"|"search_products";
+export type HermesToolName="get_purchase_history"|"search_products"|"get_wishlist";
 export interface HermesToolPort {
  purchases:()=>Promise<PurchaseSnapshot[]>;
+ wishlist?:()=>Promise<WishlistItem[]>;
  search:()=>Promise<{products:Array<{productId:string;variantId:string;totalPriceWon:number;reviewCount:number|null}>}>;
 }
 export type HermesLoopResult={calls:HermesToolName[];searched:boolean;purchases:PurchaseSnapshot[];answer:string|null};
@@ -27,11 +29,12 @@ export async function runHermesReadLoop(
 ):Promise<HermesLoopResult>{
  const skill=selectShoppingSkill(plan.query);
  const system=SHOPPING_POLICY+"\n[Hermes read tools]\nYou may use only the two provided read tools. "+
-  "Use purchase history when the user refers to previous purchases. Use product search when comparing or recommending. "+
+  "Use purchase history when the user refers to previous purchases. Use wishlist when the user refers to saved products. Use product search when comparing or recommending. "+
   "Do not claim you placed an order. After tool results, finish without additional tools if the available evidence is sufficient. "+
   "Product recommendations, rankings, numbers and citations are generated only by the server, not by your message. "+
   "No arbitrary JSON arguments; tools use the authenticated server actor and saved Shopping Plan.\n"+
   "[Skill]\n"+skill.guidance;
+ const toolDefs=tools.wishlist?[...defs,{type:"function",function:{name:"get_wishlist",description:"Read saved products owned by the signed-in user. Read only; do not modify wishlist.",parameters:{type:"object",properties:{},additionalProperties:false}}}]:defs;
  const context=JSON.stringify({latest_user_message:message,previous_shopping_plan:plan,
   confirmed_preferences:memories.map(m=>({key:m.key,value:m.value})).slice(0,3)});
  const messages:ChatMsg[]=[{role:"system",content:system},{role:"user",content:context}];
@@ -39,13 +42,13 @@ export async function runHermesReadLoop(
  let purchases:PurchaseSnapshot[]=[],searched=false,answer:string|null=null;
  const used=new Set<HermesToolName>();
  for(let turn=0;turn<=HERMES_TOOL_LIMIT;turn++){
-  const resp=await provider.chat(messages,defs,{signal:AbortSignal.timeout(20000)});
+  const resp=await provider.chat(messages,toolDefs,{signal:AbortSignal.timeout(20000)});
   const selected=resp.tool_calls??[];
   if(!selected.length){answer=resp.content;break;}
   if(turn===HERMES_TOOL_LIMIT)break;
   // One read at a time; preventing parallel or repeated dispatch bounds latency.
   const call=selected[0],name=call.name as HermesToolName;
-  if(!["get_purchase_history","search_products"].includes(name)||used.has(name)||
+  if(!["get_purchase_history","search_products",...(tools.wishlist?["get_wishlist"]:[])].includes(name)||used.has(name)||
      !/^\s*\{\s*\}\s*$/.test(call.arguments))break;
   used.add(name);calls.push(name);
   messages.push({role:"assistant",content:resp.content,tool_calls:resp.tool_calls,
@@ -54,6 +57,8 @@ export async function runHermesReadLoop(
   if(name==="get_purchase_history"){
    purchases=await tools.purchases();
    output={purchases:purchases.slice(0,20)};
+  }else if(name==="get_wishlist"&&tools.wishlist){
+   output={saved_products:(await tools.wishlist()).slice(0,20)};
   }else{
    const result=await tools.search();
    searched=true;
