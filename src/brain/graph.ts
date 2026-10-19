@@ -6,7 +6,7 @@ import {AsyncLocalStorage} from "node:async_hooks";
 import type {PostgresSaver} from "@langchain/langgraph-checkpoint-postgres";
 import type {BrainTrace,EvidenceRecord} from "./contracts.ts";
 import type {PreparedTurn,ResearchDeps,ResearchResult} from "./read-flow.ts";
-import {prepareTurn,resolveTurnPlan,retrieveTurn} from "./read-flow.ts";
+import {prepareTurn,resolveTurnPlan,retrieveTurn,RetrievalUnavailableError} from "./read-flow.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import {buildGroundedExplanation,type GroundedResponder} from "./grounded-response.ts";
 import type {BrainGraphPort} from "./api.ts";
@@ -39,6 +39,14 @@ export function createPersistentResearchGraph(
  if(fencing&&!turnLock)throw Error("fenced Brain requires distributed turn lock");
  const activeLease=new AsyncLocalStorage<TurnLease>();
  const verify=async()=>{await activeLease.getStore()?.assertHeld();};
+ const unavailable=(request:GraphRequest,prepared:PreparedTurn,plan:ShoppingPlan,route:BrainRoute)=>({
+   researchResult:{conversationId:request.conversationId,messageId:prepared.messageId,clientActionId:request.clientActionId,
+     intentKind:route.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,
+     ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
+     explanation:{kind:'NO_MATCH',text:'상품 정보를 불러오는 연결에 문제가 생겼어요.\n\n말씀하신 조건은 그대로 보관했어요. 잠시 후 다시 찾아볼까요?',items:[],limitations:[],failure:{code:'RETRIEVAL_UNAVAILABLE'}},
+     trace:{memoryMs:prepared.memoryMs,intentMs:0,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-prepared.startedAt}} as ResearchResult,
+   evidence:[] as EvidenceRecord[],
+ });
  const compiled=new StateGraph(State)
    .addNode("prepare",async state=>{
      const prepared=await prepareTurn(state.request,deps);
@@ -77,7 +85,7 @@ export function createPersistentResearchGraph(
    .addNode("clarify",async state=>{
      const questions=needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories);
      const plan={...state.shoppingPlan,interview:{...state.shoppingPlan.interview,answered:state.shoppingPlan.interview?.answered??[],pending:questions.map(q=>q.key)}};
-     const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},explanation:{kind:"CLARIFICATION",text:"더 잘 맞는 상품을 찾도록 필요한 조건만 알려주세요. 직접 입력하거나 상관없어요를 선택해도 좋아요.",items:[],limitations:[],clarification:{questions}},trace:{memoryMs:state.prepared.memoryMs,intentMs:performance.now()-state.prepared.startedAt-state.prepared.memoryMs,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
+     const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},explanation:{kind:"CLARIFICATION",text:questions[0]?.text??"원하는 조건을 알려주세요.",items:[],limitations:[],clarification:{questions}},trace:{memoryMs:state.prepared.memoryMs,intentMs:performance.now()-state.prepared.startedAt-state.prepared.memoryMs,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
      await verify();return {shoppingPlan:plan,researchResult,evidence:[]};
    })
    .addNode("deep",async state=>{
@@ -107,7 +115,12 @@ export function createPersistentResearchGraph(
          }
        });}catch{/* Continue through verified RAG if the deep model is unavailable. */}
      // Search remains mandatory for recommendations; the LLM never supplies ranking.
-     const result=fetched??await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
+     let result;
+     try{result=fetched??await retrieveTurn(state.request,state.prepared,effectivePlan,deps);}
+     catch(error){
+       if(!(error instanceof RetrievalUnavailableError))throw error;
+       await verify();return {shoppingPlan:effectivePlan,...unavailable(state.request,state.prepared,effectivePlan,state.intentRoute)};
+     }
      const cheaper=/(저렴|더 싸|보다 싸|가격.*낮)/.test(state.request.userMessage);
      const moreReviews=/(리뷰.*많|후기.*많|리뷰 수|후기 수)/.test(state.request.userMessage);
      const comparePast=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
@@ -129,7 +142,13 @@ export function createPersistentResearchGraph(
        trace:{...result.result.trace,hermesToolCalls:decision.calls.length}},evidence:result.evidence};
    })
    .addNode("retrieve",async state=>{
-     const fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
+     let fetched;
+     try{fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);}
+     catch(error){
+       if(!(error instanceof RetrievalUnavailableError))throw error;
+       await verify();
+       return unavailable(state.request,state.prepared,state.shoppingPlan,state.intentRoute);
+     }
      // A lost advisory session must not let stale RAG data finish this node.
      await verify();
      return {researchResult:{...fetched.result,intentKind:state.intentRoute.kind},evidence:fetched.evidence};
@@ -158,8 +177,8 @@ export function createPersistentResearchGraph(
    .addEdge("converse",END)
    .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes&&(/전에|이전에|구매|주문|후기|리뷰|비교/.test(state.request.userMessage))?"deep":"retrieve",["clarify","deep","retrieve"])
    .addEdge("clarify",END)
-   .addEdge("retrieve","respond")
-   .addEdge("deep","respond")
+   .addConditionalEdges("retrieve",state=>state.researchResult.explanation?.failure?.code==='RETRIEVAL_UNAVAILABLE'?END:'respond',[END,'respond'])
+   .addConditionalEdges("deep",state=>state.researchResult.explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE"?END:"respond",[END,"respond"])
    .addEdge("respond",END)
    .compile({checkpointer});
  // One-process deduplication ONLY; production multi-replica requires a DB lock.

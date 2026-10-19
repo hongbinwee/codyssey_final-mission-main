@@ -1862,3 +1862,9 @@ button.cart-thumb { border: 0; padding: 0; cursor: pointer; }
 .brain-product-exclude:focus-visible{outline:2px solid currentColor;outline-offset:3px;border-radius:4px}
 @media(prefers-color-scheme:dark){.brain-panel .brain-product-info .brain-product-exclude{color:#ffb184}}
 @media(max-width:380px){.brain-product-heading{gap:6px}.brain-panel .brain-product-info .brain-product-open{font-size:11px;gap:3px}.brain-panel .brain-product-open svg{width:13px;height:13px}.brain-panel .brain-product-image{width:64px;height:82px}}
+.brain-panel .brain-answer p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75}
+.brain-panel .brain-answer p+p{margin-top:12px}
+.brain-panel .brain-answer strong{font-weight:700;color:var(--text)}
+.brain-panel .brain-product-reason .brain-answer p+p{margin-top:6px}
+.brain-panel .brain-recovery-actions{display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap;margin:8px 0 12px}
+.brain-panel .brain-recovery-actions .link{min-height:36px;padding:6px 2px;font-weight:600}

@@ -7,7 +7,7 @@ import type {Provider,ChatMsg} from "../../src/llm.ts";
 
 type TestEvidence=EvidenceRecord & {sourceId?:string;text?:string;verified?:boolean;datasetVersion?:string;synthetic?:boolean};
 const product=(productId="p-1",variantId="v-blue",extra:Record<string,unknown>={})=>({
- productName:"Commerce 헤드폰",productId,variantId,unitPriceWon:120_000,shippingFeeWon:3_000,
+ productName:"무선 헤드폰",productId,variantId,unitPriceWon:120_000,shippingFeeWon:3_000,
  rating:4.6,ratingScale:5,wholeReviewCount:20,wholeReviewCountVerified:true,
  conditions:{},facets:{},commerceVerified:true,sourceKind:"REAL",datasetVersion:"qa-v4-2026-10",...extra
 });
@@ -60,7 +60,7 @@ test("multi-product synthetic answers announce the simulation caveat once",async
  const mock=create(JSON.stringify({claims}));
  const result=await mock.respond({originalQuestion:"두 상품의 리뷰를 비교해줘",plan:{...plan,requiredConditions:[]},ranking:rank(...candidates),evidence});
  assert.equal(result.kind,"LLM_GROUNDED");assert.equal(result.items.length,2);
- assert.equal((result.text.match(/시연용 가격·재고/g)??[]).length,1);
+ assert.equal((result.text.match(/표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요/g)??[]).length,1);
  assert.equal((result.text.match(/전체 평점이나 제품 성능·효능 점수/g)??[]).length,0);
 });
 
@@ -77,8 +77,8 @@ test("model failures are classified without leaking errors or inventing evidence
 test("empty grounded claims report that a suitable candidate was not verified",async()=>{
  const result=await create(JSON.stringify({claims:[]})).respond(ask(product()));
  assert.equal(result.kind,"EVIDENCE_INSUFFICIENT");assert.equal(result.items.length,0);
- assert.match(result.text,/적합한 후보는 확인하지 못했습니다/);
- assert.doesNotMatch(result.text,/Commerce 헤드폰|120,000원/);
+ assert.match(result.text,/요청에 맞는 상품 근거를 확인하지 못했어요/);
+ assert.doesNotMatch(result.text,/무선 헤드폰|120,000원|검증/);
 });
 
 test("structured multi-product summaries cite exact synthetic sources and use Commerce prices",async()=>{
@@ -96,9 +96,11 @@ test("structured multi-product summaries cite exact synthetic sources and use Co
  assert.deepEqual(result.citations?.map(c=>c.sourceId),["r-a","r-b"]);
  assert.match(result.text,/좋은 점.*착용감/);assert.match(result.text,/주의.*연결/);
  assert.match(result.text,/123,000원/);assert.match(result.text,/83,000원/);
- assert.match(result.text,/시연용 가격·재고/);assert.match(result.text,/시연 데이터 참고/);
+ assert.match(result.text,/합성 리뷰/);
+ assert.match(result.text,/표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요/);
+ assert.doesNotMatch(`${result.text}\n${result.limitations.join(" ")}`,/시연 데이터|참고 정보|검증 상태|REFERENCE_ONLY|Commerce/i);
  assert.doesNotMatch(result.text,/p-a|p-b|v-a|v-b|r-a|r-b/);
- assert.ok(result.limitations.some(x=>/의미|해석/.test(x)));
+ assert.ok(result.limitations.some(x=>/합성 리뷰.*실제 구매 경험/.test(x)));
  for(const changed of [
    {...claims[0],sourceId:"r-b"}, {...claims[0],quote:"배터리가 완벽합니다."},
    {...claims[0],sourceKind:"REAL"}, {...claims[0],claim:"지금 1원에 구매할 수 있어요."},
@@ -113,7 +115,7 @@ test("verified source selection contributes a citation while final price comes f
  const mock=create(cite());
  const result=await mock.respond(ask(product()));
  assert.equal(result.kind,"LLM_GROUNDED");
- assert.match(result.text,/Commerce 헤드폰/);
+ assert.match(result.text,/무선 헤드폰/);
  assert.match(result.text,/120,000원/);
  assert.match(result.text,/3,000원/);
  assert.match(result.text,/123,000원/);
@@ -154,8 +156,8 @@ test("approved QA synthetic ranked candidate reaches the model and its answer hi
  assert.deepEqual(result.items.map(row=>[row.productId,row.variantId,row.totalPriceWon,row.evidenceIds]),
   [["p-demo","v-demo",123_000,["r-demo"]]]);
  assert.deepEqual(result.citations?.map(row=>row.sourceId),["r-demo"]);
- assert.match(result.text,/시연 후보/);
- assert.match(result.text,/실제 판매 정보가 아니며 주문·결제할 수 없습니다/);
+ assert.match(result.text,/합성 리뷰/);
+ assert.match(result.text,/표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요/);
  assert.doesNotMatch(result.text,/p-demo|v-demo|r-demo|근거 ID|출처 ID/);
  const instructions=mock.calls[0].messages.find(message=>message.role==="system")?.content??"";
  assert.doesNotMatch(instructions,/Synthetic entries remain reference-only/);
@@ -197,7 +199,7 @@ test("invented citations fail closed without exposing provider output",async()=>
  const result=await mock.respond(ask(product()));
  assert.equal(result.kind,"EVIDENCE_INSUFFICIENT");
  assert.equal(result.items.length,0);
- assert.doesNotMatch(result.text,/made-up-source|Commerce 헤드폰/);
+ assert.doesNotMatch(result.text,/made-up-source|무선 헤드폰/);
 });
 
 test("citation from another product cannot be attached to a selected product",async()=>{
@@ -241,13 +243,13 @@ test("verified synthetic v4 evidence is quoted as reference-only with Commerce p
      text:"합성 참고 리뷰: 향이 순해서 좋아요. 다음에 또 구매하고 싶어요."})]});
  assert.equal(result.kind,"REFERENCE_ONLY");
  assert.equal(result.items.length,0,"synthetic evidence must not be promoted to a recommendation");
- assert.match(result.text,/합성.*참고|참고.*합성/);
- assert.match(result.text,/시연 데이터 참고/);
+ assert.match(result.text,/합성 리뷰/);
  assert.match(result.text,/향이 순해서 좋아요/);
  assert.match(result.text,/120,000원/);
  assert.match(result.text,/3,000원/);
  assert.match(result.text,/123,000원/);
- assert.match(result.text,/요청 조건 충족은 확인되지 않았어요/);
+ assert.match(result.text,/요청 조건을 모두 확인하지 못해 추천으로 고르지는 않았어요/);
+ assert.doesNotMatch(`${result.text}\n${result.limitations.join(" ")}`,/시연 데이터|참고 정보|검증 상태|REFERENCE_ONLY|Commerce/i);
  assert.doesNotMatch(result.text,/p-synthetic|v-blue|review-syn-1/);
  assert.deepEqual(result.citations?.map(x=>x.sourceKind),["SYNTHETIC"]);
  assert.equal(mock.calls.length,1);
@@ -284,8 +286,7 @@ test("test catalog prices and stock remain explicitly simulated in the model inp
  const result=await mock.respond({...ask(synthetic),ranking:{ranked:[],
    referenceOnly:[{candidate:synthetic,reasons:["synthetic"]}],rejected:[],evaluatedCount:1} as unknown as RankingResult,
    evidence:[proof("r-demo","p-demo","v-blue",{sourceKind:"SYNTHETIC"})]});
- assert.match(result.text,/시연용 가격·재고/);
- assert.match(result.text,/실제 판매 정보가 아니며 주문·결제할 수 없습니다/);
+ assert.match(result.text,/표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요/);
  assert.equal(result.items.length,0);
  const request=JSON.parse(mock.calls[0].messages[1].content??"{}");
  assert.equal(request.referenceOnly[0].isSimulated,true);
@@ -297,7 +298,7 @@ test("REAL candidate cannot borrow verified SYNTHETIC evidence",async()=>{
    evidence:[proof("review-11","p-1","v-blue",{sourceKind:"SYNTHETIC",synthetic:true})]});
  assert.equal(result.kind,"EVIDENCE_INSUFFICIENT");
  assert.equal(result.citations,undefined);
- assert.doesNotMatch(result.text,/Commerce 헤드폰|120,000원|0원/);
+ assert.doesNotMatch(result.text,/무선 헤드폰|120,000원|0원/);
  assert.equal(mock.calls.length,0);
 });
 
@@ -358,7 +359,7 @@ test("missing or mismatched verified source never falls back to a product price"
      ranking:rank(row.candidate),evidence:row.evidence});
    assert.equal(failed.kind,"EVIDENCE_INSUFFICIENT");
    assert.equal(failed.items.length,0);
-   assert.doesNotMatch(failed.text,/0원|Commerce 헤드폰|p-real/);
+   assert.doesNotMatch(failed.text,/0원|무선 헤드폰|p-real/);
  }
 
  const synthetic=product("p-synthetic","v-blue",{sourceKind:"SYNTHETIC",synthetic:true});
@@ -374,7 +375,7 @@ test("missing or mismatched verified source never falls back to a product price"
      evidence:row.evidence});
    assert.equal(failed.kind,"REFERENCE_ONLY");
    assert.equal(failed.items.length,0);
-   assert.doesNotMatch(failed.text,/0원|Commerce 헤드폰|p-synthetic/);
+   assert.doesNotMatch(failed.text,/0원|무선 헤드폰|p-synthetic/);
  }
  assert.equal(mock.calls.length,0);
 });

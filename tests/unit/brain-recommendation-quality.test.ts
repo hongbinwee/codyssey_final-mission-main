@@ -6,6 +6,7 @@ import {retrieveTurn} from '../../src/brain/read-flow.ts';
 import type {ProductCandidate,EvidenceRecord,Preference} from '../../src/brain/contracts.ts';
 import type {ShoppingPlan} from '../../src/brain/shopping-plan.ts';
 import {createPersistentResearchGraph} from '../../src/brain/graph.ts';
+import {interviewAnswer} from '../../src/brain/interview.ts';
 import {MemorySaver} from '@langchain/langgraph';
 
 const product:ProductCandidate={productId:'p-mask',variantId:'v-mask',productName:'마스크팩 10매',
@@ -83,20 +84,21 @@ test('retrieval receives explicit preferences and scoped approved Memory without
  assert.deepEqual(requests[2].preferences,['성능 중심']);
 });
 
-test('bare product asks first; skip searches once and one model response recommends a reviewless product',async()=>{
+test('named product request searches immediately and preserves its explicit budget and query',async()=>{
  let searches=0,calls=0;
  const graph=createPersistentResearchGraph({clarifyBeforeSearch:true,fastResponses:false,
    conversations:{assertOwned:async()=>{},appendUserMessage:async(_a,_c,id)=>id},memory:{list:async()=>[],put:async()=>{},delete:async()=>false},
    route:async()=>({kind:'SHOPPING_SEARCH',search:true}),
-   intent:{extract:async()=>({query:'마스크팩',context:{maxTotalWon:null,requiredConditions:[],currentPreferences:{}}})},
-   retriever:{search:async()=>{searches++;return {candidates:[product],evidence:[]};}}},new MemorySaver() as never,undefined,undefined,
+   intent:{extract:async()=>({query:'마스크팩',context:{maxTotalWon:20000,requiredConditions:[],currentPreferences:{}}})},
+   retriever:{search:async(input)=>{searches++;assert.equal(input.query,'마스크팩');assert.equal(input.maxTotalWon,20000);return {candidates:[product],evidence:[]};}}},new MemorySaver() as never,undefined,undefined,
    createLlmGroundedResponder({async chat(){calls++;return {content:JSON.stringify({recommendations:[{productId:'p-mask',variantId:'v-mask',factIds:['price'],reviewClaims:[]}]})};}}));
- const request={actorUserId:'tester_05',conversationId:'quality-c',requestId:'quality-r',clientActionId:'first',userMessage:'마스크팩 추천해줘'};
- assert.equal((await graph.invoke(request)).explanation!.kind,'CLARIFICATION');
- assert.deepEqual([searches,calls],[0,0]);
- const next=await graph.invoke({...request,clientActionId:'skip',userMessage:'상관없어요'});
- assert.deepEqual([searches,calls],[1,1]);assert.equal(next.explanation!.kind,'LLM_GROUNDED');
- assert.equal(next.explanation!.items[0].totalPriceWon,13000);assert.match(next.explanation!.items[0].reason!,/13,000원/);
- assert.equal(next.shoppingPlan!.query,'마스크팩');
- await graph.invoke({...request,clientActionId:'skip',userMessage:'상관없어요'});assert.deepEqual([searches,calls],[1,1]);
+ const request={actorUserId:'tester_05',conversationId:'quality-c',requestId:'quality-r',clientActionId:'first',userMessage:'마스크팩 2만원 이하 추천해줘'};
+ const result=await graph.invoke(request);
+ assert.equal(result.explanation!.kind,'LLM_GROUNDED');assert.deepEqual([searches,calls],[1,1]);
+ assert.deepEqual(result.explanation!.items.map(item=>[item.productId,item.variantId,item.totalPriceWon]),[['p-mask','v-mask',13000]]);
+ assert.match(result.explanation!.items[0].reason!,/13,000원|예산/);
+ assert.equal(result.shoppingPlan!.query,'마스크팩');assert.equal(result.shoppingPlan!.maxTotalWon,20000);
+ const skipped=interviewAnswer('상관없어요',{...result.shoppingPlan!,interview:{answered:[],pending:['budget']}})!;
+ assert.equal(skipped.query,'마스크팩');assert.equal(skipped.maxTotalWon,20000);
+ await graph.invoke(request);assert.deepEqual([searches,calls],[1,1]);
 });

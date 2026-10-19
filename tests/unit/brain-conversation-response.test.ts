@@ -23,11 +23,22 @@ test("CAPABILITY calls configured Claude provider with no tools, not a product c
  assert.equal(calls.length,1);
 });
 
-test("CS remains deterministic; provider is not asked to invent order/cancel actions",async()=>{
+test("purchase history, delivery and cancellation requests remain deterministic and distinct",async()=>{
  let invoked=0;
  const respond=createConversationResponder({async chat(){invoked++;throw Error("must not run");}});
- const result=await respond({message:"내 주문 취소해줘",route:{kind:"CS_REQUEST",search:false,text:"주문 변경은 이 대화에서 실행하지 않아요."}});
- assert.equal(result.text,"주문 변경은 이 대화에서 실행하지 않아요.");
+ const cases=[
+  ["나 엊그제 뭐 구매했었지","이전 구매 내역을 확인하고 싶으시군요!",/취소|반품|배송/],
+  ["나 어제 뭐 샀지","이전 구매 내역을 확인하고 싶으시군요!",/취소|반품|배송/],
+  ["지난주 산 거 뭐였지","이전 구매 내역을 확인하고 싶으시군요!",/취소|반품|배송/],
+  ["내 주문 배송은?","배송 상황을 확인하고 싶으시군요.",/취소|이전 구매 내역/],
+  ["내 주문 취소해줘","주문 취소·반품 같은 변경 요청은 이 대화에서 아직 처리할 수 없어요.",/이전 구매 내역|배송 상황/],
+ ] as const;
+ for(const [message,expected,forbidden] of cases){
+  const result=await respond({message,route:{kind:"CS_REQUEST",search:false,text:"기존 라우터 안내"}});
+  assert.equal(result.text.includes(expected),true,message);
+  assert.doesNotMatch(result.text,forbidden,message);
+  assert.deepEqual(result.items,[]);
+ }
  assert.equal(invoked,0);
 });
 test("provider errors and attempted tool calls fail closed without pretending the model replied",async()=>{

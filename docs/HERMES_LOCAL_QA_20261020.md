@@ -1,6 +1,6 @@
 # Hermes local integration QA — 2026-10-20
 
-Merged Brain Core d57f811 into Hermes 4ceb00e (merge 64ef0bd), using a dedicated worktree and local port. Existing QA servers, tunnel, original worktree, accounts, sessions and Brain storage were preserved. HERMES_QA_ENABLED=1 and HERMES_AGENT_ENABLED=1; optional HERMES_DEEP_MODEL unset.
+Merged Brain Core d57f811 into Hermes 4ceb00e (merge 64ef0bd), then integrated the newer Brain Core 01d7d84, using a dedicated worktree and local port. Existing QA servers, tunnel, original worktree, accounts, sessions and Brain storage were preserved. HERMES_QA_ENABLED=1 and HERMES_AGENT_ENABLED=1; optional HERMES_DEEP_MODEL unset.
 
 ## Corrections
 
@@ -12,7 +12,7 @@ Merged Brain Core d57f811 into Hermes 4ceb00e (merge 64ef0bd), using a dedicated
 ## Verification
 
 - Typecheck and frontend build PASS.
-- Core regression suite: 96 PASS, 0 FAIL. Includes checkout atomicity/idempotency/tenant boundaries, read-only external catalog, Hermes unsafe-tool rejection, purchase actor scoping, price/review filters, timeout fallback, snapshot collisions and stock preservation.
+- Core regression suite: 164 PASS, 0 FAIL. Includes checkout atomicity/idempotency/tenant boundaries, read-only external catalog, Hermes unsafe-tool rejection, purchase actor scoping, price/review filters, timeout fallback, latest Core conversation/interview/retrieval-failure behavior on both Hermes and Fast paths, snapshot collisions and stock preservation.
 - Actual headless browser flow PASS: existing QA login -> DGX product -> cart -> selected-item quote -> explicit simulated payment button -> completion -> order detail/list.
 - Local DB confirmed SIMULATED/PAID payment, CONFIRMED order, PREPARING shipment and local stock decrement. No order was created before explicit confirmation.
 - Actual Decisions, default Claude Tool Calling and DGX RAG purchase comparison PASS: two verified alternatives satisfied lower-price and greater-review-count conditions relative to the authenticated purchase.

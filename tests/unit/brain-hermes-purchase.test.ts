@@ -27,3 +27,14 @@ for(const timeout of [false,true])test(`Hermes enforces prior purchase price and
  const result=await graph.invoke({actorUserId:'actor-1',conversationId:crypto.randomUUID(),requestId:crypto.randomUUID(),clientActionId:crypto.randomUUID(),userMessage:'전에 산 것보다 저렴하고 리뷰 많은 니플패치 추천'});
  assert.deepEqual(result.ranking.ranked.map(x=>x.candidate.productId),['cheaper']);assert.ok(historyCalls>0);
 });
+
+test('Hermes preserves the latest Brain Core retrieval failure response without generating an answer',async()=>{
+ let groundedCalls=0;
+ const deps={conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},memory:{list:async()=>[]},
+  intent:{extract:async()=>({query:'니플패치',context:{category:'fashion',maxTotalWon:20000,requiredConditions:[],currentPreferences:{}}})},
+  retriever:{search:async()=>{throw Error('offline RAG');}},hermes:{provider:{chat:async()=>({content:'done'})},history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const graph=createPersistentResearchGraph(deps,new MemorySaver() as never,undefined,undefined,async()=>{groundedCalls++;throw Error('must not generate');});
+ const result=await graph.invoke({actorUserId:'actor-1',conversationId:crypto.randomUUID(),requestId:crypto.randomUUID(),clientActionId:crypto.randomUUID(),userMessage:'전에 산 니플패치보다 저렴한 것 비교해줘'});
+ assert.equal(result.explanation?.failure?.code,'RETRIEVAL_UNAVAILABLE');assert.equal(result.shoppingPlan?.query,'니플패치');assert.equal(groundedCalls,0);
+});

@@ -11,6 +11,15 @@ test("obvious requests and budget follow-ups avoid LLM and never manufacture pre
  assert.equal(next.queryMode,"KEEP");assert.equal(next.budgetMode,"SET");assert.equal(next.context.maxTotalWon,30000);
  assert.equal(calls,0);
 });
+test("named two-word product types avoid a model clarification while condition phrases still fall back",async()=>{
+ let calls=0;const port=createFastIntentPort({async extract(message){calls++;return {query:`fallback:${message}`,context:{maxTotalWon:null,requiredConditions:[],currentPreferences:{}}};}});
+ for(const [message,query] of [["단백질 쉐이크 추천해줘","단백질 쉐이크"],["식기세척기 세제 찾아줘","식기세척기 세제"]]){
+  const parsed=await port.extract(message,[]);assert.equal(parsed.query,query);assert.equal(parsed.queryMode,"SET");
+ }
+ assert.equal(calls,0);
+ const qualified=await port.extract("무선 헤드폰 추천해줘",[]);
+ assert.equal(qualified.query,"fallback:무선 헤드폰 추천해줘");assert.equal(calls,1);
+});
 test("complex conditions fall back, but unspoken preferences are removed",async()=>{
  let calls=0;const port=createFastIntentPort({async extract(){calls++;return {query:"모니터",context:{maxTotalWon:null,requiredConditions:["개발용"],currentPreferences:{price_priority:"value",eye_comfort:"important"},category:"display",attributePreferences:["brightness"]}};}});
  const intent=await port.extract("개발용 모니터를 찾아줘",[]);

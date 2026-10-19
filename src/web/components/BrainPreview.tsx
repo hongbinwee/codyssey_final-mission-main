@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from "react";
 import {apiSafe,newActionKey,fmtWon} from "../api.ts";
 import {resolveBrainInterviewState} from "../brain-interview-state.ts";
+import {BrainAnswer} from './BrainAnswer.tsx';
 
 type ProductCandidate={
  productId:string;productName?:string;variantId:string;productImage?:string;keywords?:string[];
@@ -25,26 +26,40 @@ type Conversation={id:string;title:string|null;createdAt:string};
 const priceLabels:Record<string,string>={value:"가성비 중심",balanced:"균형",performance:"성능 중심",important:"중요",normal:"보통"};
 const preferenceLabels:Record<string,string>={price_priority:"가격 선호",eye_comfort:"눈의 편안함",noise_sensitivity:"소음 선호"};
 const friendlyFailure=(code:string)=>code==="MODEL_TIMEOUT"?"AI 응답이 늦어지고 있어요. 질문과 기존 조건은 보존했어요.":
+ code==="RETRIEVAL_UNAVAILABLE"?"상품 정보를 불러오지 못했어요. 말씀하신 조건은 그대로예요. 잠시 후 다시 시도해 주세요.":
+ code==="MODEL_OUTPUT_INVALID"?"답변을 정리하는 중 문제가 생겼어요. 같은 질문으로 다시 시도해 주세요.":
  code==="MODEL_RATE_LIMIT"?"AI 모델이 잠시 바빠요. 잠시 후 다시 시도해 주세요.":
  code==="CONVERSATION_BUSY"?"이전 요청이 처리 중이에요. 잠시 후 결과를 다시 확인해 주세요.":
  "응답을 받지 못했어요. 같은 질문으로 다시 시도하거나 내용을 수정할 수 있어요.";
 const safeImage=(value:string|undefined)=>value&&(/^(?:https?:\/\/|\/[^/])/.test(value))?value:undefined;
 const money=(value:unknown):value is number=>typeof value==="number"&&Number.isSafeInteger(value)&&value>=0;
 const recommendationLabel=(role:RankedProduct["recommendationRole"])=>role==="PERSONALIZED"?"나에게 맞춤":role==="REVIEW_VERIFIED"?"후기 검증형":role==="ALTERNATIVE"?"비교 대안":null;
+const isRetrievalUnavailable=(entry:Entry)=>entry.reply?.explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE";
+
+export function createRetrievalRetryEntry(entry:Pick<Entry,"text"|"clientActionId"|"conversationId">,activeConversation:string|null):Entry{
+ const conversationId=entry.conversationId??activeConversation;
+ return {text:entry.text,clientActionId:newActionKey(),...(conversationId?{conversationId}:{}),status:"sending"};
+}
+export function canExploreBrainReply(reply:BrainReply|undefined):boolean{
+ return !!reply&&reply.explanation?.failure?.code!=="RETRIEVAL_UNAVAILABLE"&&
+   (reply.ranking.ranked.length>0||reply.explanation?.kind==="NO_MATCH"||reply.explanation?.kind==="REFERENCE_ONLY");
+}
 
 export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct}:{explanation?:BrainReply["explanation"];ranking:BrainRankingResult;onOpenProduct:(id:string,variantId?:string)=>void;onExcludeProduct?:(id:string)=>void}){
  const seen=new Set<string>();
  const unique=<T extends {candidate:ProductCandidate}>(rows:T[]):T[]=>rows.filter(row=>{
    if(seen.has(row.candidate.productId))return false;seen.add(row.candidate.productId);return true;
  });
- const ranked=unique(ranking.ranked.filter(r=>r.candidate.commerceVerified===true&&(!explanation||explanation.failure||explanation.items.some(i=>i.productId===r.candidate.productId&&(!i.variantId||i.variantId===r.candidate.variantId)))));
- const references=unique(ranking.referenceOnly);
+ const retrievalUnavailable=explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE";
+ const modelFallback=!!explanation?.failure&&!retrievalUnavailable;
+ const ranked=unique(ranking.ranked.filter(r=>r.candidate.commerceVerified===true&&(!explanation||modelFallback||explanation.items.some(i=>i.productId===r.candidate.productId&&(!i.variantId||i.variantId===r.candidate.variantId)))));
+ const references=unique(retrievalUnavailable?[]:ranking.referenceOnly);
  const rows=[...ranked.map(row=>({...row,reference:false})),...references.map(row=>({...row,reference:true,recommendationRole:undefined,personalizationSignals:undefined}))].slice(0,3);
  const simulated=rows.some(({candidate:p})=>p.sourceKind==="SYNTHETIC"||p.isSimulated);
  if(!rows.length)return null;
  return <section className="brain-products" aria-label="상품 비교 결과">
    <p className="muted sm">{ranked.length+references.length>rows.length?`${ranked.length+references.length}개 중 ${rows.length}개 표시`:`${rows.length}개 상품 표시`}</p>
-   {simulated&&<p className="muted sm" role="note">검증 중인 데이터셋의 시연 비교예요. 리뷰 출처는 구분하며 가격·재고는 시연용입니다. 실제 주문·결제는 할 수 없어요.</p>}
+   {simulated&&<p className="muted sm" role="note">테스트 카탈로그의 가격·재고로 실제 주문·결제는 할 수 없어요. 합성 리뷰는 실제 구매 후기가 아니에요.</p>}
    {rows.map(({candidate:p,reference,recommendationRole,personalizationSignals},index)=><article key={p.productId} className="brain-product-card">
      <div className="brain-product-image">{!reference&&<span className="brain-rank">{index+1}순위</span>}<span aria-hidden="true">상품 이미지</span>
        {safeImage(p.productImage)&&<img src={safeImage(p.productImage)} alt={p.productName??"상품"} loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.hidden=true;}}/>}</div>
@@ -56,9 +71,9 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
        {!!personalizationSignals?.length&&<p className="muted sm">맞춤 근거: {personalizationSignals.map(signal=>signal==="CART"?"장바구니":signal==="WISHLIST"?"찜":"구매 기록").join(" · ")}</p>}
        {recommendationRole==="REVIEW_VERIFIED"&&p.ratingScale===5&&typeof p.rating==="number"&&p.wholeReviewCountVerified===true&&typeof p.wholeReviewCount==="number"&&<p className="muted sm">평점 {p.rating.toFixed(1)}/5 · 상품 전체 리뷰 {p.wholeReviewCount}개 (3.5점 초과 · 10개 이상 기준)</p>}
        {recommendationRole==="PERSONALIZED"&&!personalizationSignals?.length&&<p className="muted sm">현재 조건과 검증된 상품 근거로 비교한 후보예요.</p>}
-       {explanation?.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))?.reason&&<p className="brain-product-reason">{explanation.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))?.reason}</p>}
+       {explanation?.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))?.reason&&<div className="brain-product-reason"><BrainAnswer text={explanation.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))!.reason!}/></div>}
        {(p.keywords??[]).filter(k=>!/(?:type|sub_category|source_kind|[a-z]+_[a-z]+)/.test(k)).slice(0,3).map((keyword,i)=><span key={i} className="chip">{keyword}</span>)}
-       {reference&&<p className="muted sm">참고 상품 · 필수 조건이나 근거를 더 확인해야 해요.</p>}
+       {reference&&<p className="muted sm">말씀하신 조건에 맞는지 더 확인이 필요한 상품이에요.</p>}
        {p.commerceVerified!==true&&<p className="muted sm">상품 확인 전 · 상세보기 준비 중</p>}
        {!reference&&onExcludeProduct&&<div className="brain-product-footer"><button className="link brain-product-exclude" onClick={()=>onExcludeProduct(p.productId)}>이 상품은 빼주세요</button></div>}
      </div>
@@ -144,9 +159,15 @@ export function BrainPreview({onClose,onOpenProduct}:{onClose:()=>void;onOpenPro
  };
  const retry=(entry:Entry)=>{
    if(lock.current||!entry.clientActionId)return;
+   if(isRetrievalUnavailable(entry)){
+     const retryEntry=createRetrievalRetryEntry(entry,conversation);
+     setEntries(previous=>[...previous,retryEntry]);void runEntry(retryEntry);return;
+   }
    setEntries(previous=>previous.map(e=>e.clientActionId===entry.clientActionId?{...e,status:"sending",failure:undefined}:e));
    void runEntry(entry);
  };
+ const editQuestion=(entry:Entry)=>{setInput(entry.text);setNotice("조건을 수정한 뒤 보내면 새 검색 요청으로 처리해요.");};
+ const showExplore=canExploreBrainReply(entries.at(-1)?.reply);
  const changeConversation=async(id?:string)=>{
    if(lock.current||restoring)return;lock.current=true;setBusy(true);setError("");
    try{
@@ -188,8 +209,8 @@ export function BrainPreview({onClose,onOpenProduct}:{onClose:()=>void;onOpenPro
      else setError("선호 삭제에 실패했어요.");
    }finally{lock.current=false;setBusy(false);}
  };
- return <aside className="agent-panel brain-panel" aria-label="Shopping Brain Preview">
-   <div className="agent-head"><div className="brain-brand"><span className="brain-avatar" aria-hidden="true">✦</span><div><b>AI 쇼핑 도우미</b><div className="muted sm">내 조건에 맞게, 근거는 분명하게</div></div></div><button className="link" onClick={onClose}>닫기</button></div>
+ return <aside className="agent-panel brain-panel" aria-label="토스쇼핑 AI Brain">
+   <div className="agent-head"><div className="brain-brand"><span className="brain-avatar" aria-hidden="true">✦</span><div><b>토스쇼핑 AI Brain</b><div className="muted sm">나만의 쇼핑 전담 AI 비서</div></div></div><button className="link" onClick={onClose}>닫기</button></div>
    <div className="brain-conversations">
      <button className="btn" onClick={()=>void changeConversation()} disabled={busy||restoring}>새 대화 시작</button>
      <select aria-label="이전 대화" value="" disabled={busy||restoring} onChange={e=>{if(e.target.value)void changeConversation(e.target.value);}}>
@@ -200,15 +221,21 @@ export function BrainPreview({onClose,onOpenProduct}:{onClose:()=>void;onOpenPro
      {entries.length===0&&<p className="muted sm">찾는 상품과 원하는 조건을 알려주세요. 새 대화에서도 직접 저장한 장기 선호는 유지돼요.</p>}
      {entries.map((e,i)=><div className="brain-turn" key={e.clientActionId??i}>
        <div className="msg user"><p>{e.text}</p></div>
-       {e.status==="sending"&&<p role="status" className="muted sm">상품과 근거를 확인하고 있어요…</p>}
+       {e.status==="sending"&&<p role="status" className="muted sm">토스쇼핑 AI Brain이 요청을 살펴보고 있어요…</p>}
        {e.status==="failed"&&<div className="state-box error"><p role="alert">{e.failure}</p>
-         <button className="link" disabled={busy} onClick={()=>retry(e)}>다시 시도</button>
-         <button className="link" disabled={busy} onClick={()=>{setInput(e.text);setNotice("질문을 수정한 뒤 보내면 새로운 요청으로 처리해요.");}}>질문 수정</button>
+         <button className="link" disabled={busy} onClick={()=>retry(e)}>{isRetrievalUnavailable(e)?"다시 검색":"다시 시도"}</button>
+         <button className="link" disabled={busy} onClick={()=>editQuestion(e)}>{isRetrievalUnavailable(e)?"조건 바꾸기":"질문 수정"}</button>
        </div>}
-       {e.reply&&<><div className="brain-assistant-message"><span className="brain-avatar" aria-hidden="true">✦</span><div className="msg ai"><p>{e.reply.explanation?.failure
-         ?e.reply.explanation.items.length>0?"AI 설명이 지연되어 확인된 상품 정보로 먼저 추천드려요. "+e.reply.explanation.text
-           :friendlyFailure(e.reply.explanation.failure.code)+((e.reply.ranking.ranked.length+e.reply.ranking.referenceOnly.length)>0?" 아래 검색 결과는 확인할 수 있어요.":"")
-         :e.reply.explanation?.text??"상품 정보를 확인했어요."}</p></div></div>
+       {e.reply&&<><div className="brain-assistant-message"><span className="brain-avatar" aria-hidden="true">✦</span><div className="msg ai"><BrainAnswer text={e.reply.explanation?.failure
+         ?e.reply.explanation.failure.code==="RETRIEVAL_UNAVAILABLE"
+           ?e.reply.explanation.text.trim()||friendlyFailure(e.reply.explanation.failure.code)
+           :e.reply.explanation.items.length>0?"AI 설명이 지연되어 확인된 상품 정보로 먼저 추천드려요. "+e.reply.explanation.text
+             :friendlyFailure(e.reply.explanation.failure.code)+((e.reply.ranking.ranked.length+e.reply.ranking.referenceOnly.length)>0?" 아래 검색 결과는 확인할 수 있어요.":"")
+         :e.reply.explanation?.text??"상품 정보를 확인했어요."}/></div></div>
+         {isRetrievalUnavailable(e)&&<div className="brain-recovery-actions">
+           <button className="link" disabled={busy} onClick={()=>retry(e)}>다시 검색</button>
+           <button className="link" disabled={busy} onClick={()=>editQuestion(e)}>조건 바꾸기</button>
+         </div>}
          {e.reply.explanation?.kind!=="CONVERSATION"&&e.reply.explanation?.kind!=="CLARIFICATION"&&<BrainRanking explanation={e.reply.explanation} ranking={e.reply.ranking} onOpenProduct={onOpenProduct} onExcludeProduct={i===entries.length-1&&!busy?(id)=>sendChoice(`이 상품 제외: ${id}`):undefined}/>}
        </>}
      </div>)}
@@ -226,7 +253,7 @@ export function BrainPreview({onClose,onOpenProduct}:{onClose:()=>void;onOpenPro
        <button className="link" onClick={()=>void clear()} disabled={busy}>가격 선호 기억 삭제</button>
      </div>}
      {interview.questions.length>0&&<section className="state-box brain-interview" aria-label="추천 조건 확인"><div className="brain-interview-heading"><span className="brain-section-icon" aria-hidden="true">☷</span><div><span className="brain-eyebrow">맞춤 추천 준비</span><h3>원하는 조건을 알려주세요</h3></div></div>{interview.questions.map((q,index)=><fieldset key={q.key}><legend><span className="brain-question-number">{index+1}</span>{q.text}</legend><div className="brain-quick-choices">{q.choices.map(choice=><button key={choice} className="btn brain-choice" aria-label={choice} disabled={busy||restoring} onClick={()=>sendChoice(choice)}>{choice.replace(/^예산은 /,"")}</button>)}</div></fieldset>)}<p className="muted sm">아래 입력창에 원하는 조건을 직접 적어도 좋아요.</p></section>}
-     {(entries.at(-1)?.reply?.ranking.ranked.length??0)>0&&!busy&&<div className="brain-explore"><button className="btn" disabled={restoring} onClick={()=>sendChoice("조건 바꾸기")}>조건 바꾸기</button><button className="btn" disabled={restoring} onClick={()=>sendChoice("다른 상품 보기")}>다른 상품 보기</button></div>}
+     {showExplore&&!busy&&<div className="brain-explore"><button className="btn" disabled={restoring} onClick={()=>sendChoice("조건 바꾸기")}>조건 바꾸기</button><button className="btn" disabled={restoring} onClick={()=>sendChoice("다른 상품 보기")}>다른 상품 보기</button></div>}
      {notice&&<p role="status" className="muted sm">{notice}</p>}
      {error&&<p role="alert">{error}</p>}
      <div ref={bottom}/>

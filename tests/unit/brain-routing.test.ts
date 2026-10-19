@@ -38,6 +38,28 @@ test("purpose queries with only a generic item ask for clarification while named
  }
 });
 
+test("service requests distinguish purchase history, delivery, cancellation, and payment without searching",async()=>{
+ const m=await routing;assert.ok(m,"routing implementation missing");
+ const cases=[
+  ["나 엊그제 뭐 구매했었지","이전 구매 내역을 확인하고 싶으시군요!",/배송|취소|반품/],
+  ["나 어제 뭐 샀지","이전 구매 내역을 확인하고 싶으시군요!",/배송|취소|반품/],
+  ["지난주 산 거 뭐였지","이전 구매 내역을 확인하고 싶으시군요!",/배송|취소|반품/],
+  ["내 주문 배송은?","배송 상황을 확인하고 싶으시군요.",/취소|이전 구매 내역/],
+  ["내 주문 취소해줘","주문 취소·반품 같은 변경 요청은 이 대화에서 아직 처리할 수 없어요.",/배송 상황|이전 구매 내역/],
+  ["내 결제 상태 확인해줘","결제 여부나 결제 내역은 이 대화에서 확인하거나 처리할 수 없어요.",/주문 취소|배송 상황|이전 구매 내역/],
+ ] as const;
+ for(const [message,expected,forbidden] of cases){
+  const route=m.routeBrainMessage(message);
+  assert.equal(route.kind,"CS_REQUEST",message);
+  assert.equal(route.search,false,message);
+  assert.ok(route.text?.includes(expected),`${message}: ${route.text}`);
+  assert.doesNotMatch(route.text??"",forbidden,message);
+ }
+ assert.equal(m.routeBrainMessage("배송 빠른 제품 추천해줘").kind,"SHOPPING_SEARCH");
+ assert.equal(m.routeBrainMessage("배송 빠른 제품 추천해줘").search,true);
+ assert.equal(m.routeBrainMessage("결제 편한 노트북 비교해줘").search,true);
+});
+
 test("social turns persist and replay through Graph without changing shopping plan or calling search/LLM",async()=>{
  const m=await routing;assert.ok(m);
  let messages=0,searches=0,intents=0,answers=0;

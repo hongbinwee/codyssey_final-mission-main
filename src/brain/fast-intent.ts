@@ -16,8 +16,14 @@ function simpleIntent(message:string,previous?:ShoppingPlan):ShoppingIntent|null
    .replace(/(?:추천해\s*줘|추천해주세요|추천해|추천|찾아\s*줘|찾아주세요|찾아|검색해\s*줘|검색해|검색)[.!?\s]*$/,"").trim();
  if(followup&&/^(?:으로|로)?$/.test(rest))return {query:previous!.query,queryMode:"KEEP",budgetMode:budget===null?"KEEP":"SET",
    requirementsMode:"KEEP",context:{maxTotalWon:budget,requiredConditions:[],currentPreferences:prefs}};
- // A single explicit product noun; multiple words may carry constraints that require parsing.
- if(!/^[\p{L}\p{N}-]{2,40}$/u.test(rest)||!/추천|찾아|검색/.test(text))return null;
+ // A single noun or a plain two-word product name can be handled without a
+ // model. Explicit condition modifiers stay on the planner path so they are
+ // not silently swallowed into the query.
+ const singleProduct=/^[\p{L}\p{N}-]{2,40}$/u.test(rest);
+ const twoWordProduct=/^[\p{L}\p{N}-]{2,24}\s+[\p{L}\p{N}-]{2,24}$/u.test(rest)&&
+   !/^(?:무선|블루투스|방수|방진|저소음|저자극|통화용|운동용|개발용|선물용|여행용|친환경|가성비|저렴한?)\s/u.test(rest)&&
+   !/^[^\s]+용\s/u.test(rest);
+ if((!singleProduct&&!twoWordProduct)||!/추천|찾아|검색/.test(text))return null;
  const same=previous?.query===rest;
  return {query:rest,queryMode:same?"KEEP":"SET",budgetMode:budget===null?(same?"KEEP":"CLEAR"):"SET",requirementsMode:same?"KEEP":"REPLACE",
    context:{maxTotalWon:budget,requiredConditions:[],currentPreferences:prefs}};

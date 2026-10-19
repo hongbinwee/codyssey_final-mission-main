@@ -171,7 +171,8 @@ test("mocked v4 read-flow to grounded response stays reference-only without runn
   assert.equal(answer.kind, "REFERENCE_ONLY");
   assert.equal(answer.items.length, 0);
   assert.equal(answer.citations?.[0]?.quote, quote);
-  assert.match(answer.text, /시연 데이터 참고/);
+  assert.match(answer.text, /합성 리뷰 의견이 포함/);
+  assert.ok(answer.limitations.some(text=>text.includes("실제 구매 경험")));
   assert.match(answer.text, /향이 순하다는 의견/);
   assert.match(answer.text, /39,900원.*3,000원.*42,900원/);
   assert.deepEqual([providerCalls, ragCalls, commerceCalls, reviewCalls], [2, 1, 1, 1]);

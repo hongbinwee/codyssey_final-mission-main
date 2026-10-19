@@ -42,6 +42,7 @@ export interface RetrievedTurn {
  result:ResearchResult;evidence:EvidenceRecord[]
 }
 type Request=BrainTrace & {userMessage:string;clientActionId:string};
+export class RetrievalUnavailableError extends Error {constructor(){super('retrieval unavailable');this.name='RetrievalUnavailableError';}}
 
 function isConditionOnlySyntheticReference(
  blocked:RankingResult["rejected"][number],
@@ -110,9 +111,10 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
    eye_comfort:{important:'눈의 편안함 중요'},noise_sensitivity:{important:'소음 적음 선호'}};
  const searchPreferences=[...new Set([...Object.entries(preferences).flatMap(([key,value])=>labels[key]?.[value]?[labels[key][value]]:[]),
    ...(plan.attributePreferences??[]),...(plan.interview?.purpose?[plan.interview.purpose]:[])])].slice(0,20);
- const fetched=await deps.retriever.search({query:[plan.query,plan.interview?.purpose].filter(Boolean).join(" ").slice(0,250),maxTotalWon:plan.maxTotalWon,
+ let fetched:Awaited<ReturnType<RetrieverPort['search']>>;
+ try{fetched=await deps.retriever.search({query:[plan.query,plan.interview?.purpose].filter(Boolean).join(" ").slice(0,250),maxTotalWon:plan.maxTotalWon,
    requiredConditions:plan.requiredConditions,preferences:searchPreferences,requestId:req.requestId,originalQuestion:req.userMessage,
-   ...(plan.category?{category:plan.category}:{})});
+   ...(plan.category?{category:plan.category}:{})});}catch{throw new RetrievalUnavailableError();}
  if(!fetched||!Array.isArray(fetched.candidates)||!Array.isArray(fetched.evidence)||
     fetched.candidates.length>100||fetched.evidence.length>2500)throw new Error("invalid retrieval result");
  if(deps.hermes&&/(리뷰.?많|후기.?많|리뷰 수|후기 수)/.test(req.userMessage)){

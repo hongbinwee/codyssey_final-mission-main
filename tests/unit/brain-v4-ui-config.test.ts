@@ -34,7 +34,9 @@ const moduleHook = registerHooks({
 
 const { brainRagConnectionFromEnv, start } = await import("../../src/server.ts");
 const { signSession } = await import("../../src/session.ts");
-const { BrainRanking } = await import("../../src/web/components/BrainPreview.tsx");
+const brainPreview = await import("../../src/web/components/BrainPreview.tsx");
+const { BrainRanking, createRetrievalRetryEntry, canExploreBrainReply } = brainPreview;
+const { BrainAnswer } = await import("../../src/web/components/BrainAnswer.tsx");
 const commerceState = await import("../../src/web/components/CommerceState.tsx");
 const detailResume = await import("../../src/web/detail-resume.ts");
 moduleHook.deregister();
@@ -53,6 +55,42 @@ function renderRanking(ranking: Parameters<typeof BrainRanking>[0]["ranking"]) {
     onOpenProduct: () => {},
   }));
 }
+
+function renderAnswer(text:string){
+  assert.equal(typeof BrainAnswer,"function");
+  if(typeof BrainAnswer!=="function")return "";
+  return renderToStaticMarkup(createElement(BrainAnswer,{text}));
+}
+
+test("BrainAnswer renders safe bold text, preserves paragraphs and line breaks, and wraps long content",()=>{
+ const text="# 안내\n첫 줄\n둘째 줄\n\n**중요**와 `코드` <img src=x onerror=alert(1)>\n\n"+
+   `${"가".repeat(240)}. 두 번째 문장입니다. 세 번째 문장입니다.`;
+ const html=renderAnswer(text);
+ assert.match(html,/<strong>중요<\/strong>/);
+ assert.doesNotMatch(html,/\*\*|`/);
+ assert.match(html,/안내\n첫 줄\n둘째 줄/);
+ assert.match(html,/&lt;img src=x onerror=alert\(1\)&gt;/);
+ assert.doesNotMatch(html,/<img\b/i);
+ assert.ok((html.match(/<p/g)??[]).length>=4);
+ const styles=readFileSync(new URL("../../src/web/styles.css",import.meta.url),"utf8");
+ assert.match(styles,/\.brain-panel \.brain-answer p\{[^}]*white-space:pre-wrap/);
+ assert.match(styles,/\.brain-panel \.brain-answer p\{[^}]*overflow-wrap:anywhere/);
+ const preview=readFileSync(new URL("../../src/web/components/BrainPreview.tsx",import.meta.url),"utf8");
+ assert.match(preview,/토스쇼핑 AI Brain이 요청을 살펴보고 있어요…/);
+ assert.match(preview,/토스쇼핑 AI Brain/);
+});
+
+test("retrieval retry creates a fresh action while generic follow-ups are available only for safe result states",()=>{
+ const retry=createRetrievalRetryEntry({text:"상품 찾아줘",clientActionId:"failed-action",conversationId:"conversation-one"},"other-conversation");
+ assert.notEqual(retry.clientActionId,"failed-action");
+ assert.equal(retry.text,"상품 찾아줘");
+ assert.equal(retry.conversationId,"conversation-one");
+ assert.equal(retry.status,"sending");
+ const base={conversation_id:"c",message_id:"m",read_only:true as const,ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},trace:{totalMs:0}};
+ assert.equal(canExploreBrainReply({...base,explanation:{kind:"NO_MATCH",text:"없음",items:[],limitations:[]}}),true);
+ assert.equal(canExploreBrainReply({...base,explanation:{kind:"REFERENCE_ONLY",text:"참고",items:[],limitations:[]}}),true);
+ assert.equal(canExploreBrainReply({...base,explanation:{kind:"NO_MATCH",text:"검색 실패",items:[],limitations:[],failure:{code:"RETRIEVAL_UNAVAILABLE"}}}),false);
+});
 
 test('model failure keeps verified fallback reasons on recommendation cards',()=>{
  const candidate={productId:'p-fallback',variantId:'v-fallback',commerceVerified:true,productName:'확인한 상품',unitPriceWon:10000,shippingFeeWon:3000};
@@ -189,7 +227,8 @@ test("verified synthetic ranked candidates retain simulation provenance without 
     referenceOnly: [], rejected: [], evaluatedCount: 1,
   });
   assert.ok(html.includes("합성"));
-  assert.ok(html.includes("시연"));
+  assert.ok(html.includes("테스트 카탈로그의 가격·재고로 실제 주문·결제는 할 수 없어요."));
+  assert.ok(html.includes("합성 리뷰는 실제 구매 후기가 아니에요."));
   assert.ok(html.includes("상품 보기"));
   assert.ok(!html.includes("variant-1"));
   assert.ok(!html.includes("추천 적격성을 확인한 상품이 없어요"));
@@ -219,7 +258,7 @@ test("legacy reference-only candidates keep their existing text-only display", (
     rejected: [], evaluatedCount: 1,
   });
   assert.ok(html.includes("기존 후보"));
-  assert.ok(html.includes("참고"));
+  assert.ok(html.includes("더 확인이 필요한 상품"));
   assert.ok(!html.includes("v4 합성 데이터"));
   assert.ok(!html.includes("Commerce 상품 확인 전"));
   assert.ok(!html.includes("상품 보기"));
@@ -275,13 +314,20 @@ test("requested product variant selects only an available exact match; ordinary 
 test('ranked cards use matching product and variant reasons; references never acquire a rank',()=>{
  const candidate={productId:'safe-product',variantId:'safe-variant',productName:'검증 상품',unitPriceWon:12000,commerceVerified:true,keywords:['type: mask','sub_category: raw','향 없음']};
  const ranking={ranked:[{candidate,score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1};
- const html=renderToStaticMarkup(createElement(BrainRanking,{ranking,explanation:{kind:'VERIFIED_CANDIDATES',text:'',items:[{productId:'safe-product',variantId:'safe-variant',evidenceIds:['r'],reason:'확인된 예산 안의 상품이에요.'}],limitations:[]},onOpenProduct:()=>{}}));
- assert.match(html,/1순위|검증 상품/);assert.match(html,/확인된 예산/);assert.doesNotMatch(html,/type:|sub_category:/);
- const reference=renderRanking({...ranking,ranked:[],referenceOnly:[{candidate,reasons:['unverified']}]});assert.match(reference,/참고 상품/);assert.doesNotMatch(reference,/1순위/);
+ const html=renderToStaticMarkup(createElement(BrainRanking,{ranking,explanation:{kind:'VERIFIED_CANDIDATES',text:'',items:[{productId:'safe-product',variantId:'safe-variant',evidenceIds:['r'],reason:'확인된 **예산** 안의 <img src=x onerror=alert(1)> 상품이에요.'}],limitations:[]},onOpenProduct:()=>{}}));
+ assert.match(html,/1순위|검증 상품/);assert.match(html,/<strong>예산<\/strong>/);assert.match(html,/&lt;img src=x onerror=alert\(1\)&gt;/);assert.doesNotMatch(html,/<img\b|type:|sub_category:/);
+  const reference=renderRanking({...ranking,ranked:[],referenceOnly:[{candidate,reasons:['unverified']}]});assert.match(reference,/더 확인이 필요한 상품/);assert.doesNotMatch(reference,/1순위/);
  const wrong=renderToStaticMarkup(createElement(BrainRanking,{ranking,explanation:{kind:'LLM_GROUNDED',text:'',items:[{productId:'safe-product',variantId:'other-variant',evidenceIds:['r']}],limitations:[]},onOpenProduct:()=>{}}));assert.doesNotMatch(wrong,/1순위/);
 });
 
 test('model timeout retains verified retrieval cards without invented model reasons',()=>{const ranking={ranked:[{candidate:{productId:'safe',variantId:'v-safe',productName:'검증 후보',unitPriceWon:10000,commerceVerified:true},score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1};const html=renderToStaticMarkup(createElement(BrainRanking,{ranking,explanation:{kind:'EVIDENCE_INSUFFICIENT',text:'',items:[],limitations:[],failure:{code:'MODEL_TIMEOUT'}},onOpenProduct:()=>{}}));assert.match(html,/검증 후보/);assert.match(html,/상품 보기/);});
+
+test('retrieval failure does not retain stale ranked or reference cards',()=>{
+ const ranking={ranked:[{candidate:{productId:'stale',variantId:'v-stale',productName:'오래된 상품',commerceVerified:true,unitPriceWon:10000},score:1,evidenceCoverage:1}],
+  referenceOnly:[{candidate:{productId:'ref',variantId:'v-ref',productName:'오래된 참고 상품'},reasons:['old']}],rejected:[],evaluatedCount:2};
+ const html=renderToStaticMarkup(createElement(BrainRanking,{ranking,explanation:{kind:'NO_MATCH',text:'상품 정보를 불러오는 연결에 문제가 생겼어요.',items:[],limitations:[],failure:{code:'RETRIEVAL_UNAVAILABLE'}},onOpenProduct:()=>{}}));
+ assert.equal(html,'');
+});
 
 test('card actions keep exact product/variant targets with separate view and polite exclusion labels',()=>{
  const opened:string[][]=[],excluded:string[]=[];

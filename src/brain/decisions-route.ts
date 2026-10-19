@@ -1,5 +1,7 @@
+import {serviceRequestRoute} from "./routing.ts";
 import type {BrainIntentKind,BrainRoute} from "./routing.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
+import {BRAIN_GREETING,BRAIN_CAPABILITIES} from './routing.ts';
 
 /**
  * Experiment-only router. Decisions chooses a typed intent; it never grants
@@ -17,10 +19,10 @@ const KINDS:BrainIntentKind[]=[
 ];
 const SEARCH=new Set<BrainIntentKind>(["SHOPPING_SEARCH","SHOPPING_FOLLOWUP","REVIEW_COMPARE"]);
 const REPLIES:Record<Exclude<BrainIntentKind,"SHOPPING_SEARCH"|"SHOPPING_FOLLOWUP"|"REVIEW_COMPARE">,string>={
-  GREETING:"안녕하세요! 어떤 상품을 찾고 계세요? 예산이나 원하는 점을 알려주시면 함께 살펴볼게요.",
+  GREETING:BRAIN_GREETING,
   SOCIAL:"반가워요. 더 궁금한 점이 있으면 편하게 말씀해 주세요.",
-  CAPABILITY:"상품을 찾고 예산·조건에 맞춰 비교하거나, 제공된 리뷰의 장단점을 근거와 함께 설명해 드려요. 원하는 조건은 대화 중 바꿀 수 있고, 장기 선호는 직접 확인할 때만 저장해요. 현재 시연 상품은 실제 주문·결제할 수 없어요.",
-  CS_REQUEST:"주문·배송·취소는 해당 주문 화면에서 확인해 주세요. 이 쇼핑 대화에서는 주문 변경이나 환불을 실행하지 않아요. 현재 시연 상품은 주문·결제가 차단돼 있어요.",
+  CAPABILITY:BRAIN_CAPABILITIES,
+  CS_REQUEST:"주문 관련 요청은 주문 화면에서 이용 가능한 기능을 확인해 주세요.",
   UNCERTAIN:"어떤 상품이나 조건을 말씀하시는지 조금만 더 알려주세요.",
 };
 const SAFE_UNCERTAIN:BrainRoute={kind:"UNCERTAIN",search:false,text:REPLIES.UNCERTAIN};
@@ -78,6 +80,8 @@ export function createDecisionsRouter(options:DecisionsRouterOptions){
     throw new Error("invalid BRAIN_DECISIONS_CONFIDENCE");
   return async (message:string,previous?:ShoppingPlan):Promise<BrainRoute>=>{
     if(!message.trim()||message.length>3000)return SAFE_UNCERTAIN;
+    const serviceRequest=serviceRequestRoute(message);
+    if(serviceRequest)return serviceRequest;
     // A previous plan is lower-trust context. Do not send user identity, secrets,
     // memory records, checkpoints, or the complete conversation to this API.
     const input=JSON.stringify({

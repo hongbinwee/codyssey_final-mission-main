@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createDecisionsRouter} from "../../src/brain/decisions-route.ts";
+import {routeBrainMessage} from "../../src/brain/routing.ts";
 
 const previous={query:"수분크림",maxTotalWon:50000,requiredConditions:["무향"],currentPreferences:{},revision:3};
 function answer(kind:string,confidence=0.9,probability=0.96){
@@ -44,6 +45,40 @@ test("Decisions routes declared categories; conversation stays tool-free",async(
     assert.equal(result.search,search,message);
     if(!search)assert.ok(result.text);
   }
+});
+test("safe order reads short-circuit Decisions; shopping queries still use Decisions",async()=>{
+ for(const [message,expected] of [
+  ["나 엊그제 뭐 구매했었지","이전 구매 내역을 확인하고 싶으시군요!"],
+  ["나 어제 뭐 샀지","이전 구매 내역을 확인하고 싶으시군요!"],
+  ["지난주 산 거 뭐였지","이전 구매 내역을 확인하고 싶으시군요!"],
+  ["내 주문 배송은?","배송 상황을 확인하고 싶으시군요."],
+  ["내 주문 취소해줘","주문 취소·반품 같은 변경 요청은 이 대화에서 아직 처리할 수 없어요."],
+  ["내 결제 상태 확인해줘","결제 여부나 결제 내역은 이 대화에서 확인하거나 처리할 수 없어요."],
+ ] as const){
+  let called=0;
+  const route=createDecisionsRouter({apiKey:"test",fetcher:async()=>{called++;return Response.json(answer("CS_REQUEST"));}});
+  const result=await route(message);
+  assert.equal(result.kind,"CS_REQUEST",message);
+  assert.equal(result.search,false,message);
+  assert.ok(result.text?.includes(expected),`${message}: ${result.text}`);
+  assert.equal(called,0,message);
+ }
+ let called=0;
+ const route=createDecisionsRouter({apiKey:"test",fetcher:async()=>{called++;return Response.json(answer("SHOPPING_SEARCH"));}});
+ const result=await route("배송 빠른 제품 추천해줘");
+ assert.equal(result.kind,"SHOPPING_SEARCH");
+ assert.equal(result.search,true);
+ assert.equal(called,1);
+});
+test("rules and Decisions expose the same greeting and capability persona",async()=>{
+ for(const [message,kind] of [["안녕","GREETING"],["뭘 할 수 있어?","CAPABILITY"]] as const){
+  const route=createDecisionsRouter({apiKey:"test",fetcher:async()=>Response.json(answer(kind))});
+  const decision=await route(message);
+  const rules=routeBrainMessage(message);
+  assert.equal(decision.kind,rules.kind,message);
+  assert.equal(decision.text,rules.text,message);
+  assert.match(decision.text??"",/토스쇼핑 AI Brain/,message);
+ }
 });
 test("Refusal, low confidence, invalid options, HTTP 429, network failure and missing key fail closed",async()=>{
   const cases=[
