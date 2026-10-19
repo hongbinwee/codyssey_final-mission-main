@@ -1,4 +1,6 @@
 import {interviewAnswer} from './interview.ts';
+import type {Provider} from "../llm.ts";
+import type {PurchaseSnapshot} from "./purchase-history.ts";
 import type {ConversationResponder} from "./conversation-response.ts";
 import type {BrainTrace,EvidenceRecord,MemoryRepository,Preference,RankingResult,RetrieverPort} from "./contracts.ts";
 import type {PersistentConversations} from "./persistent-store.ts";
