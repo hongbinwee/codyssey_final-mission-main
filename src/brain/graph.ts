@@ -124,7 +124,7 @@ export function createPersistentResearchGraph(
        trace:{...result.result.trace,hermesToolCalls:decision.calls.length}},evidence:result.evidence};
    })
    .addNode("retrieve",async state=>{
-     const fetched=await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
+     const fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
      // A lost advisory session must not let stale RAG data finish this node.
      await verify();
      return {researchResult:{...fetched.result,intentKind:state.intentRoute.kind},evidence:fetched.evidence};
