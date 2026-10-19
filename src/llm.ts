@@ -456,6 +456,32 @@ export function stubProvider(): Provider {
   };
 }
 
+
+/** Optional stronger Hermes model. Base provider settings remain unchanged. */
+export function hermesDeepProvider(env:Record<string,string|undefined>):Provider {
+  const model=env.HERMES_DEEP_MODEL?.trim();
+  if(!model)throw Error("HERMES_DEEP_MODEL is required");
+  const rawFormat=env.HERMES_DEEP_API_FORMAT?.trim()||config.llmApiFormat;
+  if(!["responses","chat_completions","anthropic_messages"].includes(rawFormat))
+    throw Error("invalid HERMES_DEEP_API_FORMAT");
+  const apiFormat=rawFormat as LiveProviderOptions["apiFormat"];
+  const effortSetting=env.HERMES_DEEP_EFFORT?.trim();
+  if(effortSetting&&!["low","medium","high"].includes(effortSetting))
+    throw Error("HERMES_DEEP_EFFORT must be low, medium or high");
+  if(effortSetting&&apiFormat!=="anthropic_messages")
+    throw Error("HERMES_DEEP_EFFORT requires anthropic_messages");
+  const baseUrl=env.HERMES_DEEP_BASE_URL?.trim()||config.llmBaseUrl;
+  let url:URL;
+  try{url=new URL(baseUrl);}catch{throw Error("invalid HERMES_DEEP_BASE_URL");}
+  if(url.protocol!=="https:"||url.username||url.password||url.search||url.hash)
+    throw Error("Hermes Deep requires an HTTPS API base URL without embedded credentials");
+  const apiKey=env.HERMES_DEEP_API_KEY?.trim()||config.llmApiKey;
+  if(!apiKey)throw Error("Hermes Deep API key missing");
+  return liveProvider(model,{apiFormat,baseUrl,apiKey,
+    anthropicThinking:apiFormat==="anthropic_messages"?"adaptive":"",
+    anthropicEffort:apiFormat==="anthropic_messages"?(effortSetting||"low") as "low"|"medium"|"high":""});
+}
+
 export function getProvider(): Provider {
   return config.llmProvider === "live" && config.llmApiKey && config.llmModel.trim()
     ? liveProvider()
