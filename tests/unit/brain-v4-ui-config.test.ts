@@ -217,7 +217,7 @@ test("v4 config forwards the exact deployment version and requires one", () => {
   }), /BRAIN_RAG_CONTRACT/);
 });
 
-test("verified synthetic ranked candidates retain simulation provenance without exposing internal IDs", () => {
+test("verified synthetic ranked candidates omit fixed notices without exposing internal IDs", () => {
   const html = renderRanking({
     ranked: [{ candidate: {
       productId: "synthetic-product", productName: "합성 뷰티 상품", variantId: "variant-1",
@@ -227,8 +227,8 @@ test("verified synthetic ranked candidates retain simulation provenance without 
     referenceOnly: [], rejected: [], evaluatedCount: 1,
   });
   assert.ok(html.includes("합성"));
-  assert.ok(html.includes("테스트 카탈로그의 가격·재고로 실제 주문·결제는 할 수 없어요."));
-  assert.ok(html.includes("합성 리뷰는 실제 구매 후기가 아니에요."));
+  assert.ok(!html.includes("테스트 카탈로그의 가격·재고로 실제 주문·결제는 할 수 없어요."));
+  assert.ok(!html.includes("합성 리뷰는 실제 구매 후기가 아니에요."));
   assert.ok(html.includes("상품 보기"));
   assert.ok(!html.includes("variant-1"));
   assert.ok(!html.includes("추천 적격성을 확인한 상품이 없어요"));

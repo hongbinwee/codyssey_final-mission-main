@@ -55,11 +55,9 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
  const ranked=unique(ranking.ranked.filter(r=>r.candidate.commerceVerified===true&&(!explanation||modelFallback||explanation.items.some(i=>i.productId===r.candidate.productId&&(!i.variantId||i.variantId===r.candidate.variantId)))));
  const references=unique(retrievalUnavailable?[]:ranking.referenceOnly);
  const rows=[...ranked.map(row=>({...row,reference:false})),...references.map(row=>({...row,reference:true,recommendationRole:undefined,personalizationSignals:undefined}))].slice(0,3);
- const simulated=rows.some(({candidate:p})=>p.sourceKind==="SYNTHETIC"||p.isSimulated);
  if(!rows.length)return null;
  return <section className="brain-products" aria-label="상품 비교 결과">
-   <p className="muted sm">{ranked.length+references.length>rows.length?`${ranked.length+references.length}개 중 ${rows.length}개 표시`:`${rows.length}개 상품 표시`}</p>
-   {simulated&&<p className="muted sm" role="note">테스트 카탈로그의 가격·재고로 실제 주문·결제는 할 수 없어요. 합성 리뷰는 실제 구매 후기가 아니에요.</p>}
+   <p className="muted sm">{rows.length}개 상품 표시</p>
    {rows.map(({candidate:p,reference,recommendationRole,personalizationSignals},index)=><article key={p.productId} className="brain-product-card">
      <div className="brain-product-image">{!reference&&<span className="brain-rank">{index+1}순위</span>}<span aria-hidden="true">상품 이미지</span>
        {safeImage(p.productImage)&&<img src={safeImage(p.productImage)} alt={p.productName??"상품"} loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.hidden=true;}}/>}</div>
