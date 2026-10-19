@@ -893,7 +893,7 @@ export function Product({
           <button
             className="btn primary"
             aria-label="구매하기"
-            disabled={!checkoutEnabled || !!detail.data.catalog_context?.read_only || !selected || adding || anyPending || soldOutAll}
+            disabled={!checkoutEnabled || !selected || adding || anyPending || soldOutAll}
             onClick={() =>
               selected &&
               onBuyNow({ variant_id: selected.variant_id, quantity: qty })
