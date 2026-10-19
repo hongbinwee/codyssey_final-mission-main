@@ -1,4 +1,5 @@
 import {guardBrainMessage} from './routing.ts';
+import {runHermesReadLoop} from "./hermes-tools.ts";
 import {interviewAnswer,needsInterview,rememberInterview} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
 import {AsyncLocalStorage} from "node:async_hooks";
@@ -79,6 +80,28 @@ export function createPersistentResearchGraph(
      const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},explanation:{kind:"CLARIFICATION",text:"더 잘 맞는 상품을 찾도록 필요한 조건만 알려주세요. 직접 입력하거나 상관없어요를 선택해도 좋아요.",items:[],limitations:[],clarification:{questions}},trace:{memoryMs:state.prepared.memoryMs,intentMs:performance.now()-state.prepared.startedAt-state.prepared.memoryMs,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
      await verify();return {shoppingPlan:plan,researchResult,evidence:[]};
    })
+   .addNode("deep",async state=>{
+     if(!deps.hermes)throw Error("Hermes provider unavailable");
+     let fetched:Awaited<ReturnType<typeof retrieveTurn>>|null=null;
+     const decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
+       state.shoppingPlan,state.prepared.memories,{
+         purchases:()=>deps.hermes!.history(state.request.actorUserId),
+         search:async()=>{
+           fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
+           await verify();
+           return {products:fetched.result.ranking.ranked.slice(0,3).map(row=>({
+             productId:row.candidate.productId,variantId:row.candidate.variantId,
+             totalPriceWon:(row.candidate.unitPriceWon??0)+(row.candidate.shippingFeeWon??0),
+             reviewCount:row.candidate.wholeReviewCountVerified?row.candidate.wholeReviewCount:null
+           }))};
+         }
+       });
+     // Search remains mandatory for recommendations; the LLM never supplies ranking.
+     const result=fetched??await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
+     await verify();
+     return {researchResult:{...result.result,intentKind:state.intentRoute.kind,
+       trace:{...result.result.trace,hermesToolCalls:decision.calls.length}},evidence:result.evidence};
+   })
    .addNode("retrieve",async state=>{
      const fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
      // A lost advisory session must not let stale RAG data finish this node.
@@ -107,9 +130,10 @@ export function createPersistentResearchGraph(
    .addEdge("prepare","route")
    .addConditionalEdges("route",state=>state.intentRoute.search?"plan":"converse",["plan","converse"])
    .addEdge("converse",END)
-   .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":"retrieve",["clarify","retrieve"])
+   .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes&&(/전에|이전에|구매|주문|후기|리뷰|비교/.test(state.request.userMessage))?"deep":"retrieve",["clarify","deep","retrieve"])
    .addEdge("clarify",END)
    .addEdge("retrieve","respond")
+   .addEdge("deep","respond")
    .addEdge("respond",END)
    .compile({checkpointer});
  // One-process deduplication ONLY; production multi-replica requires a DB lock.
