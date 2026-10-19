@@ -23,7 +23,7 @@ function mockMessages(){
 test("Hermes Opus defaults to low adaptive effort and uses only its Deep credentials",async()=>{
  const mock=mockMessages();
  try{
-  const p=hermesDeepProvider(deepEnv);
+  const p=hermesDeepProvider({...deepEnv,HERMES_DEEP_API_FORMAT:undefined});
   assert.equal(p.name,"live:claude-opus-4-8");
   const result=await p.chat([{role:"user",content:"상품 비교"}],[]);
   assert.equal(result.content,"확인");
