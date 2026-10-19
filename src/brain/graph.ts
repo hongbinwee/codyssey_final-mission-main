@@ -83,7 +83,8 @@ export function createPersistentResearchGraph(
    .addNode("deep",async state=>{
      if(!deps.hermes)throw Error("Hermes provider unavailable");
      let fetched:Awaited<ReturnType<typeof retrieveTurn>>|null=null;
-     const decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
+     let decision:Awaited<ReturnType<typeof runHermesReadLoop>>={calls:[],searched:false,purchases:[],answer:null};
+     try{decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
        state.shoppingPlan,state.prepared.memories,{
          purchases:()=>deps.hermes!.history(state.request.actorUserId),
          search:async()=>{
@@ -95,7 +96,7 @@ export function createPersistentResearchGraph(
              reviewCount:row.candidate.wholeReviewCountVerified?row.candidate.wholeReviewCount:null
            }))};
          }
-       });
+       });}catch{/* Continue through verified RAG if the deep model is unavailable. */}
      // Search remains mandatory for recommendations; the LLM never supplies ranking.
      const result=fetched??await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
      const cheaper=/(저렴|더 싸|보다 싸|가격.*낮)/.test(state.request.userMessage);
