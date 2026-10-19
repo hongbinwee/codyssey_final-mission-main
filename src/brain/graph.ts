@@ -83,12 +83,16 @@ export function createPersistentResearchGraph(
    .addNode("deep",async state=>{
      if(!deps.hermes)throw Error("Hermes provider unavailable");
      let fetched:Awaited<ReturnType<typeof retrieveTurn>>|null=null;
+     const refersToPurchase=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
+     const recent=refersToPurchase?await deps.hermes.history(state.request.actorUserId):[];
+     const noProductKind=!state.shoppingPlan.category&&/^(전에|이전에|지난번|그|구매|산 것)/.test(state.shoppingPlan.query);
+     const effectivePlan=noProductKind&&recent[0]?{...state.shoppingPlan,query:recent[0].productName,category:recent[0].category}:state.shoppingPlan;
      let decision:Awaited<ReturnType<typeof runHermesReadLoop>>={calls:[],searched:false,purchases:[],answer:null};
      try{decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
-       state.shoppingPlan,state.prepared.memories,{
-         purchases:()=>deps.hermes!.history(state.request.actorUserId),
+       effectivePlan,state.prepared.memories,{
+         purchases:()=>recent.length?Promise.resolve(recent):deps.hermes!.history(state.request.actorUserId),
          search:async()=>{
-           fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
+           fetched=await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
            await verify();
            return {products:fetched.result.ranking.ranked.slice(0,3).map(row=>({
              productId:row.candidate.productId,variantId:row.candidate.variantId,
@@ -98,12 +102,12 @@ export function createPersistentResearchGraph(
          }
        });}catch{/* Continue through verified RAG if the deep model is unavailable. */}
      // Search remains mandatory for recommendations; the LLM never supplies ranking.
-     const result=fetched??await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
+     const result=fetched??await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
      const cheaper=/(저렴|더 싸|보다 싸|가격.*낮)/.test(state.request.userMessage);
      const moreReviews=/(리뷰.*많|후기.*많|리뷰 수|후기 수)/.test(state.request.userMessage);
      const comparePast=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
      if(comparePast&&(cheaper||moreReviews)){
-       const ownedPurchases=decision.purchases.length?decision.purchases:await deps.hermes.history(state.request.actorUserId);
+       const ownedPurchases=decision.purchases.length?decision.purchases:recent.length?recent:await deps.hermes.history(state.request.actorUserId);
        const past=ownedPurchases[0];
        const earlierCount=past&&moreReviews?await deps.hermes.reviewCount(past.productId):null;
        const selected=result.result.ranking.ranked.filter(row=>{
@@ -120,7 +124,7 @@ export function createPersistentResearchGraph(
        trace:{...result.result.trace,hermesToolCalls:decision.calls.length}},evidence:result.evidence};
    })
    .addNode("retrieve",async state=>{
-     const fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
+     const fetched=await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
      // A lost advisory session must not let stale RAG data finish this node.
      await verify();
      return {researchResult:{...fetched.result,intentKind:state.intentRoute.kind},evidence:fetched.evidence};
