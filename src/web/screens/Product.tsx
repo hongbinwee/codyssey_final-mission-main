@@ -640,7 +640,7 @@ export function Product({
       </div>
 
       <h2 className="detail-name">{p.name}</h2>
-      {detail.data.catalog_context?.read_only && <CatalogNotice />}
+      {detail.data.catalog_context?.read_only && <CatalogNotice checkoutEnabled={checkoutEnabled} />}
       <div className="muted">
         {p.brand} · {p.description}
       </div>

@@ -86,7 +86,12 @@ export function createPersistentResearchGraph(
      const refersToPurchase=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
      const recent=refersToPurchase?await deps.hermes.history(state.request.actorUserId):[];
      const noProductKind=!state.shoppingPlan.category&&/^(전에|이전에|지난번|그|구매|산 것)/.test(state.shoppingPlan.query);
-     const effectivePlan=noProductKind&&recent[0]?{...state.shoppingPlan,query:recent[0].productName,category:recent[0].category}:state.shoppingPlan;
+     const samePurchasedKind=recent[0]&&state.shoppingPlan.query.replace(/\s/g,"").length>=2&&
+       recent[0].productName.replace(/\s/g,"").includes(state.shoppingPlan.query.replace(/\s/g,""));
+     const effectivePlan=recent[0]&&(noProductKind||samePurchasedKind)?{...state.shoppingPlan,
+       ...(noProductKind?{query:recent[0].productName}:{}),category:recent[0].category,
+       ...(state.shoppingPlan.category!==recent[0].category?{attributePreferences:[]}:{}),
+     }:state.shoppingPlan;
      let decision:Awaited<ReturnType<typeof runHermesReadLoop>>={calls:[],searched:false,purchases:[],answer:null};
      try{decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
        effectivePlan,state.prepared.memories,{
@@ -120,7 +125,7 @@ export function createPersistentResearchGraph(
        result.result.ranking={...result.result.ranking,ranked:selected,referenceOnly:[]};
      }
      await verify();
-     return {researchResult:{...result.result,intentKind:state.intentRoute.kind,
+     return {shoppingPlan:effectivePlan,researchResult:{...result.result,intentKind:state.intentRoute.kind,
        trace:{...result.result.trace,hermesToolCalls:decision.calls.length}},evidence:result.evidence};
    })
    .addNode("retrieve",async state=>{

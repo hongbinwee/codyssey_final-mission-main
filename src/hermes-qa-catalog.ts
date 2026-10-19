@@ -7,22 +7,34 @@ type Sql=ReturnType<typeof postgres>;
 type Catalog=Pick<ReturnType<typeof createCatalog>,"getProduct">;
 type Reader=Pick<Sql,"unsafe">;
 type RemoteProduct={id:string;name:string;brand:string;category:string;description:string;images:string[];specs:Record<string,string>;active:boolean;version:number};
+type LocalProduct=Pick<RemoteProduct,"id"|"name"|"brand"|"category"> & {specs_json:Record<string,unknown>};
 type RemoteVariant={variant_id:string;option_values:Record<string,string>;effective_specs:Record<string,string>;unit_price_won:number;stock_qty:number;availability:string;version:number};
 const SOURCE="test_items2";
+function ownsLocalProduct(local:LocalProduct,remote:RemoteProduct):boolean {
+ if(local.id!==remote.id||local.name!==remote.name||local.brand!==remote.brand||local.category!==remote.category)return false;
+ if(local.specs_json?._hermes_qa_source===SOURCE)return true;
+ // The pre-existing isolated QA database already holds verified source snapshots.
+ // Reuse only matching canonical source identity; never adopt arbitrary collisions.
+ return ["source_product_id","source_platform","catalog_data_version"].every(key=>
+  typeof remote.specs[key]==="string"&&remote.specs[key].length>0&&local.specs_json?.[key]===remote.specs[key]);
+}
+function sameOptions(a:Record<string,string>,b:Record<string,string>):boolean {
+ const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(key=>a[key]===b[key]);
+}
 
 /** Only the explicitly isolated Hermes QA database may call this bridge. */
 export function createHermesQaCatalog(reader:Reader,catalog:Catalog,local:Sql){
  async function projection(product:RemoteProduct,variant?:RemoteVariant):Promise<number|null>{
   if(!product.id||!product.name||product.version<1)throw Error("invalid external product");
   return local.begin(async q=>{
-   const existing=await q.unsafe<Array<{specs_json:Record<string,unknown>}>>("SELECT specs_json FROM products WHERE id=$1 FOR UPDATE",[product.id]);
-   if(existing.length&&existing[0].specs_json?._hermes_qa_source!==SOURCE)throw Error("local catalog collision");
+   const existing=await q.unsafe<Array<LocalProduct>>("SELECT id,name,brand,category,specs_json FROM products WHERE id=$1 FOR UPDATE",[product.id]);
+   if(existing.length&&!ownsLocalProduct(existing[0],product))throw Error("local catalog collision");
    if(!existing.length){
     const specs={...product.specs,_hermes_qa_source:SOURCE};
     await q.unsafe("INSERT INTO products (id,name,brand,category,description,image_urls,specs_json,active,version) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9) ON CONFLICT (id) DO NOTHING",
       [product.id,product.name,product.brand,product.category,product.description,JSON.stringify(product.images),JSON.stringify(specs),product.active,product.version]);
-    const [owned]=await q.unsafe<Array<{specs_json:Record<string,unknown>}>>("SELECT specs_json FROM products WHERE id=$1 FOR UPDATE",[product.id]);
-    if(owned?.specs_json?._hermes_qa_source!==SOURCE)throw Error("local catalog collision");
+    const [owned]=await q.unsafe<Array<LocalProduct>>("SELECT id,name,brand,category,specs_json FROM products WHERE id=$1 FOR UPDATE",[product.id]);
+    if(!owned||!ownsLocalProduct(owned,product))throw Error("local catalog collision");
    }
    if(!variant)return null;
    const active=product.active&&variant.availability!=="UNAVAILABLE";
@@ -31,7 +43,7 @@ export function createHermesQaCatalog(reader:Reader,catalog:Catalog,local:Sql){
       throw Error("invalid external variant");
    const [old]=await q.unsafe<Array<{product_id:string;version:number;stock_qty:number;unit_price_won:number;active:boolean;option_values_json:Record<string,string>}>>(
       "SELECT product_id,version,stock_qty,unit_price_won,active,option_values_json FROM product_variants WHERE id=$1 FOR UPDATE",[variant.variant_id]);
-   if(old&&(old.product_id!==product.id||JSON.stringify(old.option_values_json)!==JSON.stringify(variant.option_values)))
+   if(old&&(old.product_id!==product.id||!sameOptions(old.option_values_json,variant.option_values)))
      throw Error("local variant collision");
    if(!old){
     await q.unsafe("INSERT INTO product_variants (id,product_id,option_values_json,spec_overrides_json,unit_price_won,stock_qty,active,version) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING",
