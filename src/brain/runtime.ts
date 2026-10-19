@@ -228,7 +228,8 @@ export async function createBrainRuntime(options:{
    const graph=createPersistentResearchGraph({
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:true,datasetVersion:options.rag?.datasetVersion,
      ...(process.env.HERMES_AGENT_ENABLED==="1"?{hermes:{provider:options.provider,
-       history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId)}}:{}),
+       history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId),
+       reviewCount:async(productId:string)=>{const result=await catalog.getReviews({product_id:productId,limit:1});return result.ok?result.data.total_matching:null;}}}:{}),
      ...(ownQaCommerce?{activity:(actorUserId:string)=>readCommerceActivity(sql,actorUserId)}:{}),
      retriever:options.rag?verifiedRagRetriever({...options.rag,catalogSource:options.catalogSource??"public"},catalog.getProduct,
        options.rag.mode==="local"?localRagFetcher(localSearch!):undefined,catalog.getReviewsByIds):commerceRetriever(catalog.searchProducts),
