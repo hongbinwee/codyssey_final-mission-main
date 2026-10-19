@@ -7,6 +7,7 @@ import {PostgresSaver} from "@langchain/langgraph-checkpoint-postgres";
 import {createCatalog,type CatalogSource} from "../catalog.ts";
 import {sql} from "../db.ts";
 import {readCommerceActivity} from "./commerce-signals.ts";
+import {purchaseSnapshots} from "./purchase-history.ts";
 import {qaCommerceDatabaseIdentityMatches} from "../qa-commerce.ts";
 import {assertServiceRole} from "../db.ts";
 import {verifiedRagRetriever,localRagFetcher,type LocalRagSearch,type RagConnection} from "./rag-adapter.ts";
@@ -226,6 +227,8 @@ export async function createBrainRuntime(options:{
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:true,datasetVersion:options.rag?.datasetVersion,
+     ...(process.env.HERMES_AGENT_ENABLED==="1"?{hermes:{provider:options.provider,
+       history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId)}}:{}),
      ...(ownQaCommerce?{activity:(actorUserId:string)=>readCommerceActivity(sql,actorUserId)}:{}),
      retriever:options.rag?verifiedRagRetriever({...options.rag,catalogSource:options.catalogSource??"public"},catalog.getProduct,
        options.rag.mode==="local"?localRagFetcher(localSearch!):undefined,catalog.getReviewsByIds):commerceRetriever(catalog.searchProducts),
