@@ -146,6 +146,7 @@ export function createPersistentResearchGraph(
      try{decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
        effectivePlan,state.prepared.memories,{
          purchases:()=>recent.length?Promise.resolve(recent):deps.hermes!.history(state.request.actorUserId),
+         ...(deps.wishlist?{wishlist:()=>deps.wishlist!(state.request.actorUserId)}:{}),
          search:async()=>{
            fetched=await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
            await verify();
