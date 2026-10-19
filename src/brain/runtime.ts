@@ -157,7 +157,7 @@ export async function verifyPreparedBrainStorage(db:SchemaProbe):Promise<void>{
 }
 
 export async function createBrainRuntime(options:{
- brainDatabaseUrl:string;commerceDatabaseUrl?:string;provider:Provider;rag?:RagConnection;
+ brainDatabaseUrl:string;commerceDatabaseUrl?:string;provider:Provider;hermesProvider?:Provider;rag?:RagConnection;
  catalogSource?:CatalogSource;
  catalog?:ReturnType<typeof createCatalog>;
  qaEnvironment?:string;
@@ -227,7 +227,7 @@ export async function createBrainRuntime(options:{
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:true,datasetVersion:options.rag?.datasetVersion,
-     ...(process.env.HERMES_AGENT_ENABLED==="1"?{hermes:{provider:options.provider,
+     ...(process.env.HERMES_AGENT_ENABLED==="1"?{hermes:{provider:options.hermesProvider??options.provider,
        history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId),
        reviewCount:async(productId:string)=>{const result=await catalog.getReviews({product_id:productId,limit:1});return result.ok?result.data.total_matching:null;}}}:{}),
      ...(ownQaCommerce?{activity:(actorUserId:string)=>readCommerceActivity(sql,actorUserId)}:{}),
