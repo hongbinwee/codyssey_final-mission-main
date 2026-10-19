@@ -9,7 +9,7 @@ const deepEnv={HERMES_DEEP_MODEL:"claude-opus-4-8",HERMES_DEEP_API_KEY:"deep-tes
 function mockMessages(){
  const calls:Array<{url:string;headers:Record<string,string>;body:Record<string,unknown>}>=[];
  const saved=globalThis.fetch;
- globalThis.fetch=(async(url,init)=>{
+ globalThis.fetch=(async(url:string|URL|Request,init?:RequestInit)=>{
   const headers=init?.headers as Record<string,string>;
   const body=JSON.parse(String(init?.body)) as Record<string,unknown>;
   calls.push({url:String(url),headers,body});
