@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from "react";
 import {apiSafe,newActionKey,fmtWon} from "../api.ts";
 import {resolveBrainInterviewState} from "../brain-interview-state.ts";
 import {BrainAnswer} from './BrainAnswer.tsx';
+import type {WishlistView} from "../../brain/wishlist-task.ts";
 
 type ProductCandidate={
  productId:string;productName?:string;variantId:string;productImage?:string;keywords?:string[];
@@ -15,6 +16,7 @@ type BrainRankingResult={ranked:RankedProduct[];referenceOnly:LimitedProduct[];r
 type BrainReply={
  conversation_id:string;message_id:string;read_only:true;intent_kind?:string;
  shopping_plan?:{query:string;maxTotalWon:number|null;requiredConditions:string[];revision:number;attributePreferences?:string[]}|null;
+ agent_ui?:WishlistView|null;
  explanation?:{text:string;kind:string;items:{productId:string;variantId?:string;evidenceIds:string[];reason?:string}[];clarification?:{questions:{key:string;text:string;choices:string[]}[]};limitations:string[];
    failure?:{code:string;httpStatus?:number}}|null;
  ranking:BrainRankingResult;trace:{totalMs:number;graphWallMs?:number};
@@ -230,6 +232,7 @@ export function BrainPreview({onClose,onOpenProduct}:{onClose:()=>void;onOpenPro
            :e.reply.explanation.items.length>0?e.reply.explanation.text
              :friendlyFailure(e.reply.explanation.failure.code)+((e.reply.ranking.ranked.length+e.reply.ranking.referenceOnly.length)>0?" 아래 검색 결과는 확인할 수 있어요.":"")
          :e.reply.explanation?.text??"상품 정보를 확인했어요."}/></div></div>
+         {e.reply.agent_ui?.kind==="WISHLIST"&&<section className="brain-products" aria-label="내 찜 상품">{e.reply.agent_ui.items.map((item,index)=><article className="brain-product-card" key={item.productId}><div className="brain-product-info"><b>{index+1}. {item.name}</b><p className="muted sm">{!item.active?"판매 중단":money(item.minPriceWon)?`옵션 최저가 ${fmtWon(item.minPriceWon)} · 배송비·재고는 상세에서 확인`:"판매 가능한 옵션 확인 필요"}</p><button className="link" onClick={()=>onOpenProduct(item.productId)}>{e.reply?.agent_ui?.selectedProductId===item.productId?"선택한 상품 상세 보기":"상품 상세 보기"}</button></div></article>)}</section>}
          {isRetrievalUnavailable(e)&&<div className="brain-recovery-actions">
            <button className="link" disabled={busy} onClick={()=>retry(e)}>다시 검색</button>
            <button className="link" disabled={busy} onClick={()=>editQuestion(e)}>조건 바꾸기</button>
