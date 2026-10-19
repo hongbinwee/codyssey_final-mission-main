@@ -379,3 +379,25 @@ test("missing or mismatched verified source never falls back to a product price"
  }
  assert.equal(mock.calls.length,0);
 });
+
+test('recommendation timeout keeps verified reasons and excludes internal catalog fields',async()=>{
+ const candidate=product('p-1','v-blue');
+ const spec=(id:string,sourceRef:string,text:string):EvidenceRecord=>({id,sourceRef,text,productId:'p-1',variantId:'v-blue',kind:'SPEC',sourceKind:'REAL',verified:true,datasetVersion:'qa-v4-2026-10'});
+ const evidence=[spec('spec-internal','comparison_group_id','cmp-v6-0011'),spec('spec-package','package_label_from_name','1매'),spec('spec-public','구성','1매')];
+ const result=await grounded.createLlmGroundedResponder({chat:async()=>{throw Error('LLM timeout');}})({originalQuestion:'상품 추천',plan:{...plan,requiredConditions:[]},ranking:rank(candidate),evidence,mode:'RECOMMEND'});
+ assert.equal(result.failure?.code,'MODEL_TIMEOUT');assert.equal(result.items.length,1);
+ assert.match(result.items[0].reason??'',/123,000원/);assert.match(result.items[0].reason??'',/리뷰 20개/);assert.match(result.items[0].reason??'',/구성: 1매/);
+ assert.doesNotMatch(result.items[0].reason??'',/comparison_group_id|cmp-v6|package_label_from_name/);
+});
+
+test('model-selected recommendation facts never include internal catalog identifiers',async()=>{
+ let facts:Array<{id:string;text:string}>=[];
+ const result=await grounded.createLlmGroundedResponder({chat:async messages=>{
+  facts=JSON.parse(messages[1].content!).candidates[0].facts;
+  return {content:JSON.stringify({recommendations:[{productId:'p-1',variantId:'v-blue',factIds:[facts.find(f=>f.id.startsWith('spec-'))!.id],reviewClaims:[]}]})};
+ }})({originalQuestion:'상품 추천',plan:{...plan,requiredConditions:[]},ranking:rank(product()),evidence:[
+  {id:'metadata',sourceRef:'package_label_from_name',text:'1매',productId:'p-1',variantId:'v-blue',kind:'SPEC',verified:true,datasetVersion:'qa-v4-2026-10'},
+  {id:'public-spec',sourceRef:'구성',text:'1매',productId:'p-1',variantId:'v-blue',kind:'SPEC',verified:true,datasetVersion:'qa-v4-2026-10'}
+ ],mode:'RECOMMEND'});
+ assert.equal(result.kind,'LLM_GROUNDED');assert.match(result.items[0].reason??'',/구성: 1매/);assert.doesNotMatch(JSON.stringify(facts),/package_label_from_name/);
+});

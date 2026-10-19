@@ -247,6 +247,7 @@ async function recommend(input:GroundedResponseInput,provider:Pick<Provider,"cha
      if(e.kind!=='SPEC'||e.verified!==true||e.productId!==p.productId||e.variantId!==p.variantId||e.datasetVersion!==p.datasetVersion||
        !e.text||!e.sourceRef||seen.has(e.id)||input.evidence.filter(other=>other.id===e.id).length!==1||
        /type|category|comparison_family|database|source|version|검증|미확인/i.test(e.sourceRef)||
+       /^[a-z][a-z0-9_]*$/i.test(e.sourceRef)||
        /https?:\/\/|시스템|프롬프트|비밀번호|api\s*key|ignore.{0,20}instruction|sk-/i.test(e.text+' '+e.sourceRef))continue;
      seen.add(e.id);if(seen.size<=3)f.set(`spec-${seen.size}`,`${e.sourceRef.slice(0,40)}: ${e.text.slice(0,100)}`);
    }
