@@ -235,9 +235,10 @@ function parseAnthropicMessage(value: unknown): ChatResponse {
   };
 }
 
-export function liveProvider(): Provider {
+export function liveProvider(modelOverride?:string): Provider {
+  const model=modelOverride?.trim()||config.llmModel;
   return {
-    name: "live:" + config.llmModel,
+    name: "live:" + model,
     async chat(messages, tools, options) {
       const controller = new AbortController();
       const signal = options?.signal
@@ -254,7 +255,7 @@ export function liveProvider(): Provider {
           const nativeMessages = anthropic ? anthropicMessages(messages) : undefined;
           const body = anthropic
             ? {
-                model: config.llmModel,
+                model: model,
                 max_tokens: 8192,
                 ...(nativeMessages?.system ? { system: nativeMessages.system } : {}),
                 messages: nativeMessages!.messages,
@@ -266,13 +267,13 @@ export function liveProvider(): Provider {
               }
             : chatCompletions
             ? {
-                model: config.llmModel,
+                model: model,
                 messages: chatCompletionsMessages(messages),
                 ...(tools.length ? { tools, tool_choice: "auto" as const } : {}),
                 max_tokens: 8192,
               }
             : {
-                model: config.llmModel,
+                model: model,
                 reasoning: { effort: config.llmReasoningEffort },
                 max_output_tokens: 8192,
                 store: false,
