@@ -204,8 +204,8 @@ test("LangGraph ranks server-approved QA v4 candidates and preserves plan while 
   const intent2 = JSON.stringify({ query: "보습 크림", maxTotalWon: null,
     requiredConditions: [], currentPreferences: {}, queryMode: "KEEP",
     budgetMode: "KEEP", requirementsMode: "KEEP" });
-  const citation = JSON.stringify({ sourceKind: "SYNTHETIC", productId: "p-v4-1",
-    variantId: "v-v4-1", sourceId: "r-v4-1", quote });
+  const citation = JSON.stringify({recommendations:[{productId:"p-v4-1",variantId:"v-v4-1",factIds:["budget"],
+    reviewClaims:[{sourceKind:"SYNTHETIC",productId:"p-v4-1",variantId:"v-v4-1",sourceId:"r-v4-1",quote,polarity:"PRO",claim:"향이 순하다는 의견이에요."}]}]});
   const provider: Pick<Provider, "chat"> = { async chat(_messages, tools) {
     assert.deepEqual(tools, []);
     providerCalls++;
@@ -264,8 +264,8 @@ test("LangGraph ranks server-approved QA v4 candidates and preserves plan while 
       item.totalPriceWon, item.evidenceIds]), [["p-v4-1", "v-v4-1", 42_900, ["r-v4-1"]]]);
     assert.deepEqual(result.explanation?.citations?.map(c => [c.sourceId, c.sourceKind, c.quote]),
       [["r-v4-1", "SYNTHETIC", quote]]);
-    assert.match(result.explanation?.text ?? "", /시연 후보 순위에 포함됐어요/);
-    assert.match(result.explanation?.text ?? "", /39,900원.*3,000원.*42,900원/);
+    assert.match(result.explanation?.items[0].reason ?? "", /42,900원.*예산/);
+    assert.match(result.explanation?.items[0].reason ?? "", /합성 리뷰.*향이 순하다는 의견/);
     assert.doesNotMatch(result.explanation?.text ?? "", /p-v4-1|v-v4-1|r-v4-1/);
   }
   assert.equal(first.shoppingPlan?.maxTotalWon, 50000);

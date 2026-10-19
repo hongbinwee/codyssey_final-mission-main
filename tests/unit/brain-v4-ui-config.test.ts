@@ -54,6 +54,13 @@ function renderRanking(ranking: Parameters<typeof BrainRanking>[0]["ranking"]) {
   }));
 }
 
+test('model failure keeps verified fallback reasons on recommendation cards',()=>{
+ const candidate={productId:'p-fallback',variantId:'v-fallback',commerceVerified:true,productName:'확인한 상품',unitPriceWon:10000,shippingFeeWon:3000};
+ const html=renderToStaticMarkup(createElement(BrainRanking,{ranking:{ranked:[{candidate,score:.5,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1},
+   explanation:{kind:'VERIFIED_CANDIDATES',text:'확인한 상품을 추천해요.',items:[{productId:'p-fallback',variantId:'v-fallback',evidenceIds:[],reason:'배송비 포함 13,000원으로 예산 안이에요.'}],limitations:[],failure:{code:'MODEL_HTTP_ERROR',httpStatus:504}},onOpenProduct:()=>{}}));
+ assert.match(html,/배송비 포함 13,000원으로 예산 안이에요/);assert.doesNotMatch(html,/MODEL_HTTP_ERROR|504/);
+});
+
 test("test catalog notice identifies simulated prices and explicitly excludes purchase",()=>{
  const Notice=(commerceState as unknown as {CatalogNotice?:()=>ReactElement}).CatalogNotice;
  assert.equal(typeof Notice,"function");if(!Notice)return;
@@ -275,3 +282,18 @@ test('ranked cards use matching product and variant reasons; references never ac
 });
 
 test('model timeout retains verified retrieval cards without invented model reasons',()=>{const ranking={ranked:[{candidate:{productId:'safe',variantId:'v-safe',productName:'검증 후보',unitPriceWon:10000,commerceVerified:true},score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1};const html=renderToStaticMarkup(createElement(BrainRanking,{ranking,explanation:{kind:'EVIDENCE_INSUFFICIENT',text:'',items:[],limitations:[],failure:{code:'MODEL_TIMEOUT'}},onOpenProduct:()=>{}}));assert.match(html,/검증 후보/);assert.match(html,/상품 보기/);});
+
+test('card actions keep exact product/variant targets with separate view and polite exclusion labels',()=>{
+ const opened:string[][]=[],excluded:string[]=[];
+ const props={ranking:{ranked:[{candidate:{productId:'card-p',variantId:'card-v',productName:'상품명',commerceVerified:true,unitPriceWon:12000},score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1},
+   onOpenProduct:(id:string,variant?:string)=>opened.push([id,variant!]),onExcludeProduct:(id:string)=>excluded.push(id)};
+ const element=BrainRanking(props)!;
+ const buttons:any[]=[];
+ function walk(node:any){if(!node||typeof node!=='object')return;if(node.type==='button')buttons.push(node);for(const child of [node.props?.children].flat(Infinity))walk(child);}
+ walk(element);
+ const remove=buttons.find(b=>b.props.children==='이 상품은 빼주세요');assert.ok(remove);remove.props.onClick();
+ const view=buttons.find(b=>b.props['aria-label']==='상품 보기');assert.ok(view);view.props.onClick();
+ assert.deepEqual(excluded,['card-p']);assert.deepEqual(opened,[['card-p','card-v']]);
+ const html=renderToStaticMarkup(element);assert.match(html,/brain-product-heading/);assert.match(html,/brain-product-footer/);
+ assert.doesNotMatch(html,/>이 상품 제외</);
+});

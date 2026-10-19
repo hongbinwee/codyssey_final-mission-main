@@ -226,7 +226,7 @@ export async function createBrainRuntime(options:{
    const ownQaCommerce=qaCommerceActivityAllowed({catalogSource:options.catalogSource,
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
-     conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:true,datasetVersion:options.rag?.datasetVersion,
+     conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:options.rag?.contract!=="v4",datasetVersion:options.rag?.datasetVersion,
      ...(options.hermesEnabled?{hermes:{provider:options.hermesProvider??options.provider,
        history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId),
        reviewCount:async(productId:string)=>{const result=await catalog.getReviews({product_id:productId,limit:1});return result.ok?result.data.total_matching:null;}}}:{}),

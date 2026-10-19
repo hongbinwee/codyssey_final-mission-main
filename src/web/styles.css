@@ -1852,4 +1852,13 @@ button.cart-thumb { border: 0; padding: 0; cursor: pointer; }
 @media(max-width:420px){.brain-panel .agent-head{padding:16px}.brain-panel .brain-conversations{padding:9px 16px}.brain-panel .agent-body{padding:20px 14px}.brain-panel .brain-interview{padding:18px 16px}.brain-panel .brain-product-image{width:78px;height:96px}.brain-panel .brain-product-card{padding:12px;gap:11px}.brain-panel .brain-product-price{font-size:18px}}
 @media(prefers-reduced-motion:reduce){.brain-panel .brain-choice{transition:none}}
 
-.brain-panel .brain-product-actions{display:flex;justify-content:flex-end;margin-top:8px}.brain-panel .brain-product-info .brain-product-open{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:6px 0 6px 10px;font-weight:600;white-space:nowrap}.brain-product-open svg{flex-shrink:0}
+.brain-product-heading{display:flex;align-items:flex-start;gap:10px}
+.brain-product-summary{flex:1;min-width:0}
+.brain-panel .brain-product-info .brain-product-open{display:inline-flex;align-items:center;justify-content:center;align-self:flex-start;gap:5px;flex-shrink:0;min-height:36px;padding:0 0 0 4px;font-weight:600;white-space:nowrap}
+.brain-product-open svg{flex-shrink:0}
+.brain-product-footer{display:flex;justify-content:flex-end;margin-top:4px}
+.brain-panel .brain-product-info .brain-product-exclude{color:#a94a16;min-height:36px;padding:6px 0 6px 8px;font-weight:500}
+.brain-product-exclude:hover{text-decoration:underline;text-underline-offset:3px}
+.brain-product-exclude:focus-visible{outline:2px solid currentColor;outline-offset:3px;border-radius:4px}
+@media(prefers-color-scheme:dark){.brain-panel .brain-product-info .brain-product-exclude{color:#ffb184}}
+@media(max-width:380px){.brain-product-heading{gap:6px}.brain-panel .brain-product-info .brain-product-open{font-size:11px;gap:3px}.brain-panel .brain-product-open svg{width:13px;height:13px}.brain-panel .brain-product-image{width:64px;height:82px}}

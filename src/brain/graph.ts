@@ -135,7 +135,7 @@ export function createPersistentResearchGraph(
        ...state.researchResult,datasetVersion:deps.datasetVersion,
        explanation:groundedResponder&&(!deps.fastResponses||state.intentRoute.kind==="REVIEW_COMPARE")
          ?await groundedResponder({originalQuestion:state.request.userMessage,
-           ranking:state.researchResult.ranking,evidence:state.evidence,plan:state.shoppingPlan})
+           ranking:state.researchResult.ranking,evidence:state.evidence,plan:state.shoppingPlan,mode:"RECOMMEND"})
          :buildGroundedExplanation(state.researchResult.ranking,state.evidence,state.shoppingPlan)
      };
      if(researchResult.shoppingPlan){

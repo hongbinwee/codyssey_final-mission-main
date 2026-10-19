@@ -100,8 +100,18 @@ export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous
 }
 export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:ShoppingPlan,deps:ResearchDeps):Promise<RetrievedTurn>{
  const retrievalStart=performance.now();
+ // Confirmed memories only, with this turn's explicit choices taking priority.
+ // Do not send ranking defaults as if the user had expressed them.
+ const preferences:{[key:string]:string}={};
+ for(const memory of [...prepared.memories].sort((a,b)=>a.updatedAt.localeCompare(b.updatedAt)))
+   if(!plan.category||memory.key==='price_priority')preferences[memory.key]=memory.value;
+ Object.assign(preferences,plan.category?(plan.currentPreferences.price_priority?{price_priority:plan.currentPreferences.price_priority}:{}):plan.currentPreferences);
+ const labels:Record<string,Record<string,string>>={price_priority:{value:'가성비 중심',balanced:'가격과 성능 균형',performance:'성능 중심'},
+   eye_comfort:{important:'눈의 편안함 중요'},noise_sensitivity:{important:'소음 적음 선호'}};
+ const searchPreferences=[...new Set([...Object.entries(preferences).flatMap(([key,value])=>labels[key]?.[value]?[labels[key][value]]:[]),
+   ...(plan.attributePreferences??[]),...(plan.interview?.purpose?[plan.interview.purpose]:[])])].slice(0,20);
  const fetched=await deps.retriever.search({query:[plan.query,plan.interview?.purpose].filter(Boolean).join(" ").slice(0,250),maxTotalWon:plan.maxTotalWon,
-   requiredConditions:plan.requiredConditions,requestId:req.requestId,originalQuestion:req.userMessage,
+   requiredConditions:plan.requiredConditions,preferences:searchPreferences,requestId:req.requestId,originalQuestion:req.userMessage,
    ...(plan.category?{category:plan.category}:{})});
  if(!fetched||!Array.isArray(fetched.candidates)||!Array.isArray(fetched.evidence)||
     fetched.candidates.length>100||fetched.evidence.length>2500)throw new Error("invalid retrieval result");

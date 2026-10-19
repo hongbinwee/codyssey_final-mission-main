@@ -195,6 +195,9 @@ async function retrieveV4(
      !text(input.query,250)||!Array.isArray(input.requiredConditions)||
      input.requiredConditions.length>25||!input.requiredConditions.every(x=>text(x,128)))
     throw new Error("invalid RAG v4 request");
+  const preferences=input.preferences??[];
+  if(!Array.isArray(preferences)||preferences.length>20||!preferences.every(p=>text(p,128))||
+    input.maxTotalWon!==null&&(!Number.isSafeInteger(input.maxTotalWon)||input.maxTotalWon<0))throw Error('invalid RAG search context');
   const categories=connection.categories;
   if(categories&&(!categories.length||categories.length>100||!categories.every(c=>text(c,80))))throw Error("invalid RAG categories");
   const category=categories?(input.category??connection.category??""):(connection.category??"beauty");
@@ -204,8 +207,12 @@ async function retrieveV4(
     method:"POST",redirect:"error",signal:AbortSignal.timeout(timeout),
     headers:{"content-type":"application/json",...(connection.token?{authorization:"Bearer "+connection.token}:{})},
     body:JSON.stringify({request_id:input.requestId,original_question:input.originalQuestion,...(connection.profile?{profile:connection.profile}:{}),
-      query:input.query,...(category||connection.mode==='local'?{category}:{}),filters:{},required_conditions:input.requiredConditions,
-      preferences:[],top_k:5})
+      // Remote preferences are hints, not verified conditions. Commerce and
+      // Ranking enforce the original hard requirements and shipping-inclusive budget.
+      query:connection.mode==='local'?[input.query,...preferences].join(' ').slice(0,250):input.query,
+      ...(category||connection.mode==='local'?{category}:{}),
+      filters:connection.mode==='remote'?{in_stock:true,...(input.maxTotalWon!==null?{price_max:input.maxTotalWon,currency:'KRW'}:{})}:{},
+      required_conditions:input.requiredConditions,preferences:connection.mode==='local'?[]:preferences,top_k:5})
   });
   const rawResponse=await boundedJson(response);
   const envelope=obj(rawResponse);

@@ -46,16 +46,16 @@ function evidenceValid(ids:string[],p:ProductCandidate,idx:Map<string,EvidenceRe
   return true;
  });
 }
-function approvedSimulatedCandidate(p:ProductCandidate,idx:Map<string,EvidenceRecord>,duplicates:Set<string>):boolean{
+function approvedSimulatedCandidate(p:ProductCandidate):boolean{
  if(!["REAL","SYNTHETIC"].includes(p.sourceKind??"")||p.isSimulated!==true||p.qaRankingEligible!==true||p.commerceVerified!==true||
    typeof p.datasetVersion!=="string"||!p.datasetVersion)return false;
- return [...idx.values()].some(e=>!duplicates.has(e.id)&&e.productId===p.productId&&
-   (e.variantId===null||e.variantId===p.variantId)&&e.kind==="REVIEW"&&["REAL","SYNTHETIC"].includes(e.sourceKind??"")&&e.verified===true&&
-   e.datasetVersion===p.datasetVersion&&Number.isFinite(e.rating)&&e.rating!>=1&&e.rating!<=5);
+ // Catalog eligibility and review evidence are independent. Review facets and
+ // mandatory specifications are still checked against their exact evidence below.
+ return true;
 }
 function validRetrievedRatingFacet(f:NonNullable<ProductCandidate["facets"][string]>,p:ProductCandidate,
  idx:Map<string,EvidenceRecord>,duplicates:Set<string>):boolean{
- if(!approvedSimulatedCandidate(p,idx,duplicates)||
+ if(!approvedSimulatedCandidate(p)||
    !evidenceValid(f.evidenceIds,p,idx,duplicates,{ratingFacet:true}))return false;
  const rows=f.evidenceIds.map(id=>idx.get(id)!);
  const mean=rows.reduce((sum,row)=>sum+row.rating!/5,0)/rows.length;
@@ -87,7 +87,7 @@ export function rankProducts(candidates:ProductCandidate[],evidence:EvidenceReco
   for(const condition of ctx.requiredConditions)if(!evidenceValid(p.conditions[condition]??[],p,idx,duplicates,{condition:true}))reasons.push("unverified_required_condition:"+condition);
   if(reasons.length){rejected.push({candidate:p,reasons});continue;}
   if(p.sourceKind==="SYNTHETIC"||p.isSimulated){
-   if(!approvedSimulatedCandidate(p,idx,duplicates)){
+   if(!approvedSimulatedCandidate(p)){
     referenceOnly.push({candidate:p,reasons:["synthetic_or_simulated_reference"]});continue;
    }
   }

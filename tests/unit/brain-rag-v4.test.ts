@@ -72,6 +72,11 @@ test('remote profile is explicit, response profile is checked and low relevance 
  assert.equal(sent.profile,'test_items2');
  const global=rag.verifiedRagRetriever({...connection,category:'',categories:['beauty','fashion','food','living']},async()=>productDetail(),fetcher(raw),async()=>[review()]);
  await global.search(request);assert.equal(Object.hasOwn(sent,'category'),false,'unknown category must be omitted, never sent as empty string');
+  await global.search({...request,maxTotalWon:20000,preferences:['가성비 중심','선물용'],requiredConditions:['무향']});
+  assert.deepEqual(sent.preferences,['가성비 중심','선물용']);
+  assert.deepEqual(sent.filters,{in_stock:true,price_max:20000,currency:'KRW'});
+  assert.deepEqual(sent.required_conditions,['무향']);
+  await assert.rejects(()=>global.search({...request,preferences:['x'.repeat(129)]}),/context/);
  await assert.rejects(()=>build({...raw,profile_name:'all_products'}).search(request),/profile/);
  assert.deepEqual(await build({...raw,status:'low_relevance'}).search(request),{candidates:[],evidence:[]});
  await assert.rejects(()=>build({...raw,status:'error',error_code:'database_unavailable'}).search(request),/failed/);
