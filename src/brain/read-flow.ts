@@ -10,6 +10,7 @@ import type {PlanExtraction,ShoppingPlan} from "./shopping-plan.ts";
 import {resolveShoppingPlan} from "./shopping-plan.ts";
 import {parseKrwTenThousandBand} from "./price-band.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
+import type {WishlistItem,WishlistView} from "./wishlist-task.ts";
 import type {BrainRoute,BrainIntentKind} from "./routing.ts";
 
 export type ShoppingIntent=PlanExtraction & {attributeSources?:Record<string,string>};
@@ -20,6 +21,7 @@ export interface ResearchResult {
  datasetVersion?:string;
  conversationId:string;messageId:string;clientActionId?:string;ranking:RankingResult;
  shoppingPlan?:ShoppingPlan;
+ agentUi?:WishlistView;
  explanation?:GroundedExplanation;
  intentKind?:BrainIntentKind;
  trace:{memoryMs:number;intentMs:number;retrievalMs:number;rankMs:number;totalMs:number;[key:string]:number}
@@ -33,6 +35,7 @@ export interface ResearchDeps {
  route?:(message:string,previous?:ShoppingPlan)=>BrainRoute|Promise<BrainRoute>;
  converse?:ConversationResponder;
  activity?:(actorUserId:string)=>Promise<CommerceActivity>;
+ wishlist?:(actorUserId:string)=>Promise<WishlistItem[]>;
  fastResponses?:boolean;
 }
 export interface PreparedTurn {
