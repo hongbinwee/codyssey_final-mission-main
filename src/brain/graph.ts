@@ -1,5 +1,6 @@
 import {guardBrainMessage} from './routing.ts';
 import {runHermesReadLoop} from "./hermes-tools.ts";
+import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.ts";
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
 import {interviewAnswer,needsInterview,rememberInterview} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
@@ -24,7 +25,8 @@ const State=Annotation.Root({
  evidence:Annotation<EvidenceRecord[]>(),
  researchResult:Annotation<ResearchResult>()
  ,intentRoute:Annotation<BrainRoute>(),routeMs:Annotation<number>(),
- priorExplanation:Annotation<import("./grounded-response.ts").GroundedExplanation|null>()
+ priorExplanation:Annotation<import("./grounded-response.ts").GroundedExplanation|null>(),
+ wishlistRequest:Annotation<WishlistIntent|null>()
 });
 /**
  * Four explicit phases, each with a persisted checkpoint. Only a server-owned
@@ -61,10 +63,13 @@ export function createPersistentResearchGraph(
      const priorExplanation=explainPreviousRecommendation(state.request.userMessage,state.researchResult,deps.datasetVersion);
      if(priorExplanation){await verify();return {priorExplanation,intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},
        routeMs:performance.now()-started};}
+     const wishlistRequest=wishlistIntent(state.request.userMessage,state.researchResult?.agentUi);
+     if(wishlistRequest){await verify();return {wishlistRequest,priorExplanation:null,
+       intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},routeMs:performance.now()-started};}
      const answer=deps.clarifyBeforeSearch&&interviewAnswer(state.request.userMessage,previous);
      const follow=previous&&['다른 상품 보기','다른 제품 보기','조건 바꾸기'].includes(state.request.userMessage.trim());
      const route=guardBrainMessage(state.request.userMessage)??(answer||follow?{kind:"SHOPPING_FOLLOWUP" as const,search:true}:await (deps.route?.(state.request.userMessage,state.researchResult?.shoppingPlan)??{kind:"SHOPPING_SEARCH" as const,search:true}));
-     await verify();return {intentRoute:route,priorExplanation:null,routeMs:performance.now()-started};
+     await verify();return {intentRoute:route,priorExplanation:null,wishlistRequest:null,routeMs:performance.now()-started};
    })
    .addNode("explain_previous",async state=>{
      const start=performance.now();
@@ -79,6 +84,24 @@ export function createPersistentResearchGraph(
         intentMs:0,retrievalMs:0,rankMs:0,responseMs:performance.now()-start,
         totalMs:performance.now()-state.prepared.startedAt}};
      await verify();return {researchResult:result,evidence:[]};
+   })
+   .addNode("wishlist",async state=>{
+     const started=performance.now();
+     if(!state.wishlistRequest)throw Error("wishlist task missing");
+     let items:import("./wishlist-task.ts").WishlistItem[]=[];
+     let ready=!!deps.wishlist;
+     if(deps.wishlist){try{items=await deps.wishlist(state.request.actorUserId);}catch{ready=false;}}
+     await verify();
+     const reply=ready?wishlistReply(state.wishlistRequest,items,state.researchResult?.agentUi):null;
+     const researchResult:ResearchResult={
+       conversationId:state.request.conversationId,messageId:state.prepared.messageId,
+       clientActionId:state.request.clientActionId,intentKind:"SHOPPING_FOLLOWUP",
+       ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
+       ...(reply?{agentUi:reply.view}:{}),datasetVersion:deps.datasetVersion,
+       explanation:{kind:"CONVERSATION",items:[],limitations:[],text:reply?.text??"지금은 찜 목록을 불러올 수 없어요. 잠시 후 다시 확인해 주세요."},
+       trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,
+         responseMs:performance.now()-started,totalMs:performance.now()-state.prepared.startedAt}};
+     await verify();return {researchResult,evidence:[]};
    })
    .addNode("converse",async state=>{
      const previous=state.researchResult?.shoppingPlan;
@@ -192,8 +215,9 @@ export function createPersistentResearchGraph(
    })
    .addEdge(START,"prepare")
    .addEdge("prepare","route")
-   .addConditionalEdges("route",state=>state.priorExplanation?"explain_previous":state.intentRoute.search?"plan":"converse",["explain_previous","plan","converse"])
+   .addConditionalEdges("route",state=>state.priorExplanation?"explain_previous":state.wishlistRequest?"wishlist":state.intentRoute.search?"plan":"converse",["explain_previous","wishlist","plan","converse"])
    .addEdge("explain_previous",END)
+   .addEdge("wishlist",END)
    .addEdge("converse",END)
    .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes&&(/전에|이전에|구매|주문|후기|리뷰|비교/.test(state.request.userMessage))?"deep":"retrieve",["clarify","deep","retrieve"])
    .addEdge("clarify",END)
