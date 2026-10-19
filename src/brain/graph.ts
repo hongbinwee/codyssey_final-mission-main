@@ -98,6 +98,21 @@ export function createPersistentResearchGraph(
        });
      // Search remains mandatory for recommendations; the LLM never supplies ranking.
      const result=fetched??await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);
+     const cheaper=/(저렴|더 싸|보다 싸|가격.*낮)/.test(state.request.userMessage);
+     const moreReviews=/(리뷰.*많|후기.*많|리뷰 수|후기 수)/.test(state.request.userMessage);
+     const comparePast=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
+     if(comparePast&&(cheaper||moreReviews)){
+       const past=decision.purchases[0];
+       const earlierCount=past&&moreReviews?await deps.hermes.reviewCount(past.productId):null;
+       const selected=result.result.ranking.ranked.filter(row=>{
+         const c=row.candidate;
+         return !!past&&c.productId!==past.productId&&
+           (!cheaper||(c.unitPriceWon!==null&&c.unitPriceWon<past.unitPriceWon))&&
+           (!moreReviews||(earlierCount!==null&&c.wholeReviewCountVerified&&
+             c.wholeReviewCount!==null&&c.wholeReviewCount>earlierCount));
+       });
+       result.result.ranking={...result.result.ranking,ranked:selected,referenceOnly:[]};
+     }
      await verify();
      return {researchResult:{...result.result,intentKind:state.intentRoute.kind,
        trace:{...result.result.trace,hermesToolCalls:decision.calls.length}},evidence:result.evidence};
