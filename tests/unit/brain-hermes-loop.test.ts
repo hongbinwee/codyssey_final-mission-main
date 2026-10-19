@@ -14,7 +14,7 @@ test("Hermes invokes actor-owned purchase and product search tools then stops",a
   return {content:"완료"};
  }};
  const value=await runHermesReadLoop(provider,"전에 산 것보다 저렴한 이어폰",plan,[],{
-  purchases:async()=>{calls.push("history");return[{productId:"p1",variantId:"v1",unitPriceWon:50000,purchasedAt:"2026-01-01"}]},
+  purchases:async()=>{calls.push("history");return[{productId:"p1",variantId:"v1",productName:"이어폰 A",category:"audio",unitPriceWon:50000,purchasedAt:"2026-01-01"}]},
   search:async()=>{calls.push("search");return{products:[]}}
  });
  assert.deepEqual(calls,["history","search"]);
