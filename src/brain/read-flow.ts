@@ -26,6 +26,7 @@ export interface ResearchResult {
 }
 export interface ResearchDeps {
  clarifyBeforeSearch?:boolean;
+ hermes?:{provider:Pick<Provider,"chat">;history:(actorUserId:string)=>Promise<PurchaseSnapshot[]>;reviewCount:(productId:string)=>Promise<number|null>};
  datasetVersion?:string;
  conversations:Pick<PersistentConversations,"assertOwned"|"appendUserMessage">;
  memory:MemoryRepository;retriever:RetrieverPort;intent:IntentPort;
@@ -104,6 +105,15 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
    ...(plan.category?{category:plan.category}:{})});
  if(!fetched||!Array.isArray(fetched.candidates)||!Array.isArray(fetched.evidence)||
     fetched.candidates.length>100||fetched.evidence.length>2500)throw new Error("invalid retrieval result");
+ if(deps.hermes&&/(리뷰.?많|후기.?많|리뷰 수|후기 수)/.test(req.userMessage)){
+   const ids=[...new Set(fetched.candidates.map(x=>x.productId))].slice(0,10);
+   const counts=new Map(await Promise.all(ids.map(async id=>[id,await deps.hermes!.reviewCount(id)] as const)));
+   fetched.candidates=fetched.candidates.map(x=>{
+     const count=counts.get(x.productId);
+     return count!==null&&count!==undefined&&Number.isSafeInteger(count)&&count>=0?
+       {...x,wholeReviewCount:count,wholeReviewCountVerified:true}:x;
+   });
+ }
  const retrievalMs=performance.now()-retrievalStart;
  const rankedAt=performance.now();
  const baseRanking=rankProducts(fetched.candidates,fetched.evidence,plan,prepared.memories);
