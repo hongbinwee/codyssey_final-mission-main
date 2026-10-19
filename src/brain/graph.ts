@@ -63,7 +63,7 @@ export function createPersistentResearchGraph(
      const priorExplanation=explainPreviousRecommendation(state.request.userMessage,state.researchResult,deps.datasetVersion);
      if(priorExplanation){await verify();return {priorExplanation,intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},
        routeMs:performance.now()-started};}
-     const wishlistRequest=wishlistIntent(state.request.userMessage,state.researchResult?.agentUi);
+     const wishlistRequest=deps.wishlist?wishlistIntent(state.request.userMessage,state.researchResult?.agentUi):null;
      if(wishlistRequest){await verify();return {wishlistRequest,priorExplanation:null,
        intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},routeMs:performance.now()-started};}
      const answer=deps.clarifyBeforeSearch&&interviewAnswer(state.request.userMessage,previous);
