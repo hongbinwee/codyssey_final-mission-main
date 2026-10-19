@@ -7,13 +7,16 @@ export function wishlistIntent(message:string,previous?:WishlistView):WishlistIn
  if(!text||text.length>160||/찜.{0,12}(?:해제|취소|삭제|지워|빼)|(?:해제|취소|삭제).{0,12}찜/.test(text))return null;
  if(previous){
   const selected=/^(?:(?:그중|그 중|찜 목록에서)\s*)?(?:(\d{1,2})\s*(?:번(?:째)?|번째|순위|위)|(첫|두|세)\s*번째)\s*(.*)$/.exec(text);
-  if(selected&&/(?:사|구매|선택|상세|열어|보여|고를|할게)/.test(selected[3])){
+  if(selected&&/(?:살|사겠|사고|구매|선택|상세|열어|보여|골라|고를|할게)/.test(selected[3])){
    const n=selected[1]?Number(selected[1]):{"첫":1,"두":2,"세":3}[selected[2] as "첫"|"두"|"세"];
    return n>0&&n<=20?{kind:"SELECT",index:n-1}:null;
   }
   if(/^(?:상관없(?:어|어요)?|전체|전부|다\s*보여줘)$/.test(text))return {kind:"LIST"};
  }
- return /찜|위시리스트|하트\s*(?:눌|찍|표시)|저장해\s*둔\s*상품|저장한\s*상품/.test(text)&&!/비슷|대체|제외/.test(text)?{kind:"LIST"}:null;
+ // A comparison/recommendation involving wishlist requires a multi-Tool agent path.
+ // Do not hijack it as a plain list request just because the user said "찜".
+ if(/비교|리뷰|후기|평점|저렴|싼|비싼|가성비|추천|배송|가장|제일|예산|정렬|단점|장점|순서|대신|비슷/.test(text))return null;
+ return /찜|위시리스트|하트\s*(?:눌|찍|표시)|저장해\s*둔\s*상품|저장한\s*상품/.test(text)?{kind:"LIST"}:null;
 }
 export function wishlistReply(intent:WishlistIntent,owned:WishlistItem[],previous?:WishlistView):{text:string;view:WishlistView}{
  const view:WishlistView={kind:"WISHLIST",items:owned.slice(0,20).map(x=>({...x}))};
