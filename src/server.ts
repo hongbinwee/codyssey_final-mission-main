@@ -424,12 +424,12 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         const b = (await body(req)) as { variant_id?: string; quantity?: number; expected_cart_version?: number; expected_variant_version?: number; idempotency_key?: string };
         if (!b.idempotency_key)
           return json(res, 400, { ok: false, error: { code: "VALIDATION", message: "idempotency_key가 필요합니다" } });
-        if(hermesBridge)await hermesBridge.ensureVariant(String(b.variant_id??""),Number(b.expected_variant_version));
+        const localVariantVersion=hermesBridge?await hermesBridge.ensureVariant(String(b.variant_id??""),Number(b.expected_variant_version)):undefined;
         return send(res, await addToCart({
           variant_id: String(b.variant_id ?? ""),
           quantity: Number(b.quantity),
           expected_cart_version: Number(b.expected_cart_version),
-          expected_variant_version: Number(b.expected_variant_version),
+          expected_variant_version: localVariantVersion??Number(b.expected_variant_version),
         }, ctx, "ui-" + b.idempotency_key));
       }
 
