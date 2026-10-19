@@ -282,6 +282,7 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         brainDatabaseUrl: env.BRAIN_DATABASE_URL ?? "",
         commerceDatabaseUrl: env.DATABASE_URL,
         provider,
+        hermesEnabled:env.HERMES_AGENT_ENABLED==="1",
         ...(env.HERMES_AGENT_ENABLED==="1"&&env.HERMES_DEEP_MODEL?.trim()?{hermesProvider:liveProvider(env.HERMES_DEEP_MODEL)}:{}),
         rag: ragConnection,
         catalogSource: source,
