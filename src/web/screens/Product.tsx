@@ -745,7 +745,7 @@ export function Product({
             </button>
           </div>
           <span className="muted">
-            {variantStockLabel(selected.availability, selected.stock_qty, !!detail.data.catalog_context?.read_only)}
+            {variantStockLabel(selected.availability, selected.stock_qty, !!detail.data.catalog_context?.read_only && !checkoutEnabled)}
           </span>
         </div>
       )}
@@ -844,7 +844,7 @@ export function Product({
 
       {<div className={"bottom-bar" + (anyPending || !commerceEnabled || detail.data.catalog_context?.read_only ? " has-note" : "")}>
         {(!commerceEnabled || detail.data.catalog_context?.read_only) && <p className="muted sm" role="note">{detail.data.catalog_context?.read_only
-          ? commerceEnabled ? "시연 상품 · 찜·장바구니 저장 가능 · 주문·결제 불가" : "테스트 상품 · 조회 전용 · 주문·결제 불가"
+          ? checkoutEnabled ? "테스트용 모의 구매 · 실제 결제 없음" : commerceEnabled ? "시연 상품 · 찜·장바구니 저장 가능 · 주문·결제 불가" : "테스트 상품 · 조회 전용 · 주문·결제 불가"
           : "쇼핑 기능을 확인하고 있어요"}</p>}
         {anyPending && (
           // 미확정 write가 있으면 고정 바 최상단에서 바로 복구로 진입 — 상세
@@ -933,7 +933,7 @@ export function Product({
                       ? v.availability === "SOLD_OUT"
                         ? "품절"
                         : "판매 중단"
-                      : variantStockLabel(v.availability, v.stock_qty, !!detail.data.catalog_context?.read_only)}
+                      : variantStockLabel(v.availability, v.stock_qty, !!detail.data.catalog_context?.read_only && !checkoutEnabled)}
                   </span>
                 </button>
               );
