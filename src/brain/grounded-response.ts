@@ -85,6 +85,7 @@ export function buildGroundedExplanation(ranking:RankingResult,evidence:Evidence
      text:`${plan.maxTotalWon===null?'':budget+' 안에서 '}근거를 확인한 ${items.length}개 상품을 골랐어요.${criteria?' '+criteria:''}`,
    limitations:[...new Set([
      ...(referenceCount?["요청 조건에 맞는지 확인하지 못한 상품 정보가 있어요."]:[]),
+     ...rankingNotes,
      ...publicNotes
    ])]};
 }
@@ -313,18 +314,20 @@ function finish(selection:Selection,selected:PreparedCandidate,summary?:string,
    sourceKind:selection.sourceKind,quote:selection.quote};
  const simulated=c.isSimulated&&includeNotice?"표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요. ":"";
  const sourceLabel=selection.sourceKind==="SYNTHETIC"?"합성 리뷰":"수집 리뷰";
+ const sourceNotice=includeNotice?(selection.sourceKind==="SYNTHETIC"&&!selected.ranked
+   ?"시연 데이터 참고 내용이에요. ":`${sourceLabel} 의견을 바탕으로 한 상품 정보예요. `):"";
  const quoted=summary??`“${selection.quote}”라는 의견이 있어요.`;
   if(selection.sourceKind==="SYNTHETIC")return {kind:selected.ranked?"LLM_GROUNDED":"REFERENCE_ONLY",
     items:selected.ranked?[{productId:c.productId,variantId:c.variantId,name,totalPriceWon:c.totalPriceWon,
       evidenceIds:[selection.sourceId],indicators:[]}]:[],citations:[citation],
-    text:`${includeNotice?`${sourceLabel} 의견을 바탕으로 한 상품 정보예요. `:""}${simulated}${name}: 상품 가격 ${price}원, 배송비 ${shipping}원, 합계 ${total}원. ${quoted} `+
+    text:`${sourceNotice}${simulated}${name}: 상품 가격 ${price}원, 배송비 ${shipping}원, 합계 ${total}원. ${quoted} `+
       (includeNotice&&!selected.ranked?"요청 조건을 모두 확인하지 못해 추천으로 고르지는 않았어요.":""),
    limitations:["합성 리뷰는 실제 구매 경험이나 판매·성능·효과를 입증하지 않아요.",
      ...(selected.ranked?["합성 리뷰 평점은 검색된 일부 의견의 평균이며 전체 평점은 아니에요."]:[])]};
   const item={productId:c.productId,variantId:c.variantId,name,totalPriceWon:c.totalPriceWon,
     evidenceIds:[selection.sourceId],indicators:[]};
   return {kind:selected.ranked?"LLM_GROUNDED":"REFERENCE_ONLY",items:selected.ranked?[item]:[],citations:[citation],
-    text:`${includeNotice?`${sourceLabel} 의견을 바탕으로 한 상품 정보예요. `:""}${simulated}${name}: 상품 가격 ${price}원, 배송비 ${shipping}원, 합계 ${total}원. ${quoted}`+
+    text:`${sourceNotice}${simulated}${name}: 상품 가격 ${price}원, 배송비 ${shipping}원, 합계 ${total}원. ${quoted}`+
       (selected.ranked?"":" 요청 조건을 모두 확인하지 못해 추천으로 고르지는 않았어요."),
     limitations:["수집 리뷰는 작성자의 의견이며 실제 구매 여부나 객관적 효과를 보장하지 않아요.",
       ...(selected.ranked?[]:["요청 조건을 모두 확인하지 못해 추천으로 고르지 않았어요."])]};
@@ -392,7 +395,7 @@ export function createLlmGroundedResponder(provider:Pick<Provider,"chat">):Groun
      const sourceKinds=new Set(chosen.map(row=>row.claim.sourceKind));
      const notice=[
        ...(sourceKinds.has("REAL")?["수집 리뷰 의견이 포함되어 있어요."]:[]),
-       ...(sourceKinds.has("SYNTHETIC")?["합성 리뷰 의견이 포함되어 있어요."]:[]),
+       ...(sourceKinds.has("SYNTHETIC")?[items.length?"합성 리뷰 의견이 포함되어 있어요.":"시연 데이터 참고 내용이에요. 합성 리뷰 의견이 포함되어 있어요."]:[]),
        ...(prepared.some(c=>c.prompt.isSimulated)?["표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요."]:[])
      ].join(" ");
      return {kind:items.length?"LLM_GROUNDED":"REFERENCE_ONLY",items,citations,text:[notice,...segments].filter(Boolean).join("\n\n"),
