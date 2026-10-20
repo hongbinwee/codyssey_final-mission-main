@@ -202,6 +202,47 @@ export function createPersistentResearchGraph(
      const observation=await performHermesRead(action,agentPorts(state));
      await verify();return {agentObservations:[...observations,observation],agentAction:null};
    })
+   .addNode("agent_recover",async state=>{
+     // Degraded-mode recovery only: an explicit product-discovery request was
+     // left without validated candidates by the model. Never invoked for CS reads.
+     if(!deps.hermes||!state.intentRoute.search||!state.shoppingPlan)throw Error("recovery requires planned shopping search");
+     let plan=state.shoppingPlan;
+     const observed=state.agentObservations??[];
+     const actorPurchases=(observed.find(o=>o.tool==="get_purchase_history"&&o.ok)?.data as
+       {purchases?:import("./purchase-history.ts").PurchaseSnapshot[]}|undefined)?.purchases;
+     const refersToPast=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
+     const recent=refersToPast?(actorPurchases??await deps.hermes.history(state.request.actorUserId)):[];
+     const prior=recent[0];
+     const noProductKind=!plan.category&&/^(전에|이전에|지난번|그|구매|산 것)/.test(plan.query);
+     const matching=prior&&plan.query.replace(/\s/g,"").length>=2&&
+       prior.productName.replace(/\s/g,"").includes(plan.query.replace(/\s/g,""));
+     if(prior&&(noProductKind||matching))plan={...plan,
+       ...(noProductKind?{query:prior.productName}:{}),category:prior.category,
+       ...(plan.category!==prior.category?{attributePreferences:[]}:{})};
+     let fetched:Awaited<ReturnType<typeof retrieveTurn>>;
+     try{fetched=await retrieveTurn(state.request,state.prepared,plan,deps);}
+     catch(error){
+       if(!(error instanceof RetrievalUnavailableError))throw error;
+       await verify();
+       return {shoppingPlan:plan,...unavailable(state.request,state.prepared,plan,state.intentRoute,state.activeTask)};
+     }
+     const cheaper=/(저렴|더 싸|보다 싸|가격.*낮)/.test(state.request.userMessage);
+     const reviews=/(리뷰.*많|후기.*많|리뷰 수|후기 수)/.test(state.request.userMessage);
+     if(refersToPast&&(cheaper||reviews)){
+       const earlierCount=prior&&reviews?await deps.hermes.reviewCount(prior.productId):null;
+       fetched.result.ranking={...fetched.result.ranking,
+         ranked:fetched.result.ranking.ranked.filter(row=>{
+           const c=row.candidate;
+           return !!prior&&c.productId!==prior.productId&&
+             (!cheaper||(c.unitPriceWon!==null&&c.unitPriceWon<prior.unitPriceWon))&&
+             (!reviews||(earlierCount!==null&&c.wholeReviewCountVerified&&
+               c.wholeReviewCount!==null&&c.wholeReviewCount>earlierCount));
+         }),referenceOnly:[]};
+     }
+     await verify();return {shoppingPlan:plan,researchResult:{...fetched.result,intentKind:state.intentRoute.kind,
+       trace:{...fetched.result.trace,hermesRecovered:1,hermesToolCalls:observed.length}},
+       evidence:fetched.evidence,agentSearched:true};
+   })
    .addNode("agent_finish",async state=>{
      const start=performance.now();
      const observations=state.agentObservations??[];
@@ -300,10 +341,13 @@ export function createPersistentResearchGraph(
    .addEdge("wishlist",END)
    .addEdge("converse",END)
    .addEdge("agent_finish",END)
+   .addConditionalEdges("agent_recover",state=>state.researchResult.explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE"?END:"respond",[END,"respond"])
    .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes?"agent_decide":"retrieve",["clarify","agent_decide","retrieve"])
    .addConditionalEdges("agent_decide",state=>state.agentAction?"agent_execute":
-     state.agentSearched?"respond":state.agentStop==="MODEL_UNAVAILABLE"&&state.intentRoute.search?"retrieve":"agent_finish",
-     ["agent_execute","respond","retrieve","agent_finish"])
+     state.agentSearched?"respond":state.intentRoute.search&&!state.agentQuestion&&
+       (state.agentStop==="MODEL_UNAVAILABLE"||state.agentStop==="DONE")&&
+       (state.agentObservations??[]).every(o=>o.tool==="get_purchase_history")?"agent_recover":"agent_finish",
+     ["agent_execute","respond","agent_recover","agent_finish"])
    .addConditionalEdges("agent_execute",state=>state.agentStop==="RETRIEVAL_UNAVAILABLE"?"agent_finish":"agent_decide",
      ["agent_finish","agent_decide"])
    .addEdge("clarify",END)
