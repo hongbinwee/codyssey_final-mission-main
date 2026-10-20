@@ -25,6 +25,7 @@ export function wishlistReply(intent:WishlistIntent,owned:WishlistItem[],previou
  if(intent.kind==="LIST")return {view,text:!owned.length?"아직 찜한 상품이 없어요.":"찜한 상품을 확인했어요. 원하는 상품을 선택하면 상세 화면에서 구매 옵션을 확인할 수 있어요."};
  const prior=previous?.items[intent.index],current=prior&&owned.find(x=>x.productId===prior.productId);
  if(!prior||!current)return {view,text:"선택한 상품이 현재 찜 목록에 없어요. 다시 선택해 주세요."};
+ if(!view.items.some(item=>item.productId===current.productId))return {view,text:"선택한 상품이 최신 찜 목록의 표시 범위를 벗어났어요. 목록을 다시 확인해 주세요."};
  if(!current.active||current.minPriceWon===null)return {view,text:"선택한 상품은 현재 구매 가능한 옵션이 없어요."};
  view.selectedProductId=current.productId;
  return {view,text:`${current.name}을(를) 선택했어요. 상품 상세에서 옵션과 현재 가격을 확인하고 직접 구매를 진행해 주세요.`};
