@@ -1,5 +1,5 @@
 import {guardBrainMessage} from './routing.ts';
-import {runHermesReadLoop,type HermesToolPort} from "./hermes-tools.ts";
+import type {HermesToolPort} from "./hermes-tools.ts";
 import {decideHermesAction,performHermesRead,readAgentRoute,summarizeAgentObservations,type AgentAction,type AgentObservation} from "./hermes-agent-step.ts";
 import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.ts";
 import {ownedTask,nextTask,retainTask,taskForWishlistSelection,resetTaskRequested,type AgentTaskState,type TaskScope} from "./task-state.ts";
@@ -261,61 +261,6 @@ export function createPersistentResearchGraph(
          {phase:"AWAITING_INPUT",pendingQuestion:questions[0]?.key}),ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},explanation:{kind:"CLARIFICATION",text:questions[0]?.text??"원하는 조건을 알려주세요.",items:[],limitations:[],clarification:{questions}},trace:{memoryMs:state.prepared.memoryMs,intentMs:performance.now()-state.prepared.startedAt-state.prepared.memoryMs,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
      await verify();return {shoppingPlan:plan,researchResult,evidence:[]};
    })
-   .addNode("deep",async state=>{
-     if(!deps.hermes)throw Error("Hermes provider unavailable");
-     let fetched:Awaited<ReturnType<typeof retrieveTurn>>|null=null;
-     const refersToPurchase=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
-     const recent=refersToPurchase?await deps.hermes.history(state.request.actorUserId):[];
-     const noProductKind=!state.shoppingPlan.category&&/^(전에|이전에|지난번|그|구매|산 것)/.test(state.shoppingPlan.query);
-     const samePurchasedKind=recent[0]&&state.shoppingPlan.query.replace(/\s/g,"").length>=2&&
-       recent[0].productName.replace(/\s/g,"").includes(state.shoppingPlan.query.replace(/\s/g,""));
-     const effectivePlan=recent[0]&&(noProductKind||samePurchasedKind)?{...state.shoppingPlan,
-       ...(noProductKind?{query:recent[0].productName}:{}),category:recent[0].category,
-       ...(state.shoppingPlan.category!==recent[0].category?{attributePreferences:[]}:{}),
-     }:state.shoppingPlan;
-     let decision:Awaited<ReturnType<typeof runHermesReadLoop>>={calls:[],searched:false,purchases:[],wishlist:[],answer:null,observations:[]};
-     try{decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
-       effectivePlan,state.prepared.memories,{
-         purchases:()=>recent.length?Promise.resolve(recent):deps.hermes!.history(state.request.actorUserId),
-         ...deps.hermes.toolPorts?.(state.request.actorUserId),
-         ...(deps.wishlist?{wishlist:()=>deps.wishlist!(state.request.actorUserId)}:{}),
-         search:async()=>{
-           fetched=await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
-           await verify();
-           return {products:fetched.result.ranking.ranked.slice(0,3).map(row=>({
-             productId:row.candidate.productId,variantId:row.candidate.variantId,
-             totalPriceWon:(row.candidate.unitPriceWon??0)+(row.candidate.shippingFeeWon??0),
-             reviewCount:row.candidate.wholeReviewCountVerified?row.candidate.wholeReviewCount:null
-           }))};
-         }
-       });}catch{/* Continue through verified RAG if the deep model is unavailable. */}
-     // Search remains mandatory for recommendations; the LLM never supplies ranking.
-     let result;
-     try{result=fetched??await retrieveTurn(state.request,state.prepared,effectivePlan,deps);}
-     catch(error){
-       if(!(error instanceof RetrievalUnavailableError))throw error;
-       await verify();return {shoppingPlan:effectivePlan,...unavailable(state.request,state.prepared,effectivePlan,state.intentRoute,state.activeTask)};
-     }
-     const cheaper=/(저렴|더 싸|보다 싸|가격.*낮)/.test(state.request.userMessage);
-     const moreReviews=/(리뷰.*많|후기.*많|리뷰 수|후기 수)/.test(state.request.userMessage);
-     const comparePast=/(전에|이전에|지난번|구매했던|산 것)/.test(state.request.userMessage);
-     if(comparePast&&(cheaper||moreReviews)){
-       const ownedPurchases=decision.purchases.length?decision.purchases:recent.length?recent:await deps.hermes.history(state.request.actorUserId);
-       const past=ownedPurchases[0];
-       const earlierCount=past&&moreReviews?await deps.hermes.reviewCount(past.productId):null;
-       const selected=result.result.ranking.ranked.filter(row=>{
-         const c=row.candidate;
-         return !!past&&c.productId!==past.productId&&
-           (!cheaper||(c.unitPriceWon!==null&&c.unitPriceWon<past.unitPriceWon))&&
-           (!moreReviews||(earlierCount!==null&&c.wholeReviewCountVerified&&
-             c.wholeReviewCount!==null&&c.wholeReviewCount>earlierCount));
-       });
-       result.result.ranking={...result.result.ranking,ranked:selected,referenceOnly:[]};
-     }
-     await verify();
-     return {shoppingPlan:effectivePlan,researchResult:{...result.result,intentKind:state.intentRoute.kind,
-       trace:{...result.result.trace,hermesToolCalls:decision.calls.length}},evidence:result.evidence};
-   })
    .addNode("retrieve",async state=>{
      let fetched;
      try{fetched=await retrieveTurn(state.request,state.prepared,state.shoppingPlan,deps);}
@@ -363,7 +308,6 @@ export function createPersistentResearchGraph(
      ["agent_finish","agent_decide"])
    .addEdge("clarify",END)
    .addConditionalEdges("retrieve",state=>state.researchResult.explanation?.failure?.code==='RETRIEVAL_UNAVAILABLE'?END:'respond',[END,'respond'])
-   .addConditionalEdges("deep",state=>state.researchResult.explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE"?END:"respond",[END,"respond"])
    .addEdge("respond",END)
    .compile({checkpointer});
  // One-process deduplication ONLY; production multi-replica requires a DB lock.
