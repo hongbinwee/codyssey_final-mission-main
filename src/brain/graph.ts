@@ -46,9 +46,10 @@ export function createPersistentResearchGraph(
  const activeLease=new AsyncLocalStorage<TurnLease>();
  const verify=async()=>{await activeLease.getStore()?.assertHeld();};
  const taskScope=(request:GraphRequest):TaskScope=>({actorUserId:request.actorUserId,conversationId:request.conversationId,datasetVersion:deps.datasetVersion});
- const unavailable=(request:GraphRequest,prepared:PreparedTurn,plan:ShoppingPlan,route:BrainRoute)=>({
+ const unavailable=(request:GraphRequest,prepared:PreparedTurn,plan:ShoppingPlan,route:BrainRoute,previousTask:AgentTaskState|null)=>({
    researchResult:{conversationId:request.conversationId,messageId:prepared.messageId,clientActionId:request.clientActionId,
      intentKind:route.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,
+     taskState:nextTask(taskScope(request),route.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY",previousTask,{phase:"UNAVAILABLE"}),
      ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
      explanation:{kind:'NO_MATCH',text:'상품 정보를 불러오는 연결에 문제가 생겼어요.\n\n말씀하신 조건은 그대로 보관했어요. 잠시 후 다시 찾아볼까요?',items:[],limitations:[],failure:{code:'RETRIEVAL_UNAVAILABLE'}},
      trace:{memoryMs:prepared.memoryMs,intentMs:0,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-prepared.startedAt}} as ResearchResult,
@@ -173,7 +174,7 @@ export function createPersistentResearchGraph(
      try{result=fetched??await retrieveTurn(state.request,state.prepared,effectivePlan,deps);}
      catch(error){
        if(!(error instanceof RetrievalUnavailableError))throw error;
-       await verify();return {shoppingPlan:effectivePlan,...unavailable(state.request,state.prepared,effectivePlan,state.intentRoute)};
+       await verify();return {shoppingPlan:effectivePlan,...unavailable(state.request,state.prepared,effectivePlan,state.intentRoute,state.activeTask)};
      }
      const cheaper=/(저렴|더 싸|보다 싸|가격.*낮)/.test(state.request.userMessage);
      const moreReviews=/(리뷰.*많|후기.*많|리뷰 수|후기 수)/.test(state.request.userMessage);
@@ -201,7 +202,7 @@ export function createPersistentResearchGraph(
      catch(error){
        if(!(error instanceof RetrievalUnavailableError))throw error;
        await verify();
-       return unavailable(state.request,state.prepared,state.shoppingPlan,state.intentRoute);
+       return unavailable(state.request,state.prepared,state.shoppingPlan,state.intentRoute,state.activeTask);
      }
      // A lost advisory session must not let stale RAG data finish this node.
      await verify();
