@@ -11,7 +11,7 @@ const candidate=(id:string,price:number):ProductCandidate=>({
  shippingFeeWon:3000,rating:null,ratingScale:null,wholeReviewCount:null,
  wholeReviewCountVerified:false,conditions:{},facets:{},sourceKind:"REAL",commerceVerified:true
 });
-function baseDeps(provider:ResearchDeps["hermes"]["provider"],tools:Record<string,unknown>={}){
+function baseDeps(provider:NonNullable<ResearchDeps["hermes"]>["provider"],tools:Record<string,unknown>={}){
  let retrievals=0,plans=0;
  const deps={
   conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
@@ -88,7 +88,7 @@ test("H4 recommendation: LLM observes owned history before deciding to search",a
  assert.deepEqual(seen,["history-observed","rank-observed"]);
  assert.equal(getCounts().retrievals,1);
  assert.equal(result.ranking.ranked[0]?.candidate.productId,"p1");
- assert.equal(result.trace.hermesToolCalls,undefined); // trace set in H4 response node separately
+ assert.equal(result.trace.hermesToolCalls,2);
 });
 
 test("H4 model unavailable on order read does not trigger RAG or fake order",async()=>{
