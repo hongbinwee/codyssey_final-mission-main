@@ -134,6 +134,7 @@ export async function readBrainHistory(db:SchemaProbe,actorUserId:string,convers
    return [{clientActionId:row.client_action_id,text:row.content,reply:{conversation_id:id,message_id:result.messageId,read_only:true,
      ranking:result.ranking,shopping_plan:result.shoppingPlan??null,intent_kind:result.intentKind,
      ...(result.agentUi?{agent_ui:result.agentUi}:{}),
+     ...(result.shoppingHandoffs?.length?{shopping_handoffs:result.shoppingHandoffs}:{}),
      explanation:result.explanation,trace:result.trace??{totalMs:0}}}];
  });
  return {conversationId:id,entries};
