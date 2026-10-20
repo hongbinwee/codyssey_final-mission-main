@@ -19,6 +19,7 @@ import type {FencedTurns} from "./fenced-turns.ts";
 import type {BrainRoute} from "./routing.ts";
 import {currentDatasetResult} from "./dataset-state.ts";
 import {validatedShoppingHandoffs} from "./shopping-handoff.ts";
+import {reviewSummaryIntent,summarizeNamedProductReviews,type ReviewSummaryOutcome} from "./review-summary.ts";
 
 export type GraphRequest=BrainTrace & {clientActionId:string;userMessage:string};
 const State=Annotation.Root({
@@ -30,6 +31,7 @@ const State=Annotation.Root({
  ,intentRoute:Annotation<BrainRoute>(),routeMs:Annotation<number>(),
  priorExplanation:Annotation<import("./grounded-response.ts").GroundedExplanation|null>(),
  wishlistRequest:Annotation<WishlistIntent|null>(),
+ reviewSummaryRequest:Annotation<NonNullable<ReturnType<typeof reviewSummaryIntent>>|null>(),
  activeTask:Annotation<AgentTaskState|null>(),
  agentRead:Annotation<boolean>(),agentAction:Annotation<AgentAction|null>(),
  agentObservations:Annotation<AgentObservation[]>(),agentStart:Annotation<number>(),
@@ -85,13 +87,22 @@ export function createPersistentResearchGraph(
            text:"현재 쇼핑 작업과 조건을 초기화했어요. 저장된 장기 선호와 주문 기록은 그대로예요. 어떤 상품을 찾아볼까요?"},
          routeMs:performance.now()-started};
      }
+     const guard=guardBrainMessage(state.request.userMessage);
+     const reviewRequest=deps.reviewSummary&&guard?.kind!=="UNCERTAIN"&&guard?.kind!=="CS_REQUEST"?
+       reviewSummaryIntent(state.request.userMessage):null;
+     if(reviewRequest||deps.reviewSummary&&activeTask?.kind==="REVIEW_SUMMARY"&&
+       activeTask.phase==="AWAITING_INPUT"&&guard===undefined&&
+       state.request.userMessage.trim().length>=2&&!/추천|비교|구매|주문|취소|환불/.test(state.request.userMessage)){
+       const target=reviewRequest??{target:state.request.userMessage.trim().slice(0,120),ordinal:null,negativeOnly:false};
+       await verify();return {reviewSummaryRequest:target,activeTask,priorExplanation:null,wishlistRequest:null,
+         intentRoute:{kind:"REVIEW_SUMMARY" as const,search:false},routeMs:performance.now()-started};
+     }
      const priorExplanation=explainPreviousRecommendation(state.request.userMessage,state.researchResult,deps.datasetVersion);
      if(priorExplanation){await verify();return {priorExplanation,activeTask,intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},
        routeMs:performance.now()-started};}
      const wishlistRequest=deps.wishlist?wishlistIntent(state.request.userMessage,taskForWishlistSelection(activeTask)):null;
      if(wishlistRequest){await verify();return {wishlistRequest,activeTask,priorExplanation:null,
        intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},routeMs:performance.now()-started};}
-     const guard=guardBrainMessage(state.request.userMessage);
      if(deps.hermes&&readAgentRoute(state.request.userMessage)&&guard?.kind!=="UNCERTAIN"){
        const available=deps.hermes.toolPorts?.(state.request.actorUserId);
        if(available&&(available.cart||available.orders)){
@@ -115,6 +126,42 @@ export function createPersistentResearchGraph(
        }
      }
      await verify();return {intentRoute:route,activeTask,priorExplanation:null,wishlistRequest:null,routeMs:performance.now()-started};
+   })
+   .addNode("review_summary",async state=>{
+     if(!deps.reviewSummary||!state.reviewSummaryRequest)throw Error("review summary source unavailable");
+     const start=performance.now(),prev=state.researchResult;
+     const hasPrevious=prev?.datasetVersion===deps.datasetVersion&&prev?.conversationId===state.request.conversationId;
+     // Only products actually presented by the server in this actor's conversation.
+     // A model-produced ordinal or arbitrary product ID is never accepted as authority.
+     const ids=hasPrevious?prev?.shoppingPlan?.lastDisplayedProductIds??state.activeTask?.displayedProductIds??[]:
+       state.activeTask?.displayedProductIds??[];
+     const selected=state.activeTask?.selectedProductId;
+     let outcome:ReviewSummaryOutcome;
+     try{
+       outcome=await summarizeNamedProductReviews({request:state.reviewSummaryRequest,
+         previousDisplayedIds:ids,previousSelectedId:selected,
+         source:deps.reviewSummary,provider:deps.reviewSummaryProvider});
+     }catch{
+       outcome={kind:"NOT_FOUND",text:"리뷰를 불러오는 중 문제가 생겼어요. 잠시 후 다시 확인해 주세요."};
+     }
+     const item=outcome.kind==="SUMMARY"?outcome:null;
+     const asking=outcome.kind==="CLARIFY";
+     const result:ResearchResult={
+       conversationId:state.request.conversationId,messageId:state.prepared.messageId,
+       clientActionId:state.request.clientActionId,intentKind:"REVIEW_SUMMARY",datasetVersion:deps.datasetVersion,
+       ...(hasPrevious&&prev?.shoppingPlan?{shoppingPlan:prev.shoppingPlan}:{}),
+       ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
+       ...(item?{reviewSummary:{productId:item.productId,name:item.productName,
+         sampled:item.sampled,totalMatching:item.totalMatching,citations:item.citations}}:{}),
+       taskState:nextTask(taskScope(state.request),"REVIEW_SUMMARY",state.activeTask,{
+         phase:asking?"AWAITING_INPUT":item?"ACTIVE":"UNAVAILABLE",
+         pendingQuestion:asking?"agent_followup":undefined,
+         displayedProductIds:item?[item.productId]:[],selectedProductId:item?.productId}),
+       explanation:{kind:asking?"CLARIFICATION":item?"REVIEW_SUMMARY":"CONVERSATION",
+         text:outcome.text,items:[],limitations:[]},
+       trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:performance.now()-start,
+         rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
+     await verify();return {researchResult:result,evidence:[]};
    })
    .addNode("explain_previous",async state=>{
      const start=performance.now();
@@ -385,7 +432,8 @@ export function createPersistentResearchGraph(
    })
    .addEdge(START,"prepare")
    .addEdge("prepare","route")
-   .addConditionalEdges("route",state=>state.priorExplanation?"explain_previous":state.wishlistRequest?"wishlist":state.agentRead?"agent_decide":state.intentRoute.search?"plan":"converse",["explain_previous","wishlist","agent_decide","plan","converse"])
+   .addConditionalEdges("route",state=>state.reviewSummaryRequest?"review_summary":state.priorExplanation?"explain_previous":state.wishlistRequest?"wishlist":state.agentRead?"agent_decide":state.intentRoute.search?"plan":"converse",["review_summary","explain_previous","wishlist","agent_decide","plan","converse"])
+   .addEdge("review_summary",END)
    .addEdge("explain_previous",END)
    .addEdge("wishlist",END)
    .addEdge("converse",END)
