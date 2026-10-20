@@ -14,7 +14,7 @@ export type ShoppingHandoff=
 const validId=(s:unknown):s is string=>typeof s==="string"&&s.length>0&&s.length<=128&&
  !/[\u0000-\u001f]/.test(s);
 export function validatedShoppingHandoffs(input:{
- ranking?:RankingResult;wishlist?:WishlistView;
+ ranking?:RankingResult;displayedProductIds?:readonly string[];wishlist?:WishlistView;
  observations?:readonly AgentObservation[];
  /** Only a server-owned route that has the actor-scoped orders capability. */
  showOrdersForCancellation?:boolean;
@@ -28,7 +28,8 @@ export function validatedShoppingHandoffs(input:{
  // Recommendations only from verified Commerce ranking, never model text or reference-only candidates.
  for(const row of (input.ranking?.ranked??[]).slice(0,3)){
   const p=row.candidate;
-  if(p.commerceVerified===true&&validId(p.productId)&&validId(p.variantId)){
+  if(p.commerceVerified===true&&validId(p.productId)&&validId(p.variantId)&&
+    (!input.displayedProductIds||input.displayedProductIds.includes(p.productId))){
    add({kind:"PRODUCT_DETAIL",productId:p.productId,variantId:p.variantId,label:"상품 옵션 확인"});
   }
  }
