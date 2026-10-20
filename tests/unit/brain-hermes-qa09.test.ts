@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import {MemorySaver} from "@langchain/langgraph";
 import {parseKrwTenThousandBand} from "../../src/brain/price-band.ts";
 import {rankProducts} from "../../src/brain/personalization.ts";
 import {curateRecommendations} from "../../src/brain/recommendation-strategies.ts";
 import {positiveForAspect,requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "../../src/brain/review-sort.ts";
 import {resolveTurnPlan,retrieveTurn} from "../../src/brain/read-flow.ts";
+import {createPersistentResearchGraph} from "../../src/brain/graph.ts";
 import {parseV4Response} from "../../src/brain/rag-adapter.ts";
 import type {EvidenceRecord,ProductCandidate} from "../../src/brain/contracts.ts";
 import type {ResearchDeps} from "../../src/brain/read-flow.ts";
@@ -157,4 +159,42 @@ test("QA09 multiple RAG chunks of one original review are deduplicated before Co
   {product_id:"p1",rrf_score:.9,evidence:[
    chunk("촉촉해요"),{...chunk("촉촉해요"),source_metadata:{variant_id:"other",source_kind:"REAL",synthetic:false}}]}
  ]},"qa09",10),/collision/);
+});
+
+test("QA09 actual checkpointed LangGraph responds with verified sample-order, keeps budget/criterion, then clears explicit sort",async()=>{
+ const {products,reviews}=fixture();
+ const seen:string[]=[];
+ const deps={
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},activity:async()=>({cartProductIds:["cheap"],wishlistProductIds:["cheap"]}),
+  intent:{extract:async(message:string,mem:unknown,previous?:unknown)=>{
+   if(!previous)return {query:"세럼",queryMode:"SET",budgetMode:"CLEAR",requirementsMode:"REPLACE",
+    context:{maxTotalWon:null,requiredConditions:[],currentPreferences:{}}};
+   return {query:"세럼",queryMode:"KEEP",budgetMode:"KEEP",requirementsMode:"KEEP",
+    context:{maxTotalWon:null,requiredConditions:[],currentPreferences:{}}};
+  }},
+  retriever:{search:async(input:{reviewSortAspect?:string})=>{
+   seen.push(input.reviewSortAspect??"default");
+   return {candidates:products,evidence:reviews};
+  }}
+ } as unknown as ResearchDeps;
+ const graph=createPersistentResearchGraph(deps,new MemorySaver() as never);
+ const conversationId=crypto.randomUUID();
+ const run=(userMessage:string)=>graph.invoke({actorUserId:"actor",conversationId,
+  requestId:crypto.randomUUID(),clientActionId:crypto.randomUUID(),userMessage});
+ const first=await run("1~3만원대에서 촉촉하다는 리뷰가 많은 순으로 세럼 추천해줘");
+ assert.equal(first.shoppingPlan?.minTotalWon,10000);
+ assert.equal(first.shoppingPlan?.maxTotalWon,39999);
+ assert.equal(first.shoppingPlan?.reviewSortAspect,"촉촉");
+ assert.equal(first.ranking.ranked[0]?.candidate.productId,"moist");
+ assert.match(first.explanation?.text??"",/일부 리뷰/);
+ assert.match(first.explanation?.text??"",/전체 리뷰를 확인한 순위는 아니에요/);
+ const next=await run("그럼 같은 기준으로 보여줘");
+ assert.equal(next.shoppingPlan?.reviewSortAspect,"촉촉");
+ assert.equal(next.shoppingPlan?.minTotalWon,10000);
+ assert.equal(next.ranking.ranked[0]?.candidate.productId,"moist");
+ const last=await run("이번엔 가격순으로");
+ assert.equal(last.shoppingPlan?.reviewSortAspect,undefined);
+ assert.equal(last.ranking.ranked[0]?.candidate.productId,"cheap","normal personalized ranking resumed");
+ assert.deepEqual(seen,["촉촉","촉촉","default"]);
 });
