@@ -1868,3 +1868,12 @@ button.cart-thumb { border: 0; padding: 0; cursor: pointer; }
 .brain-panel .brain-product-reason .brain-answer p+p{margin-top:6px}
 .brain-panel .brain-recovery-actions{display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap;margin:8px 0 12px}
 .brain-panel .brain-recovery-actions .link{min-height:36px;padding:6px 2px;font-weight:600}
+
+/* QA09 — commerce-confirmed price breakdown; wrap long won values on narrow screens. */
+.brain-panel .brain-price-breakdown{display:grid;gap:5px;min-width:0;margin:7px 0 10px;overflow-wrap:anywhere}
+.brain-panel .brain-price-breakdown>div{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;column-gap:8px;row-gap:2px;min-width:0}
+.brain-panel .brain-price-breakdown dt{color:var(--muted);font-size:11px;line-height:1.5;font-weight:500}
+.brain-panel .brain-price-breakdown dd{margin:0;color:var(--text-2);font-size:12px;line-height:1.5;font-weight:550;min-width:0;text-align:right;overflow-wrap:anywhere}
+.brain-panel .brain-price-breakdown .brain-price-total{border-top:1px solid var(--line);margin-top:3px;padding-top:7px}
+.brain-panel .brain-price-breakdown .brain-price-total dd{font-size:16px;line-height:1.35;font-weight:750;color:var(--text)}
+@media(max-width:380px){.brain-panel .brain-price-breakdown>div{align-items:flex-start}.brain-panel .brain-price-breakdown .brain-price-total dd{font-size:15px}}
