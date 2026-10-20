@@ -11,6 +11,8 @@ on:
       - "src/catalog.ts"
       - "src/orders.ts"
       - "tests/unit/brain-*.test.ts"
+      - "tests/brain-db/brain-hermes-*.test.mjs"
+      - "tests/ui/hermes-narrow-layout.test.mjs"
       - ".github/workflows/hermes-h3-check.yml"
   workflow_dispatch:
 
@@ -21,6 +23,20 @@ jobs:
   hermes-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: brain_ci
+          POSTGRES_PASSWORD: ci_brain_only_never_for_Commerce
+          POSTGRES_DB: brain_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U brain_ci -d brain_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,6 +60,9 @@ jobs:
           tests/unit/brain-hermes-h6-graph.test.ts
           tests/unit/brain-hermes-qa09.test.ts
           tests/unit/brain-hermes-qa09-price-sort.test.ts
+          tests/unit/brain-hermes-qa09-cancel.test.ts
+          tests/unit/brain-hermes-qa10-fenced.test.ts
+          tests/unit/brain-hermes-qa11-token.test.ts
           tests/unit/brain-hermes-qa10.test.ts
           tests/unit/brain-hermes-qa11.test.ts
           tests/unit/brain-price-band.test.ts
@@ -62,3 +81,15 @@ jobs:
         continue-on-error: true
         timeout-minutes: 7
         run: npm run test:unit
+
+      - name: Real isolated PostgreSQL publication and preference regression
+        env:
+          BRAIN_DATABASE_URL: postgresql://brain_ci:ci_brain_only_never_for_Commerce@127.0.0.1:5432/brain_ci
+          BRAIN_MIGRATE_APPROVED: "1"
+        run: |
+          node scripts/brain-migrate.ts
+          node --test --test-concurrency=1 tests/brain-db/brain-fencing-prototype.test.mjs tests/brain-db/brain-fenced-v9.test.mjs tests/brain-db/brain-fenced-v9-recovery.test.mjs tests/brain-db/brain-fenced-v9-publish-ack.test.mjs tests/brain-db/brain-hermes-qa10-fenced.test.mjs tests/brain-db/brain-hermes-token.test.mjs
+      - name: Install Chromium for offline responsive layout regression
+        run: npx playwright install --with-deps chromium
+      - name: Narrow layout with repository CSS and synthetic UI fixtures (not live E2E)
+        run: node --test tests/ui/hermes-narrow-layout.test.mjs

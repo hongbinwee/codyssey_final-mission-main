@@ -18,11 +18,30 @@ export type FencedClaim=
 const digest=(action:Action)=>createHash("sha256").update(JSON.stringify([
   action.actorUserId,action.conversationId,action.clientActionId,action.userMessage
 ])).digest("hex");
+function allowsUnplannedResult(result:ResearchResult):boolean{
+  const kind=result.explanation?.kind;
+  return kind==="CONVERSATION"||
+    result.intentKind==="REVIEW_SUMMARY"&&(kind==="REVIEW_SUMMARY"||kind==="CLARIFICATION");
+}
+function validReviewShape(result:ResearchResult):boolean{
+  const summary=result.reviewSummary;
+  if(result.intentKind==="REVIEW_SUMMARY"&&result.explanation?.kind==="REVIEW_SUMMARY"&&
+    (!summary||typeof summary.productId!=="string"||!summary.productId||
+      typeof summary.name!=="string"||!summary.name||!Number.isSafeInteger(summary.sampled)||summary.sampled<0||
+      !Number.isSafeInteger(summary.totalMatching)||summary.totalMatching<0||!Array.isArray(summary.citations)))return false;
+  if(summary===undefined)return true;
+  return !!summary&&typeof summary.productId==="string"&&!!summary.productId&&
+    typeof summary.name==="string"&&!!summary.name&&Number.isSafeInteger(summary.sampled)&&summary.sampled>=0&&
+    Number.isSafeInteger(summary.totalMatching)&&summary.totalMatching>=0&&Array.isArray(summary.citations)&&
+    summary.citations.every(c=>!!c&&typeof c.sourceId==="string"&&!!c.sourceId&&
+      typeof c.quote==="string"&&!!c.quote&&["REAL","SYNTHETIC"].includes(c.sourceKind)&&
+      (c.sourceVariantId===null||typeof c.sourceVariantId==="string"&&!!c.sourceVariantId));
+}
 
 function checkedResult(raw:unknown,conversationId:string):ResearchResult {
   const r=(typeof raw==="string"?JSON.parse(raw):raw) as ResearchResult;
   if(!r||typeof r!=="object"||r.conversationId!==conversationId||
-    typeof r.messageId!=="string"||!r.explanation||(!r.shoppingPlan&&r.explanation.kind!=="CONVERSATION"))
+    typeof r.messageId!=="string"||!r.explanation||!validReviewShape(r)||(!r.shoppingPlan&&!allowsUnplannedResult(r)))
     throw new Error("invalid canonical Brain receipt");
   return r;
 }
@@ -78,7 +97,7 @@ export class FencedTurns {
   /** Atomic guarded promotion: stale/failed attempts can never change the public pointer. */
   async publish(action:Action,claim:Extract<FencedClaim,{kind:"run"}>,result:ResearchResult):Promise<void>{
     if(result.conversationId!==action.conversationId||result.clientActionId!==action.clientActionId||
-       !result.explanation||(!result.shoppingPlan&&result.explanation.kind!=="CONVERSATION"))throw Error("invalid graph result");
+       !result.explanation||!validReviewShape(result)||(!result.shoppingPlan&&!allowsUnplannedResult(result)))throw Error("invalid graph result");
     await this.db.transaction(async tx=>{
       const owner=await tx.query<{id:string}>(
         "SELECT id FROM shopping_brain.conversations WHERE id=$1 AND actor_user_id=$2 AND closed_at IS NULL FOR SHARE",

@@ -11,7 +11,7 @@ import type {PlanExtraction,ShoppingPlan} from "./shopping-plan.ts";
 import {resolveShoppingPlan} from "./shopping-plan.ts";
 import {parseKrwTenThousandBand} from "./price-band.ts";
 import {isReviewSortCancelled,requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "./review-sort.ts";
-import {requestedPriceSort,isPriceSortOnly,isPriceSortCancelled,sortByVerifiedTotal} from "./price-sort.ts";
+import {requestedPriceSort,isPriceSortOnly,isSortCancellationOnly,isPriceSortCancelled,sortByVerifiedTotal} from "./price-sort.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {WishlistItem,WishlistView} from "./wishlist-task.ts";
 import type {ShoppingHandoff} from "./shopping-handoff.ts";
@@ -99,7 +99,7 @@ export async function prepareTurn(req:Request,deps:ResearchDeps):Promise<Prepare
 }
 function resolveSortPlan(message:string,plan:ShoppingPlan,previous:ShoppingPlan|null|undefined,newTask=false):ShoppingPlan{
  const price=requestedPriceSort(message),aspect=requestedPositiveReviewSort(message);
- const cancelled=isReviewSortCancelled(message)||isPriceSortCancelled(message)||
+ const cancelled=isSortCancellationOnly(message)||isReviewSortCancelled(message)||isPriceSortCancelled(message)||
   /^(?:그냥\s*추천(?:해)?\s*줘|정렬(?:\s*기준)?(?:은|는|을|를)?\s*(?:상관없|취소|해제|초기화|없애))/.test(message.trim())||
   /평점\s*(?:낮은|높은|많은|좋은)?\s*순/.test(message);
  // A newly stated (non-cancelled) criterion replaces the previous criterion.
@@ -108,6 +108,7 @@ function resolveSortPlan(message:string,plan:ShoppingPlan,previous:ShoppingPlan|
 }
 export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous:ShoppingPlan|null|undefined,deps:ResearchDeps):Promise<ShoppingPlan>{
  const trimmed=req.userMessage.trim();
+ if(previous&&isSortCancellationOnly(trimmed))return {...previous,revision:previous.revision+1,priceSortOrder:undefined,reviewSortAspect:undefined};
  if(previous&&isPriceSortOnly(trimmed))return resolveSortPlan(trimmed,{...previous,revision:previous.revision+1},previous);
  if(deps.clarifyBeforeSearch&&!requestedPriceSort(trimmed)&&!requestedPositiveReviewSort(trimmed)){const answered=interviewAnswer(trimmed,previous??undefined);if(answered)return resolveSortPlan(req.userMessage,answered,previous,answered.query!==previous?.query);}
  const last=previous?.lastDisplayedProductIds??[];

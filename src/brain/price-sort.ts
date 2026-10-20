@@ -28,6 +28,11 @@ export function isPriceSortOnly(message:string):boolean{
   .replace(/(?:이번엔|이번에는|이제는|이제|그럼|으로|말고|대신|(?:추천|정렬)(?:해)?\s*(?:줘|주세요)|보여\s*(?:줘|주세요)|해\s*(?:줘|주세요)|정렬|추천|다시|같은 조건|상품을|상품|제품을|제품)/g,"");
  return /^[\s.!?]*$/.test(rest);
 }
+/** Exact task-local cancellation, never a product-bearing request such as 그냥 커피 추천. */
+export function isSortCancellationOnly(message:string):boolean{
+ const text=message.trim().replace(/[.!?]+$/g,"").replace(/\s+/g," ");
+ return /^(?:(?:그럼|그러면|이번엔)\s*)?(?:그냥\s*추천(?:해\s*(?:줘|주세요))?|(?:정렬|순서)(?:은|는|을|를)?\s*(?:없이|상관없이|상관없(?:어|어요)?|취소(?:해\s*(?:줘|주세요))?|해제(?:해\s*(?:줘|주세요))?)(?:\s*(?:추천(?:해\s*(?:줘|주세요))?|보여\s*(?:줘|주세요)))?)$/.test(text);
+}
 export function isPriceSortCancelled(message:string):boolean{
  const text=message.trim().replace(/\s+/g," ");
  return [...text.matchAll(priceOrderPattern)].some(m=>cancelled.test(text.slice(m.index+m[0].length)));

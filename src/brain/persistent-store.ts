@@ -8,6 +8,12 @@ export interface BrainSqlRunner {
 export interface BrainSqlDatabase extends BrainSqlRunner {
   transaction<T>(fn:(tx:BrainSqlRunner)=>Promise<T>):Promise<T>;
 }
+export class PreferenceConfirmationError extends Error {
+  readonly kind:"not_found"|"required";
+  constructor(kind:"not_found"|"required"){
+    super(kind);this.kind=kind;this.name="PreferenceConfirmationError";
+  }
+}
 function actor(id:string) { if (!id || id.length>256) throw new Error('invalid authenticated actor'); }
 function uid(id:string) { if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) throw new Error('invalid conversation identifier'); }
 const CONVERSATION_CREATE_NAMESPACE='toss-shopping-brain/conversation-create/v1';
@@ -88,14 +94,17 @@ export class PersistentConversations {
   async confirmPreference(actorUserId:string,proposalId:string):Promise<Preference>{
     actor(actorUserId);uid(proposalId);
     return this.db.transaction(async tx=>{
-      const rows=await tx.query<{actor_user_id:string;conversation_id:string;source_message_id:string;preference_key:PreferenceKey;preference_value:PreferenceValue}>(
+      const rows=await tx.query<{actor_user_id:string;conversation_id:string;source_message_id:string;preference_key:PreferenceKey;preference_value:PreferenceValue;consumed_at:Date|string|null}>(
         `SELECT p.actor_user_id,p.conversation_id,p.source_message_id,p.preference_key,p.preference_value
+                ,p.consumed_at
          FROM shopping_brain.preference_proposals p JOIN shopping_brain.conversations c ON c.id=p.conversation_id
-         WHERE p.id=$1 AND p.actor_user_id=$2 AND c.actor_user_id=$2 AND c.closed_at IS NULL
-         AND p.consumed_at IS NULL AND p.expires_at>now() FOR UPDATE OF p`,[proposalId,actorUserId]);
-      if(rows.length!==1)throw new Error('confirmation expired, used or not owned');
+         WHERE p.id=$1 AND p.actor_user_id=$2 AND c.actor_user_id=$2 AND c.closed_at IS NULL FOR UPDATE OF p`,[proposalId,actorUserId]);
+      if(rows.length!==1)throw new PreferenceConfirmationError("not_found");
       const p=rows[0]; assertPreference(p.preference_key,p.preference_value);
-      await tx.query('UPDATE shopping_brain.preference_proposals SET consumed_at=now() WHERE id=$1 AND actor_user_id=$2',[proposalId,actorUserId]);
+      if(p.consumed_at!==null)throw new PreferenceConfirmationError("required");
+      const consumed=await tx.query<{id:string}>(`UPDATE shopping_brain.preference_proposals SET consumed_at=clock_timestamp()
+        WHERE id=$1 AND actor_user_id=$2 AND consumed_at IS NULL AND expires_at>clock_timestamp() RETURNING id`,[proposalId,actorUserId]);
+      if(consumed.length!==1)throw new PreferenceConfirmationError("required");
       const saved=await tx.query<{updated_at:Date|string}>(`INSERT INTO shopping_brain.user_preferences
         (actor_user_id,preference_key,preference_value,source_conversation_id,source_message_id)
         VALUES($1,$2,$3,$4,$5) ON CONFLICT(actor_user_id,preference_key) DO UPDATE SET

@@ -13,7 +13,8 @@ function simpleIntent(message:string,previous?:ShoppingPlan):ShoppingIntent|null
  const prefs:ShoppingIntent["context"]["currentPreferences"]={};
  if(/가성비|더 저렴|가격 우선/.test(rest))prefs.price_priority="value";
  rest=rest.replace(/^(?:그럼|그러면)\s*/,"").replace(/예산은?|가성비|더 저렴한?\s*(?:걸로)?|가격 우선/g,"")
-   .replace(/(?:추천해\s*줘|추천해주세요|추천해|추천|찾아\s*줘|찾아주세요|찾아|검색해\s*줘|검색해|검색)[.!?\s]*$/,"").trim();
+   .replace(/(?:추천해\s*줘|추천해주세요|추천해|추천|찾아\s*줘|찾아주세요|찾아|검색해\s*줘|검색해|검색)[.!?\s]*$/,"").trim()
+   .replace(/^그냥\s+(?=\S)/,"");
  if(followup&&/^(?:으로|로)?$/.test(rest))return {query:previous!.query,queryMode:"KEEP",budgetMode:budget===null?"KEEP":"SET",
    requirementsMode:"KEEP",context:{maxTotalWon:budget,requiredConditions:[],currentPreferences:prefs}};
  // A single noun or a plain two-word product name can be handled without a
