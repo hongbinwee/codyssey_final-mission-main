@@ -232,6 +232,25 @@ export async function createBrainRuntime(options:{
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:options.rag?.contract!=="v4",datasetVersion:options.rag?.datasetVersion,
+     // QA10: direct Commerce review reads bypass the in-stock RAG recommendation filter.
+     // Resolve named products with the existing catalogue search; exact identity
+     // and review source checks happen again inside the dedicated graph node.
+     reviewSummary:{
+       findProducts:async(query:string)=>{
+         const result=await catalog.searchProducts({query,limit:20});
+         if(!result.ok)throw Error("review catalogue lookup unavailable");
+         return {items:result.data.items.map(x=>({product_id:x.product_id,name:x.name})),hasMore:result.data.has_more};
+       },
+       product:async(productId:string)=>{
+         const result=await catalog.getProduct({product_id:productId});
+         return result.ok?result.data:null;
+       },
+       reviews:async(productId:string)=>{
+         const result=await catalog.getReviews({product_id:productId,limit:20,sort:"LATEST"});
+         return result.ok?result.data:null;
+       }
+     },
+     reviewSummaryProvider:options.provider,
      ...(options.hermesEnabled?{hermes:{provider:options.hermesProvider??options.provider,
        history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId),
        toolPorts:(actorUserId:string)=>createHermesReadPorts({
