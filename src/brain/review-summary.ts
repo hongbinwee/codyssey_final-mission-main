@@ -8,14 +8,15 @@ import type {ProductDetail,ProductSummary,ReviewsResult} from "../contracts.ts";
 export function reviewSummaryIntent(message:string):{target:string|null;ordinal:number|null;negativeOnly:boolean}|null{
  const m=message.trim();
  if(!/(리뷰|후기|장단점)/.test(m)||!/(정리|요약|알려|보여|설명|어때|분석|궁금|자세히|단점|장점)/.test(m))return null;
- if(/(?:추천|찾아|검색|구매|살까|많은\s*순|순위|정렬)/.test(m)||
+ if(/(?:추천|찾아|검색|구매|살까|비교|차이|많은\s*순|순위|정렬)/.test(m)||
     /(?:이\s*제품|저\s*제품|상품|제품|서로|둘|두\s*개).{0,20}(?:비교|차이)|(?:비교|차이).{0,15}(?:리뷰|후기)/.test(m))return null;
  const ordinal=m.match(/(?:^|\s|지난\s*추천(?:의)?\s*)([1-3])\s*번\s*(?:상품|제품|거|것)/);
  const negativeOnly=/(?:단점|아쉬운|부정|안\s*좋은)/.test(m)&&!/(?:장점|좋은\s*점)/.test(m);
  // Remove only the request suffix; the remaining name can contain spaces, numbers and capacity.
- const target=m.replace(/(?:의|에\s*대한)?\s*(?:리뷰|후기|장단점)(?:에서|만|를|은|의)?\s*(?:단점|장점|평가|내용)?\s*(?:만)?\s*(?:자세히)?\s*(?:정리(?:해\\s*줘|해주세요)?|요약(?:해\\s*줘|해주세요)?|분석(?:해\\s*줘|해주세요)?|알려\s*줘|알려\s*주세요|알려줘|보여\s*줘|설명해\s*줘|설명해\s*주세요|궁금해|어때|자세히\s*알려줘)?[.!?\s]*$/,"")
+ const target=m.replace(/(?:의|에\s*대한)?\s*(?:리뷰|후기|장단점)(?:에서|만|를|은|의)?\s*(?:단점|장점|평가|내용)?\s*(?:만)?\s*(?:자세히)?\s*(?:정리(?:해\s*줘|해주세요)?|요약(?:해\s*줘|해주세요)?|분석(?:해\s*줘|해주세요)?|알려\s*줘|알려\s*주세요|알려줘|보여\s*줘|설명해\s*줘|설명해\s*주세요|궁금해|어때|자세히\s*알려줘)?[.!?\s]*$/,"")
   .replace(/^(?:그럼|그러면|아까|이전에|지난번에|제가\s*봤던)\s*/,"")
-  .replace(/^(?:이|그|저)\s*(?:상품|제품|거|것)(?:은|의)?$/,"").trim();
+  .replace(/^(?:이|그|저)\s*(?:상품|제품|거|것)(?:은|의)?$/,"")
+  .replace(/\s+(?:상품|제품)$/,"").trim();
  const contextual=!!ordinal||/(?:이|그|저)\s*(?:상품|제품|거|것)(?:의|에|은|가)?\s*(?:리뷰|후기|장단점)/.test(m);
  return {target:contextual?null:target&&target.length>=2?target.slice(0,120):null,
    ordinal:ordinal?Number(ordinal[1]):null,negativeOnly};
