@@ -115,7 +115,7 @@ test("Chromium: log in, save long-term preference, get personalized reranking, f
    await page.getByPlaceholder("상품 검색").waitFor({timeout:15000});
    console.log("BROWSER_STAGE 04 logged in");
    await page.getByTitle("AI 쇼핑 도우미").click();
-   const panel=page.locator('aside[aria-label="Shopping Brain Preview"]');
+   const panel=page.getByRole("complementary",{name:"토스쇼핑 AI Brain",exact:true});
    await panel.waitFor({timeout:15000});
    console.log("BROWSER_STAGE 05 preview visible");
    const send=async(message)=>{
