@@ -29,7 +29,7 @@ type MemoryItem={key:string;value:string;updatedAt:string};
 type Entry={text:string;clientActionId?:string;conversationId?:string;reply?:BrainReply;status?:"sending"|"failed"|"completed";failure?:string};
 type History={conversationId:string|null;entries:Entry[]};
 type Conversation={id:string;title:string|null;createdAt:string};
-const priceLabels:Record<string,string>={value:"가성비 중심",balanced:"균형",performance:"성능 중심",important:"중요",normal:"보통"};
+const priceLabels:Record<string,string>={value:"가성비를 우선해요",balanced:"가격과 품질을 균형 있게 봐요",performance:"품질을 더 중요하게 생각해요",important:"중요",normal:"보통"};
 const preferenceLabels:Record<string,string>={price_priority:"가격 선호",eye_comfort:"눈의 편안함",noise_sensitivity:"소음 선호"};
 const friendlyFailure=(code:string)=>code==="MODEL_TIMEOUT"?"AI 응답이 늦어지고 있어요. 질문과 기존 조건은 보존했어요.":
  code==="RETRIEVAL_UNAVAILABLE"?"상품 정보를 불러오지 못했어요. 말씀하신 조건은 그대로예요. 잠시 후 다시 시도해 주세요.":
@@ -107,13 +107,15 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
  const [sourceMessage,setSourceMessage]=useState<string|null>(null);
  const [selected,setSelected]=useState<"value"|"balanced"|"performance">("value");
  const [pending,setPending]=useState<string|null>(null);
- const [saved,setSaved]=useState(false);
+ const [pendingValue,setPendingValue]=useState<typeof selected|null>(null);
  const [memories,setMemories]=useState<MemoryItem[]>([]);
  const [entries,setEntries]=useState<Entry[]>([]);
  const [busy,setBusy]=useState(false);
  const [restoring,setRestoring]=useState(true);
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
+ const storedPrice=memories.find(m=>m.key==="price_priority")?.value;
+ const alreadySaved=storedPrice===selected;
  const lock=useRef(false),epoch=useRef(0),bottom=useRef<HTMLDivElement>(null);
  const initialCreation=useRef<string|null>(null),newCreation=useRef<string|null>(null);
  const listConversations=async(generation=epoch.current)=>{
@@ -123,7 +125,7 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
  const applyHistory=(data:History)=>{
    setConversation(data.conversationId);setEntries(data.entries);
    setSourceMessage(data.entries.at(-1)?.reply?.message_id??null);
-   setPending(null);setSaved(false);setInput("");
+   setPending(null);setPendingValue(null);setInput("");
  };
  useEffect(()=>{
    const generation=epoch.current;
@@ -132,19 +134,30 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
      if(r.ok)applyHistory(r.data);else setError("이전 대화를 복원하지 못했어요. 다시 열어 주세요.");
    }).finally(()=>{if(generation===epoch.current)setRestoring(false);});
    void listConversations(generation);
-   void apiSafe<MemoryItem[]>("/api/brain/preferences").then(r=>{if(generation===epoch.current&&r.ok)setMemories(r.data);});
+   void apiSafe<MemoryItem[]>("/api/brain/preferences").then(r=>{
+     if(generation!==epoch.current||!r.ok)return;
+     setMemories(r.data);
+     const preference=r.data.find(m=>m.key==="price_priority");
+     if(preference&&["value","balanced","performance"].includes(preference.value))
+       setSelected(preference.value as typeof selected);
+   });
    return ()=>{epoch.current++;};
  },[]);
  useEffect(()=>{bottom.current?.scrollIntoView({block:"nearest",behavior:"smooth"});},[entries,busy]);
 
  const refresh=async()=>{
    const result=await apiSafe<MemoryItem[]>("/api/brain/preferences");
-   if(result.ok)setMemories(result.data);
+   if(result.ok){
+     setMemories(result.data);
+     const preference=result.data.find(m=>m.key==="price_priority");
+     if(preference&&["value","balanced","performance"].includes(preference.value))
+       setSelected(preference.value as typeof selected);
+   }
    return result.ok;
  };
  const runEntry=async(entry:Entry)=>{
    if(lock.current)return;lock.current=true;const generation=epoch.current;
-   setBusy(true);setError("");setNotice("");setPending(null);setSaved(false);setSourceMessage(null);
+   setBusy(true);setError("");setNotice("");setPending(null);setPendingValue(null);setSourceMessage(null);
    const update=(changes:Partial<Entry>)=>{
      if(generation===epoch.current)setEntries(previous=>previous.map(e=>e.clientActionId===entry.clientActionId?{...e,...changes}:e));
    };
@@ -202,30 +215,51 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
    }finally{lock.current=false;setBusy(false);}
  };
  const propose=async()=>{
-   if(!conversation||!sourceMessage||lock.current)return;lock.current=true;setBusy(true);setError("");setNotice("");
+   if(!conversation||!sourceMessage||lock.current||restoring||alreadySaved)return;
+   const value=selected;
+   lock.current=true;setBusy(true);setError("");setNotice("");
    try{
-     const r=await apiSafe<{proposal_id:string}>("/api/brain/preferences/proposals",{method:"POST",body:JSON.stringify({conversation_id:conversation,source_message_id:sourceMessage,key:"price_priority",value:selected})});
-     if(r.ok)setPending(r.data.proposal_id);else setError("선호 저장 요청을 만들지 못했어요.");
+     const r=await apiSafe<{proposal_id:string}>("/api/brain/preferences/proposals",
+       {method:"POST",body:JSON.stringify({conversation_id:conversation,source_message_id:sourceMessage,
+         key:"price_priority",value})});
+     if(r.ok){setPending(r.data.proposal_id);setPendingValue(value);}
+     else setError("저장 요청을 준비하지 못했어요. 다시 시도해 주세요.");
    }finally{lock.current=false;setBusy(false);}
  };
  const confirm=async()=>{
-   if(!pending||lock.current)return;lock.current=true;setBusy(true);setError("");
+   if(!pending||!pendingValue||lock.current)return;
+   const expected=pendingValue;lock.current=true;setBusy(true);setError("");setNotice("");
    try{
-     const r=await apiSafe<{key:string;value:string;updatedAt:string}>("/api/brain/preferences/confirm",{method:"POST",body:JSON.stringify({proposal_id:pending})});
-     if(r.ok){
-       setPending(null);setSaved(true);
+     const r=await apiSafe<{key:string;value:string;updatedAt:string}>("/api/brain/preferences/confirm",
+       {method:"POST",body:JSON.stringify({proposal_id:pending})});
+     if(r.ok&&r.data.key==="price_priority"&&r.data.value===expected){
+       setPending(null);setPendingValue(null);
        setMemories(previous=>[...previous.filter(m=>m.key!==r.data.key),r.data]);
-       setNotice("선호를 장기 기억에 저장했어요.");
-       if(!await refresh())setNotice("선호를 저장했어요. 목록 새로고침은 잠시 후 다시 확인해 주세요.");
-     }else setError("선호 저장 확인에 실패했어요. 다시 확인해 주세요.");
+       setNotice("가격 기준을 저장했어요. 다음 상품 추천부터 반영할게요.");
+       if(!await refresh())setNotice("가격 기준은 저장했어요. 저장 목록은 잠시 후 다시 확인해 주세요.");
+     }else if(r.ok){
+       setPending(null);setPendingValue(null);
+       await refresh();
+       setError("저장된 기준이 선택한 값과 달라요. 현재 저장된 기준을 다시 확인해 주세요.");
+     }else if(r.error.code==="CONFIRMATION_REQUIRED"){
+       setPending(null);setPendingValue(null);
+       setError("확인 시간이 지났거나 이미 처리한 요청이에요. 저장하기를 다시 눌러 주세요.");
+     }else setError("가격 기준 저장에 실패했어요. 저장 확인을 다시 눌러 주세요.");
    }finally{lock.current=false;setBusy(false);}
  };
+ const cancelPending=()=>{
+   if(lock.current)return;
+   setPending(null);setPendingValue(null);setError("");setNotice("");
+ };
  const clear=async()=>{
-   if(lock.current)return;lock.current=true;setBusy(true);setError("");
+   if(lock.current)return;lock.current=true;setBusy(true);setError("");setNotice("");
    try{
      const r=await apiSafe<{deleted:boolean}>("/api/brain/preferences/price_priority",{method:"DELETE"});
-     if(r.ok){setMemories(previous=>previous.filter(m=>m.key!=="price_priority"));setSaved(false);setNotice("장기 가격 선호만 삭제했어요. 대화 기록과 현재 조건은 보존돼요.");}
-     else setError("선호 삭제에 실패했어요.");
+     if(r.ok){
+       setMemories(previous=>previous.filter(m=>m.key!=="price_priority"));
+       setPending(null);setPendingValue(null);
+       setNotice("저장한 가격 기준을 삭제했어요. 대화와 현재 쇼핑 조건은 그대로예요.");
+     }else setError("저장한 가격 기준을 삭제하지 못했어요. 다시 시도해 주세요.");
    }finally{lock.current=false;setBusy(false);}
  };
  return <aside className="agent-panel brain-panel" aria-label="토스쇼핑 AI Brain">
@@ -287,19 +321,39 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
          {e.reply.explanation?.kind!=="CONVERSATION"&&e.reply.explanation?.kind!=="CLARIFICATION"&&<BrainRanking explanation={e.reply.explanation} ranking={e.reply.ranking} onOpenProduct={onOpenProduct} onExcludeProduct={i===entries.length-1&&!busy?(id)=>sendChoice(`이 상품 제외: ${id}`):undefined}/>}
        </>}
      </div>)}
-     {sourceMessage&&conversation&&(entries.at(-1)?.reply?.ranking.ranked.length??0)>0&&<div className="state-box">
-       <b>가격 선호를 장기 기억으로 저장할까요?</b>
-       <select aria-label="가격 선호" value={selected} disabled={busy} onChange={e=>{setSelected(e.target.value as typeof selected);setPending(null);setSaved(false);setNotice("");}}>
-         <option value="value">가성비 중심</option><option value="balanced">균형</option><option value="performance">성능 중심</option>
-       </select>
-       {saved?<p>저장 완료</p>:!pending?<button className="btn" onClick={()=>void propose()} disabled={busy}>선호 저장 요청</button>
-         :<button className="btn primary" onClick={()=>void confirm()} disabled={busy}>이 선호를 기억하도록 확인</button>}
-       <p className="muted sm">최종 확인 후에만 장기 기억에 저장돼요.</p>
-     </div>}
-     {memories.length>0&&<div className="state-box brain-memory"><b>저장된 장기 선호</b>
+     {sourceMessage&&conversation&&(entries.at(-1)?.reply?.ranking.ranked.length??0)>0&&<section className="state-box brain-preference-save" aria-label="가격 기준 저장">
+       <div className="brain-preference-intro">
+         <h3>이 가격 기준을 기억해둘까요?</h3>
+         <p>다음 상품 추천에도 선택한 기준을 반영할 수 있어요.</p>
+       </div>
+       <div className="brain-preference-field">
+         <label htmlFor="brain-price-priority">추천할 때 중요하게 볼 기준</label>
+         <select id="brain-price-priority" aria-label="가격 선호" value={selected} disabled={busy||restoring}
+           onChange={e=>{setSelected(e.target.value as typeof selected);setPending(null);setPendingValue(null);setError("");setNotice("");}}>
+           <option value="value">가성비를 우선해요</option>
+           <option value="balanced">가격과 품질을 균형 있게 봐요</option>
+           <option value="performance">품질을 더 중요하게 생각해요</option>
+         </select>
+       </div>
+       {pending&&pendingValue?
+         <div className="brain-preference-confirm">
+           <p role="status">‘{priceLabels[pendingValue]}’ 기준을 저장할까요? 확인 후에만 저장돼요.</p>
+           <div className="brain-preference-actions">
+             <button className="btn primary" onClick={()=>void confirm()} disabled={busy||restoring}>저장 확인</button>
+             <button className="btn" onClick={cancelPending} disabled={busy||restoring}>취소</button>
+           </div>
+         </div>:
+         <div className="brain-preference-actions">
+           {alreadySaved?<p role="status" className="brain-preference-saved">현재 저장된 기준이에요.</p>:
+             <button className="btn primary" onClick={()=>void propose()} disabled={busy||restoring||!conversation||!sourceMessage}>저장하기</button>}
+         </div>}
+       <p className="brain-preference-note">원할 때 저장하고, 나중에 바꿀 수 있어요.</p>
+     </section>}
+     {memories.length>0&&<section className="state-box brain-memory" aria-label="저장된 선호">
+       <b>저장된 선호</b>
        {memories.map(m=><div key={m.key} className="muted sm">{preferenceLabels[m.key]??"저장된 선호"}: {priceLabels[m.value]??"설정됨"}</div>)}
-       <button className="link" onClick={()=>void clear()} disabled={busy}>가격 선호 기억 삭제</button>
-     </div>}
+       {storedPrice&&<button className="link" onClick={()=>void clear()} disabled={busy||restoring}>저장한 가격 기준 삭제</button>}
+     </section>}
      {interview.questions.length>0&&<section className="state-box brain-interview" aria-label="추천 조건 확인"><div className="brain-interview-heading"><span className="brain-section-icon" aria-hidden="true">☷</span><div><span className="brain-eyebrow">맞춤 추천 준비</span><h3>원하는 조건을 알려주세요</h3></div></div>{interview.questions.map((q,index)=><fieldset key={q.key}><legend><span className="brain-question-number">{index+1}</span>{q.text}</legend><div className="brain-quick-choices">{q.choices.map(choice=><button key={choice} className="btn brain-choice" aria-label={choice} disabled={busy||restoring} onClick={()=>sendChoice(choice)}>{choice.replace(/^예산은 /,"")}</button>)}</div></fieldset>)}<p className="muted sm">아래 입력창에 원하는 조건을 직접 적어도 좋아요.</p></section>}
      {showExplore&&!busy&&<div className="brain-explore"><button className="btn" disabled={restoring} onClick={()=>sendChoice("조건 바꾸기")}>조건 바꾸기</button><button className="btn" disabled={restoring} onClick={()=>sendChoice("다른 상품 보기")}>다른 상품 보기</button></div>}
      {notice&&<p role="status" className="muted sm">{notice}</p>}
