@@ -133,8 +133,8 @@ test("Chromium: log in, save long-term preference, get personalized reranking, f
    assert.equal((await currentPlan()).maxTotalWon,500000);
    const remember=async(value)=>{
      await panel.locator(".state-box select").selectOption(value);
-     await panel.getByRole("button",{name:"선호 저장 요청"}).click();
-     await panel.getByRole("button",{name:"이 선호를 기억하도록 확인"}).click();
+     await panel.getByRole("button",{name:"저장하기",exact:true}).click();
+     await panel.getByRole("button",{name:"최종 확인",exact:true}).click();
      await panel.getByRole('status').filter({hasText:'저장했어요'}).waitFor({timeout:12000});
      assert.ok(await panel.getByText(value==='value'?'가격 선호: 가성비 중심':'가격 선호: 성능 중심',{exact:true}).count()>0);
    };
@@ -150,12 +150,14 @@ test("Chromium: log in, save long-term preference, get personalized reranking, f
 
    failNext=true;
    const countBefore=await panel.locator(".msg.ai").count();
-   await send("조건 유지하고 다시 보여줘");
-   await panel.getByRole("alert").waitFor({timeout:25000});
-   assert.equal(await panel.locator(".msg.ai").count(),countBefore,"failed request must not claim successful ranking");
-   assert.equal(await panel.getByPlaceholder("쇼핑 조건을 입력하세요").inputValue(),"","input is cleared while failed bubble retains original question");
+   const retrievalFailure=await send("조건 유지하고 다시 보여줘");
+   await retrievalFailure.locator(".msg.ai").waitFor({timeout:25000});
+   assert.match(await retrievalFailure.locator(".msg.ai").innerText(),/말씀하신 조건은 그대로 보관했어요/);
+   assert.equal(await panel.locator(".msg.ai").count(),countBefore+1,"HTTP 200 retrieval failure renders its safe explanation");
+   assert.equal(await retrievalFailure.locator(".brain-product-card").count(),0,"retrieval failure has no stale recommendation cards");
+   assert.equal(await panel.getByPlaceholder("쇼핑 조건을 입력하세요").inputValue(),"","input clears while the original question remains visible");
    assert.ok(await panel.locator('.msg.user').getByText('조건 유지하고 다시 보여줘',{exact:true}).count()>0);
-   await panel.getByRole("button",{name:"다시 시도",exact:true}).click();
+   await retrievalFailure.getByRole("button",{name:"다시 검색",exact:true}).click();
    await panel.locator(".brain-turn").last().locator(".brain-product-card").first().waitFor({timeout:25000});
    assert.ok(ragCalls>=5);
    // LLM planner failure after a completed turn must preserve the last completed plan.
@@ -170,7 +172,7 @@ test("Chromium: log in, save long-term preference, get personalized reranking, f
    await panel.locator(".brain-turn").last().locator(".brain-product-card").first().waitFor({timeout:25000});
    assert.equal((await currentPlan()).maxTotalWon,500000,"failed LLM call cannot destroy previous completed budget plan");
    await panel.getByRole("button",{name:"가격 선호 기억 삭제"}).click();
-   await panel.getByText(/장기 가격 선호만 삭제했어요/).waitFor({timeout:12000});
+   await panel.getByText(/저장된 가격 기준을 삭제했어요/).waitFor({timeout:12000});
    assert.equal(await panel.getByText("가격 선호: 성능 중심",{exact:true}).count(),0,
      "canonical long-term memory removed; previous conversations remain separate");
    failNextModelStatus=429;
