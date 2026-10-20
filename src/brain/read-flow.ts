@@ -1,5 +1,6 @@
 import {interviewAnswer} from './interview.ts';
 import type {Provider} from "../llm.ts";
+import type {HermesToolPort} from "./hermes-tools.ts";
 import type {PurchaseSnapshot} from "./purchase-history.ts";
 import type {ConversationResponder} from "./conversation-response.ts";
 import type {BrainTrace,EvidenceRecord,MemoryRepository,Preference,RankingResult,RetrieverPort} from "./contracts.ts";
@@ -30,7 +31,8 @@ export interface ResearchResult {
 }
 export interface ResearchDeps {
  clarifyBeforeSearch?:boolean;
- hermes?:{provider:Pick<Provider,"chat">;history:(actorUserId:string)=>Promise<PurchaseSnapshot[]>;reviewCount:(productId:string)=>Promise<number|null>};
+ hermes?:{provider:Pick<Provider,"chat">;history:(actorUserId:string)=>Promise<PurchaseSnapshot[]>;reviewCount:(productId:string)=>Promise<number|null>;
+  toolPorts?:(actorUserId:string)=>Partial<Pick<HermesToolPort,"cart"|"product"|"reviews"|"orders"|"order"|"shipping">>};
  datasetVersion?:string;
  conversations:Pick<PersistentConversations,"assertOwned"|"appendUserMessage">;
  memory:MemoryRepository;retriever:RetrieverPort;intent:IntentPort;
