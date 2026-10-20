@@ -1934,3 +1934,8 @@ button.cart-thumb { border: 0; padding: 0; cursor: pointer; }
  .brain-panel .brain-preference-save{padding:15px 14px;gap:12px}
  .brain-panel .brain-preference-actions .btn{max-width:100%}
 }
+
+.brain-panel .brain-preference-retry{
+  width:fit-content;min-height:32px;padding:3px 0;font-size:12px;
+  color:var(--accent);font-weight:600;text-align:left;
+}
