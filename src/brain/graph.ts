@@ -118,7 +118,7 @@ export function createPersistentResearchGraph(
      await verify();return {researchResult,evidence:[]};
    })
    .addNode("converse",async state=>{
-     const previous=resetTaskRequested(state.request.userMessage)?null:state.researchResult?.shoppingPlan;
+     const previous=(resetTaskRequested(state.request.userMessage)||state.intentRoute.kind==="CS_REQUEST")?null:state.researchResult?.shoppingPlan;
      const started=performance.now();
      const explanation=deps.converse?await deps.converse({message:state.request.userMessage,route:state.intentRoute,previous}):
        {kind:"CONVERSATION" as const,text:state.intentRoute.text??"어떤 상품을 찾으시는지 알려주세요.",items:[],limitations:[]};
