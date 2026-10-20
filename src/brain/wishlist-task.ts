@@ -9,7 +9,7 @@ export function wishlistIntent(message:string,previous?:WishlistReference):Wishl
  if(!text||text.length>160||/찜.{0,12}(?:해제|취소|삭제|지워|빼)|(?:해제|취소|삭제).{0,12}찜/.test(text))return null;
  if(previous){
   const selected=/^(?:(?:그중|그 중|찜 목록에서)\s*)?(?:(\d{1,2})\s*(?:번(?:째)?|번째|순위|위)|(첫|두|세)\s*번째)\s*(.*)$/.exec(text);
-  if(selected&&/(?:살|사겠|사고|구매|선택|상세|열어|보여|골라|고를|할게)/.test(selected[3])){
+  if(selected&&/(?:살|사겠|사고|구매|선택|상세|열어|보여|골라|고를|할게|담아|넣어)/.test(selected[3])){
    const n=selected[1]?Number(selected[1]):{"첫":1,"두":2,"세":3}[selected[2] as "첫"|"두"|"세"];
    return n>0&&n<=20?{kind:"SELECT",index:n-1}:null;
   }
@@ -28,5 +28,5 @@ export function wishlistReply(intent:WishlistIntent,owned:WishlistItem[],previou
  if(!view.items.some(item=>item.productId===current.productId))return {view,text:"선택한 상품이 최신 찜 목록의 표시 범위를 벗어났어요. 목록을 다시 확인해 주세요."};
  if(!current.active||current.minPriceWon===null)return {view,text:"선택한 상품은 현재 구매 가능한 옵션이 없어요."};
  view.selectedProductId=current.productId;
- return {view,text:`${current.name}을(를) 선택했어요. 상품 상세에서 옵션과 현재 가격을 확인하고 직접 구매를 진행해 주세요.`};
+ return {view,text:`${current.name}을(를) 선택했어요. 상품 상세에서 옵션·가격을 확인하고 장바구니에 담거나 구매를 진행해 주세요.`};
 }
