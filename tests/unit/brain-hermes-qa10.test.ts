@@ -120,9 +120,10 @@ test("QA10 source text injection cannot demand writes or produce unsupported rev
  let calls=0;
  const provider={chat:async()=>{calls++;return {content:"not json"};}};
  const result=await summarizeNamedProductReviews({request:request(),previousDisplayedIds:[],source:fixture({reviews:async()=>injected}),provider});
- assert.equal(calls,1);assert.equal(result.kind,"SUMMARY");
+ assert.equal(calls,0,"unsafe review instructions must never reach the model");assert.equal(result.kind,"SUMMARY");
  if(result.kind==="SUMMARY"){
-  assert.equal(result.citations.length,1);
+  assert.equal(result.citations.length,0);
+  assert.doesNotMatch(result.text,/IGNORE ALL|cancel another/);
   assert.doesNotMatch(result.text,/주문을 취소했|주문이 취소|의학적으로 검증/);
  }
 });
