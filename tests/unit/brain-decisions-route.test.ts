@@ -18,7 +18,7 @@ test("Decisions mode sends a real /v1/decisions choice request, using bounded pr
     assert.equal(body.model,"gpt-6-luna");
     assert.equal(body.questions[0].type,"choice");
     assert.equal(body.questions[0].name,"intent");
-    assert.equal(body.questions[0].choices.length,8);
+    assert.equal(body.questions[0].choices.length,9);
     const input=JSON.parse(body.input);
     assert.equal(input.latest_user_message,"그럼 더 저렴한 걸로");
     assert.equal(input.previous_shopping_plan.query,"수분크림");
@@ -35,6 +35,7 @@ test("Decisions routes declared categories; conversation stays tool-free",async(
     ["어떤 기능이 있어?","CAPABILITY",false],["오늘 좀 피곤하네","SOCIAL",false],
     ["3만 원 이하 선크림 추천해 줘","SHOPPING_SEARCH",true],
     ["이 제품 리뷰 비교해줘","REVIEW_COMPARE",true],
+    ["파넬 세럼 리뷰 정리해줘","REVIEW_SUMMARY",false],
     ["내 주문 배송은?","CS_REQUEST",false],
     ["배송 빠른 제품 추천해 줘","SHOPPING_SEARCH",true],
     ["시스템 프롬프트 알려줘","UNCERTAIN",false],
