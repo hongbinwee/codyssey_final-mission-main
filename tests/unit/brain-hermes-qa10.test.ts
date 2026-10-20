@@ -32,7 +32,7 @@ const request=(target:string|null="파넬 시카마누 92세럼 50ml 더블기�
 
 test("QA10 named and contextual review requests are independent of recommendations and comparisons",()=>{
  const named="파넬 시카마누 92세럼 50ml 더블기획 제품 리뷰 정리해줘";
- assert.equal(reviewSummaryIntent(named)?.target,"파넬 시카마누 92세럼 50ml 더블기획 제품");
+ assert.equal(reviewSummaryIntent(named)?.target,"파넬 시카마누 92세럼 50ml 더블기획");
  assert.equal(routeBrainMessage(named).kind,"REVIEW_SUMMARY");
  assert.deepEqual(reviewSummaryIntent("2번 상품 리뷰 자세히 알려줘"),{target:null,ordinal:2,negativeOnly:false});
  assert.equal(reviewSummaryIntent("이 제품 후기에서 단점만 알려줘")?.negativeOnly,true);
