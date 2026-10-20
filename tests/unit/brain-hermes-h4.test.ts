@@ -158,3 +158,13 @@ test("H4 agent clarification is checkpointed and a neutral answer resumes the sa
  assert.equal(second.taskState?.phase,"ACTIVE");
  assert.equal(second.ranking.ranked[0]?.candidate.productId,"p1");
 });
+
+test("H4 product summary uses the cheapest actually available option and explicit shipping fee",()=>{
+ const text=summarizeAgentObservations([{tool:"get_product_detail",ok:true,data:{product:{
+  name:"무선 이어폰",active:true,shippingFeeWon:3000,variants:[
+   {priceWon:5000,availability:"SOLD_OUT"},{priceWon:20000,availability:"AVAILABLE"},
+   {priceWon:14000,availability:"AVAILABLE"}]}}}]);
+ assert.match(text,/14,000원/);
+ assert.match(text,/배송비는 3,000원/);
+ assert.doesNotMatch(text,/5,000원/);
+});
