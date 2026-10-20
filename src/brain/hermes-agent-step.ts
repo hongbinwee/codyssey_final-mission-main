@@ -10,6 +10,7 @@ import {SHOPPING_POLICY} from "./policy.ts";
 import {selectShoppingSkill} from "./skills.ts";
 import {HERMES_TOOL_LIMIT,hermesToolDefinitions,parseHermesToolArgs,type HermesToolName,type HermesToolPort} from "./hermes-tools.ts";
 import type {AgentTaskState} from "./task-state.ts";
+import {agentPromptObservations} from "./hermes-observation-prompt.ts";
 
 export type AgentObservation={tool:HermesToolName;ok:boolean;data:unknown};
 export type AgentAction={name:HermesToolName;args:{productId?:string;orderId?:string;query:string}};
@@ -64,7 +65,7 @@ export async function decideHermesAction(input:{
     requiredConditions:input.plan.requiredConditions.slice(0,8)}}:{}),
   previous_task:input.task?{kind:input.task.kind,phase:input.task.phase,pendingQuestion:input.task.pendingQuestion,displayedProductIds:input.task.displayedProductIds.slice(0,8)}:null,
   confirmed_preferences:input.memories.slice(0,3).map(m=>({key:m.key,value:m.value})),
-  observed_tools:observations.slice(0,HERMES_TOOL_LIMIT),remaining_calls:HERMES_TOOL_LIMIT-observations.length};
+  observed_tools:agentPromptObservations(observations),remaining_calls:HERMES_TOOL_LIMIT-observations.length};
  try{
   const response=await input.provider.chat([{role:"system",content:system},{role:"user",content:JSON.stringify(details)}],
    defs,{signal:AbortSignal.timeout(Math.min(18000,remaining))});
