@@ -351,11 +351,22 @@ export function createPersistentResearchGraph(
      const started=performance.now();
      const researchResult={
        ...state.researchResult,datasetVersion:deps.datasetVersion,
-       explanation:groundedResponder&&(!deps.fastResponses||state.intentRoute.kind==="REVIEW_COMPARE")
-         ?await groundedResponder({originalQuestion:state.request.userMessage,
-           ranking:state.researchResult.ranking,evidence:state.evidence,plan:state.shoppingPlan,mode:"RECOMMEND"})
-         :buildGroundedExplanation(state.researchResult.ranking,state.evidence,state.shoppingPlan)
+       // Explicit user order must cite the inspected aspect; avoid a generic model
+       // explanation that can imply a whole-review ranking or unrelated claims.
+       explanation:state.researchResult.reviewSortInfo?
+         buildGroundedExplanation(state.researchResult.ranking,state.evidence,state.shoppingPlan):
+         groundedResponder&&(!deps.fastResponses||state.intentRoute.kind==="REVIEW_COMPARE")
+          ?await groundedResponder({originalQuestion:state.request.userMessage,
+            ranking:state.researchResult.ranking,evidence:state.evidence,plan:state.shoppingPlan,mode:"RECOMMEND"})
+          :buildGroundedExplanation(state.researchResult.ranking,state.evidence,state.shoppingPlan)
      };
+     if(researchResult.reviewSortInfo){
+       const info=researchResult.reviewSortInfo,aspect=info.aspect;
+       const notice=info.status==="VERIFIED_SAMPLE_ORDER"?
+         `확인한 일부 리뷰에서 ‘${aspect}’에 대한 긍정 표현이 있는 원본 리뷰 건수로 비교했어요. 전체 리뷰를 확인한 순위는 아니에요.`:
+         `‘${aspect}’ 긍정 리뷰 순서를 검증하기에 확인된 근거가 부족해요. 순위를 정하지 않고 참고용 상품만 보여드릴게요.`;
+       researchResult.explanation={...researchResult.explanation,text:notice+"\\n\\n"+researchResult.explanation.text};
+     }
      if(researchResult.shoppingPlan){
        const selected=researchResult.ranking.ranked.filter(row=>row.candidate.commerceVerified===true&&(researchResult.explanation.failure||researchResult.explanation.items.some(item=>item.productId===row.candidate.productId&&item.variantId===row.candidate.variantId)));
        researchResult.shoppingPlan={...researchResult.shoppingPlan,lastDisplayedProductIds:[...new Set([...selected,...researchResult.ranking.referenceOnly].map(row=>row.candidate.productId))].slice(0,3)};
