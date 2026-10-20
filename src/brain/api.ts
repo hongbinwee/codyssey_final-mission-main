@@ -12,7 +12,7 @@ import {executionMode} from "./execution-mode.ts";
 export interface BrainGraphPort {
   invoke(input:{actorUserId:string;conversationId:string;requestId:string;clientActionId:string;userMessage:string}):Promise<{
     conversationId:string;messageId:string;ranking:RankingResult;trace:Record<string,number>;
-    shoppingPlan?:ShoppingPlan;agentUi?:WishlistView;shoppingHandoffs?:ShoppingHandoff[];taskState?:AgentTaskState;explanation?:GroundedExplanation;intentKind?:BrainIntentKind;datasetVersion?:string;
+    shoppingPlan?:ShoppingPlan;agentUi?:WishlistView;shoppingHandoffs?:ShoppingHandoff[];reviewSummary?:{productId:string;name:string;sampled:number;totalMatching:number;citations:{sourceId:string;quote:string;sourceKind:"REAL"|"SYNTHETIC";sourceVariantId:string|null}[]};taskState?:AgentTaskState;explanation?:GroundedExplanation;intentKind?:BrainIntentKind;datasetVersion?:string;
   }>;
   getOwnedState(actorUserId:string,conversationId:string):Promise<{values?:Record<string,unknown>}>;
 }
