@@ -6,6 +6,7 @@ on:
       - feature/hermes-agent
     paths:
       - "src/brain/**"
+      - "src/web/**"
       - "src/cart.ts"
       - "src/catalog.ts"
       - "src/orders.ts"
