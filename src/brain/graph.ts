@@ -160,10 +160,11 @@ export function createPersistentResearchGraph(
        ...(noProductKind?{query:recent[0].productName}:{}),category:recent[0].category,
        ...(state.shoppingPlan.category!==recent[0].category?{attributePreferences:[]}:{}),
      }:state.shoppingPlan;
-     let decision:Awaited<ReturnType<typeof runHermesReadLoop>>={calls:[],searched:false,purchases:[],answer:null};
+     let decision:Awaited<ReturnType<typeof runHermesReadLoop>>={calls:[],searched:false,purchases:[],wishlist:[],answer:null,observations:[]};
      try{decision=await runHermesReadLoop(deps.hermes.provider,state.request.userMessage,
        effectivePlan,state.prepared.memories,{
          purchases:()=>recent.length?Promise.resolve(recent):deps.hermes!.history(state.request.actorUserId),
+         ...deps.hermes.toolPorts?.(state.request.actorUserId),
          ...(deps.wishlist?{wishlist:()=>deps.wishlist!(state.request.actorUserId)}:{}),
          search:async()=>{
            fetched=await retrieveTurn(state.request,state.prepared,effectivePlan,deps);
