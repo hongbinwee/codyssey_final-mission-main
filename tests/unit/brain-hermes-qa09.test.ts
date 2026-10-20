@@ -1,13 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {MemorySaver} from "@langchain/langgraph";
 import {parseKrwTenThousandBand} from "../../src/brain/price-band.ts";
 import {rankProducts} from "../../src/brain/personalization.ts";
 import {curateRecommendations} from "../../src/brain/recommendation-strategies.ts";
 import {positiveForAspect,requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "../../src/brain/review-sort.ts";
 import {resolveTurnPlan,retrieveTurn} from "../../src/brain/read-flow.ts";
-import {createPersistentResearchGraph} from "../../src/brain/graph.ts";
 import type {EvidenceRecord,ProductCandidate} from "../../src/brain/contracts.ts";
 import type {ResearchDeps} from "../../src/brain/read-flow.ts";
 
@@ -96,7 +94,7 @@ test("QA09 insufficient sample cannot masquerade as verified ranked, relevance o
 });
 test("QA09 ordinary recommendation keeps its personalized sorting and cart affinity",()=>{
  const {products,reviews}=fixture();
- const ranked=rankProducts(products,reviews,{...plan(),reviewSortAspect:undefined},[]);
+ const ranked=rankProducts(products,reviews,plan(),[]);
  const personalized=curateRecommendations(ranked,{cartProductIds:["moist"],wishlistProductIds:[]});
  assert.equal(personalized.ranked[0].candidate.productId,"moist");
 });
