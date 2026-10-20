@@ -11,6 +11,7 @@ import type {PlanExtraction,ShoppingPlan} from "./shopping-plan.ts";
 import {resolveShoppingPlan} from "./shopping-plan.ts";
 import {parseKrwTenThousandBand} from "./price-band.ts";
 import {isReviewSortCancelled,requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "./review-sort.ts";
+import {requestedPriceSort,isPriceSortOnly,isPriceSortCancelled,sortByVerifiedTotal} from "./price-sort.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {WishlistItem,WishlistView} from "./wishlist-task.ts";
 import type {ShoppingHandoff} from "./shopping-handoff.ts";
@@ -96,9 +97,19 @@ export async function prepareTurn(req:Request,deps:ResearchDeps):Promise<Prepare
  if(memories.some(m=>m.userId!==req.actorUserId))throw new Error("cross-tenant memory response");
  return {messageId,memories,startedAt:t0,memoryMs:performance.now()-t0};
 }
+function resolveSortPlan(message:string,plan:ShoppingPlan,previous:ShoppingPlan|null|undefined,newTask=false):ShoppingPlan{
+ const price=requestedPriceSort(message),aspect=requestedPositiveReviewSort(message);
+ const cancelled=isReviewSortCancelled(message)||isPriceSortCancelled(message)||
+  /^(?:그냥\s*추천(?:해)?\s*줘|정렬(?:\s*기준)?(?:은|는|을|를)?\s*(?:상관없|취소|해제|초기화|없애))/.test(message.trim())||
+  /평점\s*(?:낮은|높은|많은|좋은)?\s*순/.test(message);
+ // A newly stated (non-cancelled) criterion replaces the previous criterion.
+ return {...plan,priceSortOrder:price??(!aspect&&!cancelled&&!newTask?previous?.priceSortOrder:undefined),
+  reviewSortAspect:price?undefined:aspect??(!cancelled&&!newTask?previous?.reviewSortAspect:undefined)};
+}
 export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous:ShoppingPlan|null|undefined,deps:ResearchDeps):Promise<ShoppingPlan>{
  const trimmed=req.userMessage.trim();
- if(deps.clarifyBeforeSearch){const answered=interviewAnswer(trimmed,previous??undefined);if(answered)return answered;}
+ if(previous&&isPriceSortOnly(trimmed))return resolveSortPlan(trimmed,{...previous,revision:previous.revision+1},previous);
+ if(deps.clarifyBeforeSearch&&!requestedPriceSort(trimmed)&&!requestedPositiveReviewSort(trimmed)){const answered=interviewAnswer(trimmed,previous??undefined);if(answered)return resolveSortPlan(req.userMessage,answered,previous,answered.query!==previous?.query);}
  const last=previous?.lastDisplayedProductIds??[];
  const excludeOne=last.find(id=>trimmed===`이 상품 제외: ${id}`);
  const excludeAll=trimmed==="다른 상품 보기"||trimmed==="다른 제품 보기"||trimmed==="추천 상품 전부 제외";
@@ -111,12 +122,9 @@ export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous
  const explicitBand=parseKrwTenThousandBand(req.userMessage);
  if(explicitBand)plan={...plan,...explicitBand};
  else if(intent.budgetMode==="SET")plan={...plan,minTotalWon:undefined};
- const requestedAspect=requestedPositiveReviewSort(req.userMessage);
- const cleared=isReviewSortCancelled(req.userMessage)||
-  /(?:가격|평점)\s*(?:낮은|높은|많은|좋은)?\s*순/.test(req.userMessage);
- const changedTask=intent.queryMode==="SET"&&previous&&plan.query!==previous.query;
- plan={...plan,...(requestedAspect&&!cleared?{reviewSortAspect:requestedAspect}:
-   !cleared&&!changedTask&&previous?.reviewSortAspect?{reviewSortAspect:previous.reviewSortAspect}:{reviewSortAspect:undefined})};
+ const changedTask=!!previous&&(intent.queryMode==="SET"||plan.query!==previous.query||
+   !!plan.category&&plan.category!==previous.category);
+ plan=resolveSortPlan(req.userMessage,plan,previous,changedTask);
  if(!plan.query||plan.query.length>200)throw new Error("invalid shopping plan");
  return plan;
 }
@@ -163,7 +171,8 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
  const reviewSort=plan.reviewSortAspect?
    sortByVerifiedPositiveReviews(baseRanking,fetched.evidence,plan.reviewSortAspect):null;
  // Explicit user order outranks cart/wishlist, recommendation slots and generic personalized cost scores.
- const ranking=reviewSort?reviewSort.ranking:deps.activity?curateRecommendations(baseRanking,activity):baseRanking;
+ const ranking=plan.priceSortOrder?sortByVerifiedTotal(baseRanking,plan.priceSortOrder):
+   reviewSort?reviewSort.ranking:deps.activity?curateRecommendations(baseRanking,activity):baseRanking;
  const conditionOnlyReferences=ranking.rejected.filter(item=>
    isConditionOnlySyntheticReference(item,plan.requiredConditions,fetched.evidence));
  if(conditionOnlyReferences.length){

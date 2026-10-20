@@ -400,7 +400,7 @@ export function createPersistentResearchGraph(
        ...state.researchResult,datasetVersion:deps.datasetVersion,
        // Explicit user order must cite the inspected aspect; avoid a generic model
        // explanation that can imply a whole-review ranking or unrelated claims.
-       explanation:state.researchResult.reviewSortInfo?
+       explanation:state.researchResult.reviewSortInfo||state.shoppingPlan.priceSortOrder?
          buildGroundedExplanation(state.researchResult.ranking,state.evidence,state.shoppingPlan):
          groundedResponder&&(!deps.fastResponses||state.intentRoute.kind==="REVIEW_COMPARE")
           ?await groundedResponder({originalQuestion:state.request.userMessage,

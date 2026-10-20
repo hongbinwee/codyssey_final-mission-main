@@ -2,7 +2,7 @@ import type {InterviewState} from './interview.ts';
 import type {PreferenceKey,PreferenceValue,ShoppingContext} from "./contracts.ts";
 
 /** Task-local context, separate from confirmed cross-session user memories. */
-export interface ShoppingPlan extends ShoppingContext { query:string; revision:number;interview?:InterviewState; excludedProductIds?:string[];lastDisplayedProductIds?:string[];reviewSortAspect?:string }
+export interface ShoppingPlan extends ShoppingContext { query:string; revision:number;interview?:InterviewState; excludedProductIds?:string[];lastDisplayedProductIds?:string[];reviewSortAspect?:string;priceSortOrder?:"ASC"|"DESC" }
 export interface PlanOperations {
   queryMode?:"KEEP"|"SET";
   budgetMode?:"KEEP"|"SET"|"CLEAR";

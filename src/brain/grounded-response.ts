@@ -1,3 +1,4 @@
+import {verifiedPriceTotal} from "./price-sort.ts";
 import {positiveForAspect} from "./review-sort.ts";
 import {MAX_DISPLAY_PRODUCTS,type Aspect,type EvidenceRecord,type ProductCandidate,type RankingResult} from "./contracts.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
@@ -75,6 +76,11 @@ export function buildGroundedExplanation(ranking:RankingResult,evidence:Evidence
      name:safeName(candidate.productName,candidate.productId),totalPriceWon:price,
      evidenceIds:[...new Set(ids)].slice(0,12),indicators};
  });
+ const direction=plan.priceSortOrder;
+ const totals=ranking.ranked.map(row=>verifiedPriceTotal(row.candidate));
+ const priceOrderVerified=direction&&totals.length>0&&totals.every((total,i)=>total!==null&&
+  (i===0||(direction==="ASC"?totals[i-1]!<=total:totals[i-1]!>=total)));
+ const orderNotice=priceOrderVerified?`배송비 포함 합계가 ${direction==="ASC"?"낮은":"높은"} 순으로 정렬했어요. `:"";
  const rankingNotes=rankedRows.flatMap(x=>x.limitations??[]);
  const publicNotes=[
    ...(rankingNotes.some(note=>note==="rating_unverified"||note==="whole_review_count_unverified")?
@@ -86,7 +92,7 @@ export function buildGroundedExplanation(ranking:RankingResult,evidence:Evidence
    ...rankingNotes.filter(note=>!/^([a-z][a-z0-9_]*)(?::.*)?$/i.test(note))
  ];
  return {kind:"VERIFIED_CANDIDATES",items,
-     text:`${plan.maxTotalWon===null?'':budget+' 안에서 '}근거를 확인한 ${items.length}개 상품을 골랐어요.${criteria?' '+criteria:''}`,
+     text:`${orderNotice}${plan.maxTotalWon===null?'':budget+' 안에서 '}근거를 확인한 ${items.length}개 상품을 골랐어요.${criteria?' '+criteria:''}`,
    limitations:[...new Set([
      ...(referenceCount?["요청 조건에 맞는지 확인하지 못한 상품 정보가 있어요."]:[]),
      ...rankingNotes,
