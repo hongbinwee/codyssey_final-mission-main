@@ -68,7 +68,7 @@ export async function decideHermesAction(input:{
   observed_tools:agentPromptObservations(observations),remaining_calls:HERMES_TOOL_LIMIT-observations.length};
  try{
   const response=await input.provider.chat([{role:"system",content:system},{role:"user",content:JSON.stringify(details)}],
-   defs,{signal:AbortSignal.timeout(Math.min(18000,remaining))});
+   defs,{signal:AbortSignal.timeout(Math.min(18000,remaining)),parallelToolCalls:false});
   const calls=response.tool_calls??[];
   if(!calls.length)return {kind:"FINISH",reason:"DONE",...(safeQuestion(response.content)?{question:safeQuestion(response.content)}:{})};
   if(calls.length!==1)return {kind:"FINISH",reason:"INVALID"};
@@ -116,61 +116,165 @@ export async function performHermesRead(action:AgentAction,tools:HermesToolPort)
 }
 export function readAgentRoute(message:string):boolean{
  const m=message.trim();
+ const orderInquiry=/(?:최근|지난|이전|내|제)?\s*주문\s*(?:(?:은|이|의|을|를)\s*)?(?:내역|조회|상태|목록|어디|언제|도착|배송|오|와|받|상세|구성|상품|금액|총액)/.test(m);
  // Writes and sensitive payment changes remain on the existing guarded CS/UI path.
- if(/취소|환불|반품|교환|결제|삭제|수정|해제|담아|빼줘|장바구니에\s*넣/.test(m))return false;
+ if(/취소|환불|반품|교환|결제|삭제|수정|해제|담아(?!\s*(?:둔|놓은))|빼줘|장바구니에\s*넣/.test(m))return false;
  // Requests that compare or recommend products still need the planned agent path.
- if(/추천|비교|대체|다른\\s*(?:상품|제품)|상품.*찾|제품.*찾/.test(m))return false;
+ if(/추천|비교|대체|다른\s*(?:상품|제품)|상품.*찾|제품.*찾/.test(m))return false;
  // Delivery requirements of new products are not tracking an existing order.
  if(/배송비|무료배송|배송\s*(?:빠른|좋은|가능한|조건|상품|제품|추천)|(?:상품|제품).{0,18}(?:추천|찾아|비교)/.test(m)&&
-   !/(?:내|제)\s*주문|주문\s*(?:조회|상태|어디)|택배\s*(?:조회|추적|상태)/.test(m))return false;
- return /(?:장바구니|카트|주문\s*(?:내역|조회|상태|목록|어디)|내\s*주문|제\s*주문|배송|택배|운송장)/.test(m);
+   !/(?:내|제)\s*주문|주문\s*(?:조회|상태|어디)|택배\s*(?:조회|추적|상태)/.test(m)&&!orderInquiry)return false;
+ return orderInquiry||/(?:장바구니|카트|내\s*주문|제\s*주문|배송|택배|운송장)/.test(m);
 }
 /** Canonical messages originate exclusively from verified Tool observations. */
 export function summarizeAgentObservations(observations:readonly AgentObservation[],question?:string):string{
- const valid=observations.filter(x=>x.ok);
+ const valid=observations.filter(x=>x.ok).slice(0,HERMES_TOOL_LIMIT);
  if(!valid.length)return question??"지금은 확인된 조회 결과가 없어요. 확인할 상품이나 주문 정보를 조금 더 알려주세요.";
- const recent=valid.at(-1)!;
- const data=recent.data as Record<string,any>;
- if(recent.tool==="get_cart"){
-  const cart=data.cart as {items:Array<{productName:string;quantity:number}>;totalWon:number};
-  if(!cart?.items.length)return "현재 장바구니가 비어 있어요.";
-  return "장바구니에 "+cart.items.slice(0,5).map(p=>`${p.productName} ${p.quantity}개`).join(", ")+"가 있어요. 현재 합계는 "+cart.totalWon.toLocaleString("ko-KR")+"원이에요.";
+ const label=(value:unknown,limit=140):string=>typeof value==="string"?value.replace(/\s+/g," ").trim().slice(0,limit):"";
+ const money=(value:unknown):string=>typeof value==="number"&&Number.isSafeInteger(value)&&value>=0?
+  value.toLocaleString("ko-KR")+"원":"";
+ const itemComposition=(value:unknown):string=>{
+  if(!Array.isArray(value))return "";
+  return value.slice(0,5).map((raw:unknown)=>{
+   if(!raw||typeof raw!=="object")return "";
+   const item=raw as Record<string,unknown>,name=label(item.productName,80);
+   if(!name)return "";
+   const quantity=typeof item.quantity==="number"&&Number.isSafeInteger(item.quantity)&&item.quantity>0?
+    " "+item.quantity+"개":"";
+   return name+quantity;
+  }).filter(Boolean).join(", ");
+ };
+ type OrderSummary={itemSummary?:string;composition?:string;status?:string;totalWon?:string;
+  shippingStatus?:string;shippingMessage?:string;detailed?:boolean};
+ const orderRecords=new Map<string,OrderSummary>();
+ const recordFor=(idValue:unknown,fallback:string):{key:string;record:OrderSummary}=>{
+  const id=label(idValue,128),key=id?"order:"+id:fallback;
+  let record=orderRecords.get(key);
+  if(!record){record={};orderRecords.set(key,record);}
+  return {key,record};
+ };
+ let emptyOrderList=false,missingOrderDetail=false;
+ for(const [observationIndex,observation] of valid.entries()){
+  if(!observation.data||typeof observation.data!=="object")continue;
+  const data=observation.data as Record<string,any>;
+  if(observation.tool==="get_orders"){
+   const rows=Array.isArray(data.orders?.orders)?data.orders.orders as unknown[]:null;
+   if(rows&&rows.length===0)emptyOrderList=true;
+   for(const [rowIndex,raw] of (rows??[]).slice(0,3).entries()){
+    if(!raw||typeof raw!=="object")continue;
+    const row=raw as Record<string,unknown>;
+    const result=recordFor(row.orderId,"order-list:"+observationIndex+":"+rowIndex);
+    const record=result.record;
+    record.itemSummary=label(row.itemSummary,100)||record.itemSummary;
+    record.status=label(row.status,60)||record.status;
+    record.totalWon=money(row.totalWon)||record.totalWon;
+    record.shippingStatus=label(row.shippingStatus,60)||record.shippingStatus;
+   }
+  }else if(observation.tool==="get_order"){
+   const order=data.order as Record<string,unknown>|null;
+   if(!order||typeof order!=="object"){missingOrderDetail=true;continue;}
+   const result=recordFor(order.orderId??data.requestedOrderId,"order-detail:"+observationIndex);
+   const record=result.record;
+   record.detailed=true;
+   record.composition=itemComposition(order.items)||record.composition;
+   record.status=label(order.status,60)||record.status;
+   record.totalWon=money(order.totalWon)||record.totalWon;
+   record.shippingStatus=label(order.shippingStatus,60)||record.shippingStatus;
+  }else if(observation.tool==="get_shipping_status"){
+   const ship=data.shipping as Record<string,unknown>|null;
+   const result=recordFor(ship?.orderId??data.requestedOrderId,"shipping:"+observationIndex);
+   const record=result.record;
+   if(!ship||typeof ship!=="object"||ship.information==="NO_INFORMATION"){
+    record.shippingMessage="해당 주문의 배송 정보가 아직 등록되지 않았어요.";
+   }else if(ship.information==="AVAILABLE"){
+    const status=label(ship.status,60)||"정보 없음",arrival=label(ship.estimatedArrivalAt,80);
+    record.shippingMessage="배송 상태는 "+status+"예요."+(arrival?" 확인된 도착 예정: "+arrival:"");
+   }else record.shippingMessage="배송 정보를 확인하지 못했어요.";
+  }
  }
- if(recent.tool==="get_orders"){
-  const orders=data.orders?.orders as Array<{itemSummary:string;status:string;shippingStatus:string|null}>;
-  if(!orders?.length)return "확인된 주문 내역이 없어요.";
-  return "최근 주문: "+orders.slice(0,3).map(o=>`${o.itemSummary} · ${o.status}${o.shippingStatus?" · "+o.shippingStatus:""}`).join(" / ")+"예요.";
+ const facts=new Map<string,string>();
+ const addFact=(key:string,value:string)=>{
+  const text=label(value,700);
+  if(text)facts.set(key,text);
+ };
+ for(const [observationIndex,observation] of valid.entries()){
+  if(!observation.data||typeof observation.data!=="object")continue;
+  const data=observation.data as Record<string,any>;
+  if(observation.tool==="get_cart"){
+   const cart=data.cart as {items?:unknown[];totalWon?:unknown}|null;
+   if(!cart||!Array.isArray(cart.items))continue;
+   if(!cart.items.length){addFact("cart","현재 장바구니가 비어 있어요.");continue;}
+   const items=cart.items.slice(0,5).map(raw=>{
+    if(!raw||typeof raw!=="object")return "";
+    const item=raw as Record<string,unknown>,name=label(item.productName,80);
+    if(!name)return "";
+    const quantity=typeof item.quantity==="number"&&Number.isSafeInteger(item.quantity)&&item.quantity>0?
+     " "+item.quantity+"개":"";
+    return name+quantity;
+   }).filter(Boolean);
+   const total=money(cart.totalWon);
+   let text=items.length?"장바구니에 "+items.join(", ")+"가 있어요.":"장바구니 상품 정보를 확인했어요.";
+   if(total)text+=" 현재 합계는 "+total+"이에요.";
+   const unavailable=cart.items.slice(0,5).flatMap(raw=>{
+    if(!raw||typeof raw!=="object")return [];
+    const item=raw as Record<string,unknown>,name=label(item.productName,80);
+    const state=item.availability==="SOLD_OUT"?"품절":item.availability==="UNAVAILABLE"?"판매 중단":"";
+    return name&&state?[name+" "+state]:[];
+   });
+   if(unavailable.length)text+=" 장바구니 상품 상태: "+unavailable.join(", ")+".";
+   addFact("cart",text);
+  }else if(observation.tool==="get_wishlist"){
+   const list=data.saved_products as Array<{name?:unknown}>|undefined;
+   if(Array.isArray(list))addFact("wishlist",list.length?
+    "찜 목록에서 "+list.slice(0,4).map(x=>label(x?.name,80)).filter(Boolean).join(", ")+"을(를) 확인했어요.":
+    "찜한 상품이 없어요.");
+  }else if(observation.tool==="get_product_detail"){
+   const item=data.product as Record<string,any>|null;
+   if(!item){addFact("product:"+observationIndex,"상품 정보를 확인하지 못했어요.");continue;}
+   const name=label(item.name,100);
+   if(!name)continue;
+   const prices=Array.isArray(item.variants)&&item.active?item.variants.filter((v:Record<string,unknown>)=>
+    v?.availability==="AVAILABLE"&&typeof v.priceWon==="number"&&Number.isSafeInteger(v.priceWon)&&v.priceWon>=0)
+    .map((v:Record<string,number>)=>v.priceWon):[];
+   if(!prices.length){addFact("product:"+ (label(data.requestedProductId,128)||name),
+    "확인된 "+name+"의 구매 가능한 옵션이 현재 없어요.");continue;}
+   const min=Math.min(...prices),shipping=money(item.shippingFeeWon);
+   addFact("product:"+(label(data.requestedProductId,128)||name),
+    name+"의 현재 판매 가능한 옵션 최저가는 "+money(min)+"이고, "+
+    (shipping?"배송비는 "+shipping:"배송비 정보는 확인되지 않았어요.")+" 최종 금액은 상품 상세에서 확인해 주세요.");
+  }else if(observation.tool==="get_product_reviews"){
+   const review=data.review_evidence as {reviews?:Array<{rating?:unknown;body?:unknown}>;totalMatching?:unknown}|undefined;
+   if(Array.isArray(review?.reviews))addFact("reviews:"+(label(data.requestedProductId,128)||observationIndex),
+    review.reviews.length?"관련 리뷰 "+(typeof review.totalMatching==="number"?review.totalMatching:review.reviews.length)+
+     "건 중 확인한 "+review.reviews.length+"건에서 확인된 내용: "+
+     review.reviews.slice(0,2).map(r=>label(r?.body,110)).filter(Boolean).join(" / "):"관련 리뷰를 찾지 못했어요.");
+  }else if(observation.tool==="get_purchase_history"){
+   const history=data.purchases as Array<{productName?:unknown}>|undefined;
+   if(Array.isArray(history))addFact("purchase-history",history.length?
+    "구매 이력에서 "+history.slice(0,3).map(x=>label(x?.productName,80)).filter(Boolean).join(", ")+"을(를) 확인했어요.":
+    "확인된 구매 이력이 없어요.");
+  }
  }
- if(recent.tool==="get_shipping_status"){
-  const ship=data.shipping as {status:string|null;information:string;estimatedArrivalAt:string|null};
-  if(!ship||ship.information==="NO_INFORMATION")return "해당 주문의 배송 정보가 아직 등록되지 않았어요.";
-  return "배송 상태는 "+(ship.status??"정보 없음")+"예요."+(ship.estimatedArrivalAt?" 확인된 도착 예정: "+ship.estimatedArrivalAt:"");
+ if(!orderRecords.size&&emptyOrderList)addFact("orders-empty","확인된 주문 내역이 없어요.");
+ if(missingOrderDetail)addFact("order-missing","해당 주문 정보를 확인하지 못했어요.");
+ let orderCount=0;
+ for(const [key,record] of orderRecords){
+  if(orderCount>=3)break;
+  const parts:string[]=[];
+  const composition=record.composition||record.itemSummary;
+  if(composition)parts.push((record.detailed?"주문 상품: ":"최근 주문: ")+composition);
+  if(record.status)parts.push("주문 상태는 "+record.status+"예요.");
+  if(record.totalWon)parts.push("주문 금액은 "+record.totalWon+"이에요.");
+  if(record.shippingMessage)parts.push(record.shippingMessage);
+  else if(record.shippingStatus)parts.push("배송 상태는 "+record.shippingStatus+"예요.");
+  if(parts.length)addFact("order-summary:"+key,parts.join(" "));
+  orderCount++;
  }
- if(recent.tool==="get_order"){
-  const order=data.order as {status:string;totalWon:number;shippingStatus:string|null};
-  if(!order)return "해당 주문 정보를 확인하지 못했어요.";
-  return "주문 상태는 "+order.status+"이고, 주문 금액은 "+order.totalWon.toLocaleString("ko-KR")+"원이에요."+(order.shippingStatus?" 배송 상태는 "+order.shippingStatus+"예요.": "");
+ let output="";
+ for(const fact of facts.values()){
+  const next=output?output+" "+fact:fact;
+  if(next.length>1800)break;
+  output=next;
  }
- if(recent.tool==="get_wishlist"){
-  const list=data.saved_products as Array<{name:string}>;
-  return list?.length?"찜 목록에서 "+list.slice(0,4).map(x=>x.name).join(", ")+"을(를) 확인했어요.":"찜한 상품이 없어요.";
- }
- if(recent.tool==="get_product_detail"){
-  const item=data.product as {name:string;active:boolean;variants:Array<{priceWon:number;availability:string}>;shippingFeeWon:number};
-  if(!item)return "상품 정보를 확인하지 못했어요.";
-  const prices=item.active?item.variants.filter(v=>v.availability==="AVAILABLE"&&Number.isSafeInteger(v.priceWon)&&v.priceWon>=0).map(v=>v.priceWon):[];
-  if(!prices.length)return "확인된 "+item.name+"의 구매 가능한 옵션이 현재 없어요.";
-  const min=Math.min(...prices);
-  return item.name+"의 현재 판매 가능한 옵션 최저가는 "+min.toLocaleString("ko-KR")+"원이고, 배송비는 "+
-    item.shippingFeeWon.toLocaleString("ko-KR")+"원이에요. 최종 금액은 상품 상세에서 확인해 주세요.";
- }
- if(recent.tool==="get_product_reviews"){
-  const review=data.review_evidence as {reviews:Array<{rating:number;body:string}>;totalMatching:number};
-  return review?.reviews.length?"관련 리뷰 "+review.totalMatching+"건 중 확인한 "+review.reviews.length+"건에서 확인된 내용: "+review.reviews.slice(0,2).map(r=>r.body.slice(0,110)).join(" / "):"관련 리뷰를 찾지 못했어요.";
- }
- if(recent.tool==="get_purchase_history"){
-  const history=data.purchases as Array<{productName:string}>;
-  return history?.length?"구매 이력에서 "+history.slice(0,3).map(x=>x.productName).join(", ")+"을(를) 확인했어요.":"확인된 구매 이력이 없어요.";
- }
- return question??"조회 결과를 확인했어요.";
+ return output||"조회 결과를 확인했어요.";
 }

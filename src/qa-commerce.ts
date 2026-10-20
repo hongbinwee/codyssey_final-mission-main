@@ -12,7 +12,12 @@ const SYSTEM_PROMPT_IDENTITY = {
 
 export function qaCommerceIdentity(env:Record<string,string|undefined>) {
   const profile=env.QA_ENVIRONMENT;
-  if(profile!==undefined&&profile!=="system-prompt")throw Error("invalid QA_ENVIRONMENT");
+  if(profile!==undefined&&profile!=="system-prompt"&&profile!=="hermes-h6")throw Error("invalid QA_ENVIRONMENT");
+  if(profile==="hermes-h6"){
+    if(env.COMMERCE_CATALOG_SOURCE!=="test_items2")throw Error("invalid Hermes H6 QA profile");
+    return {port:15442,database:"toss_hermes_h6_20261020",role:"commerce_hermes_h6",
+      brainDatabase:"brain_hermes_h6_20261020",brainRole:"brain_hermes_h6"};
+  }
   if(profile==="system-prompt"){
     if(env.COMMERCE_CATALOG_SOURCE!=="test_items2")throw Error("invalid system-prompt QA profile");
     return SYSTEM_PROMPT_IDENTITY;
@@ -53,6 +58,10 @@ export function qaCommerceConnectedIdentityMatches(
 }
 
 export function qaCommerceEnabled(env: Record<string, string | undefined>): boolean {
+  if(env.QA_ENVIRONMENT==="hermes-h6"&&
+      (env.QA_AUTH_ENABLED!=="1"||env.QA_COMMERCE_ENABLED!=="1"||env.HERMES_QA_ENABLED!=="1"||
+       env.COMMERCE_CATALOG_SOURCE!=="test_items2"||env.QA_REUSE_EXISTING_BRAIN!==undefined))
+    throw Error("invalid Hermes H6 QA profile");
   if(env.QA_ENVIRONMENT!=="system-prompt"&&(env.QA_COMMERCE_ENABLED===undefined||env.QA_COMMERCE_ENABLED==="0"))return false;
   const identity=qaCommerceIdentity(env);
   if(env.QA_ENVIRONMENT==="system-prompt"&&
@@ -77,7 +86,9 @@ export function qaCommerceRequestAllowed(method: string, path: string): boolean 
 }
 
 /** Only enabled by HERMES_QA_ENABLED on an already verified isolated QA database. */
-export function hermesQaRequestAllowed(method:string,path:string):boolean {
+export function hermesQaRequestAllowed(method:string,path:string,env:Record<string,string|undefined>={}):boolean {
+ if(env.QA_ENVIRONMENT==="hermes-h6"&&env.HERMES_QA_ENABLED==="1"&&qaCommerceEnabled(env)&&
+   method==="POST"&&/^\/api\/orders\/[^/]+\/cancel\/(?:approve|execute)$/.test(path))return true;
  return (method==="GET"&&(/^\/api\/orders(?:\/[^/]+(?:\/shipping|\/cancel\/(?:eligibility|quote))?)?$/.test(path)||
    path==="/api/checkout/quote"))||
   (method==="POST"&&(path==="/api/checkout/quote"||path==="/api/checkout/confirm"));

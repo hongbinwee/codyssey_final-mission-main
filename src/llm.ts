@@ -23,7 +23,7 @@ export type ChatResponse = {
 };
 export interface Provider {
   name: string;
-  chat(messages: ChatMsg[], tools: unknown[], options?: { signal?: AbortSignal }): Promise<ChatResponse>;
+  chat(messages: ChatMsg[], tools: unknown[], options?: { signal?: AbortSignal; parallelToolCalls?: boolean }): Promise<ChatResponse>;
 }
 
 function responsesInput(messages: ChatMsg[]): unknown[] {
@@ -276,7 +276,7 @@ export function liveProvider(modelOverride?:string, overrides:LiveProviderOption
                 max_tokens: 8192,
                 ...(nativeMessages?.system ? { system: nativeMessages.system } : {}),
                 messages: nativeMessages!.messages,
-                ...(tools.length ? { tools: anthropicTools(tools) } : {}),
+                ...(tools.length ? { tools: anthropicTools(tools), ...(options?.parallelToolCalls === false ? { tool_choice: { type: "auto" as const, disable_parallel_tool_use: true } } : {}) } : {}),
                 ...(anthropicThinking === "adaptive" ? {
                   thinking: { type: "adaptive" },
                   output_config: { effort: anthropicEffort },
@@ -286,7 +286,7 @@ export function liveProvider(modelOverride?:string, overrides:LiveProviderOption
             ? {
                 model: model,
                 messages: chatCompletionsMessages(messages),
-                ...(tools.length ? { tools, tool_choice: "auto" as const } : {}),
+                ...(tools.length ? { tools, tool_choice: "auto" as const, ...(options?.parallelToolCalls === false ? { parallel_tool_calls: false } : {}) } : {}),
                 max_tokens: 8192,
               }
             : {
@@ -299,7 +299,7 @@ export function liveProvider(modelOverride?:string, overrides:LiveProviderOption
                   .map((m) => m.content ?? "").join("\n\n"),
                 input: responsesInput(messages),
                 tools: responsesTools(tools),
-                tool_choice: "auto",
+                tool_choice: "auto", ...(tools.length && options?.parallelToolCalls === false ? { parallel_tool_calls: false } : {}),
               };
           res = await fetch(baseUrl + (anthropic ? "/messages" : chatCompletions ? "/chat/completions" : "/responses"), {
             method: "POST",

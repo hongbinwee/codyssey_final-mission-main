@@ -101,9 +101,12 @@ test("H4 model unavailable on order read does not trigger RAG or fake order",asy
  assert.equal(result.trace.hermesToolCalls,0);
 });
 test("tool-policy router distinguishes reads from sensitive writes",()=>{
- for(const m of ["장바구니에 뭐 있어?","내 주문 조회","배송 어디쯤이야","택배 상황 알려줘"])
+ for(const m of ["장바구니에 뭐 있어?","내 주문 조회","배송 어디쯤이야","택배 상황 알려줘",
+   "최근 주문의 상세 구성과 총 주문 금액 보여줘","장바구니에 담아 둔 상품 옵션 조회해줘",
+   "장바구니에 담아놓은 상품 옵션 확인해줘"])
   assert.equal(readAgentRoute(m),true,m);
- for(const m of ["주문 취소해 줘","결제 내역 확인","장바구니에 넣어 줘","반품 진행해",
+ for(const m of ["주문 취소해 줘","결제 내역 확인","장바구니에 넣어 줘","장바구니에 담아줘",
+   "장바구니에 담아 주세요","반품 진행해",
    "무료배송 상품 추천해줘","배송 빠른 이어폰 추천해줘","내 주문 제품 중 다른 상품 추천해줘"])
   assert.equal(readAgentRoute(m),false,m);
 });
@@ -167,4 +170,30 @@ test("H4 product summary uses the cheapest actually available option and explici
  assert.match(text,/14,000원/);
  assert.match(text,/배송비는 3,000원/);
  assert.doesNotMatch(text,/5,000원/);
+});
+
+test("H4 verified summaries combine cart, deduplicated order details and honest shipping; arrival routing stays scoped",()=>{
+ const text=summarizeAgentObservations([
+  {tool:"get_cart",ok:true,data:{cart:{items:[{productId:"product-private-cart",productName:"무선 이어폰",quantity:1,availability:"SOLD_OUT"}],totalWon:22000}}},
+  {tool:"get_orders",ok:true,data:{orders:{orders:[
+   {orderId:"order-private-42",itemSummary:"무선 이어폰 외 1건",status:"PAID",totalWon:65000,shippingStatus:"IN_TRANSIT"},
+   {orderId:"order-private-43",itemSummary:"키보드",status:"SHIPPED",totalWon:40000,shippingStatus:"IN_TRANSIT"}
+  ],hasMore:false}}},
+  {tool:"get_order",ok:true,data:{requestedOrderId:"order-private-42",order:{orderId:"order-private-42",status:"PAID",totalWon:65000,shippingStatus:"IN_TRANSIT",items:[
+   {productId:"product-private-order",productName:"무선 이어폰",quantity:1},
+   {productId:"product-private-case",productName:"케이스",quantity:2}
+  ]}}},
+  {tool:"get_shipping_status",ok:true,data:{requestedOrderId:"order-private-42",shipping:{orderId:"order-private-42",information:"NO_INFORMATION",status:null,estimatedArrivalAt:null}}}
+ ],"모델이 생성한 최종 답변은 관측 사실이 아니에요.");
+ assert.match(text,/장바구니에 무선 이어폰 1개가 있어요/);
+ assert.match(text,/현재 합계는 22,000원/);
+ assert.match(text,/장바구니 상품 상태: 무선 이어폰 품절/);
+ assert.match(text,/주문 상품: 무선 이어폰 1개, 케이스 2개/);
+ assert.match(text,/키보드/);
+ assert.match(text,/배송 정보가 아직 등록되지 않았어요/);
+ assert.equal(text.split("주문 상품: ").length-1,1);
+ assert.doesNotMatch(text,/무선 이어폰 외 1건|order-private|product-private|모델이 생성한 최종 답변/);
+ assert.equal(readAgentRoute("주문은 언제 도착해?"),true);
+ for(const message of ["배송 빠른 제품 추천해줘","무료배송 상품 추천해줘","다른 상품 배송은 언제야?"])
+  assert.equal(readAgentRoute(message),false,message);
 });

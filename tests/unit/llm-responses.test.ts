@@ -389,3 +389,34 @@ test("scripted and read-only stub providers keep the chat contract without fetch
   const stub = await stubProvider().chat([{ role: "user", content: "apple" }], []);
   assert.equal(stub.tool_calls?.[0].name, "search_products");
 });
+
+test("Anthropic serial tool mode is opt-in through tool_choice", async () => {
+  Object.assign(config, { llmApiFormat: "anthropic_messages", llmModel: "claude-sonnet-4" });
+  const requests = capture([Response.json({ id: "msg_serial", type: "message", role: "assistant",
+    model: "claude-sonnet-4-6", content: [{ type: "text", text: "Ready" }],
+    stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } })]);
+  await liveProvider().chat([{ role: "user", content: "Read one thing" }], [{
+    type: "function", function: { name: "lookup", description: "Read one thing",
+      parameters: { type: "object", properties: {} } },
+  }], { parallelToolCalls: false });
+  assert.deepEqual(requests[0].body.tool_choice, {
+    type: "auto", disable_parallel_tool_use: true,
+  });
+});
+
+test("Chat Completions serial tool mode is opt-in", async () => {
+  Object.assign(config, { llmApiFormat: "chat_completions" });
+  const requests = capture([Response.json({ choices: [{ message: { role: "assistant", content: "Ready" } }] })]);
+  await liveProvider().chat([{ role: "user", content: "Read one thing" }], [{
+    type: "function", function: { name: "lookup", parameters: { type: "object", properties: {} } },
+  }], { parallelToolCalls: false });
+  assert.equal(requests[0].body.parallel_tool_calls, false);
+});
+
+test("Responses serial tool mode is opt-in", async () => {
+  const requests = capture([reply(textOutput)]);
+  await liveProvider().chat([{ role: "user", content: "Read one thing" }], [{
+    type: "function", function: { name: "lookup", parameters: { type: "object", properties: {} } },
+  }], { parallelToolCalls: false });
+  assert.equal(requests[0].body.parallel_tool_calls, false);
+});

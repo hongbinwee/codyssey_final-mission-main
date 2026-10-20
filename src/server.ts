@@ -372,12 +372,12 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
       // 아래부터는 인증 필요
       const ctx = await requestContext(req);
       if (!ctx) return json(res, 401, { ok: false, error: { code: "UNAUTHENTICATED", message: "로그인이 필요합니다" } });
-      if (!catalogRequestAllowed(source, req.method ?? "", p) && !(qaCommerce && qaCommerceRequestAllowed(req.method ?? "", p)) && !(hermesBridge && hermesQaRequestAllowed(req.method ?? "",p)))
+      if (!catalogRequestAllowed(source, req.method ?? "", p) && !(qaCommerce && qaCommerceRequestAllowed(req.method ?? "", p)) && !(hermesBridge && hermesQaRequestAllowed(req.method ?? "",p,env)))
         return json(res, 403, {ok:false,error:{code:"READ_ONLY_CATALOG",
           message:qaCommerce?"v4 QA에서는 찜·장바구니 저장만 지원하며 주문·결제는 제공하지 않습니다.":"v4 테스트 상품은 시연용 가격·재고이며 장바구니·찜·주문·결제를 제공하지 않습니다."}});
       if(externalCatalog&&!hermesBridge&&req.method!=='GET'&&qaCommerceRequestAllowed(req.method??'',p))
         return json(res,403,{ok:false,error:{code:'CATALOG_WRITES_PAUSED',message:'외부 상품과 로컬 저장소의 정합성 확인 전에는 찜·장바구니 변경을 잠시 지원하지 않습니다.'}});
-      if (qaCommerce && (qaCommerceRequestAllowed(req.method ?? "", p)||hermesBridge&&hermesQaRequestAllowed(req.method ?? "",p)) && req.method !== "GET" &&
+      if (qaCommerce && (qaCommerceRequestAllowed(req.method ?? "", p)||hermesBridge&&hermesQaRequestAllowed(req.method ?? "",p,env)) && req.method !== "GET" &&
           !brainMutationAllowed(req.headers, env.BRAIN_PUBLIC_ORIGIN))
         return json(res,403,{ok:false,error:{code:"CSRF_REJECTED",message:"허용되지 않은 요청 출처"}});
       if (p === "/api/catalog/context" && req.method === "GET")

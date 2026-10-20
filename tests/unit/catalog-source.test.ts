@@ -104,6 +104,9 @@ test('test_items catalog IDs and simulated facts pass through the v4 adapter and
  const respond=createLlmGroundedResponder({chat:async()=>({content:JSON.stringify({sourceKind:'SYNTHETIC',
   productId:product.id,variantId:variant.id,sourceId:review.id,quote:review.body})})});
  const answer=await respond({originalQuestion:request.userMessage,ranking:fetched.result.ranking,evidence:fetched.evidence,plan});
- assert.equal(answer.kind,'REFERENCE_ONLY');assert.match(answer.text,/시연용 가격·재고/);
+ assert.equal(answer.kind,'REFERENCE_ONLY');
+ assert.match(answer.text,/시연 데이터 참고 내용이에요/);
+ assert.match(answer.text,/합성 리뷰 의견이 포함되어 있어요/);
+ assert.match(answer.text,/표시된 가격과 재고는 실제 판매 정보가 아니며 주문·결제할 수 없어요/);
  assert.deepEqual(answer.citations?.map(c=>[c.productId,c.variantId,c.sourceId]),[[product.id,variant.id,review.id]]);
 });
