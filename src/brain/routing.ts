@@ -1,6 +1,7 @@
 import type {ShoppingPlan} from "./shopping-plan.ts";
+import {reviewSummaryIntent} from "./review-summary.ts";
 
-export type BrainIntentKind="GREETING"|"SOCIAL"|"CAPABILITY"|"SHOPPING_SEARCH"|"SHOPPING_FOLLOWUP"|"REVIEW_COMPARE"|"CS_REQUEST"|"UNCERTAIN";
+export type BrainIntentKind="GREETING"|"SOCIAL"|"CAPABILITY"|"SHOPPING_SEARCH"|"SHOPPING_FOLLOWUP"|"REVIEW_COMPARE"|"REVIEW_SUMMARY"|"CS_REQUEST"|"UNCERTAIN";
 export interface BrainRoute {kind:BrainIntentKind;search:boolean;text?:string}
 export const BRAIN_GREETING='안녕하세요! 😊 토스쇼핑 AI Brain이에요.\n\n찾으시는 상품이 있으신가요?\n원하시는 조건과 예산에 맞춰 찾아드릴게요!';
 export const BRAIN_CAPABILITIES='토스쇼핑 AI Brain은 쇼핑 전담 AI 비서예요.\n\n원하는 상품을 찾고, 가격과 조건을 비교하며 확인된 리뷰의 장단점을 정리해 드려요.\n\n대화 중 조건을 바꿀 수 있고, 직접 저장한 선호를 다음 추천에도 활용해요.';
@@ -57,6 +58,7 @@ export function routeBrainMessage(message:string,previous?:ShoppingPlan):BrainRo
   return {kind:"UNCERTAIN",search:false,text:`어떤 상품을 ${useCase[1]} 쓰고 싶으세요?`};
  if(/^(도와줘|도와주세요|뭐|음|글쎄|추천해\s*줘|골라\s*줘|아무거나|그거)$/i.test(text)&&!previous)
   return {kind:"UNCERTAIN",search:false,text:"어떤 상품을 찾으세요? 상품 종류와 대략적인 예산부터 알려주시면 돼요."};
+ if(reviewSummaryIntent(text))return {kind:"REVIEW_SUMMARY",search:false};
  if(/리뷰|후기|장단점|비교/.test(text))return {kind:"REVIEW_COMPARE",search:true};
  if(previous&&(/^(그럼|그러면|그중|그 중|같은|그 제품|이 상품|좀 더|더 |예산|가격|조건|가성비|아까|이전|대신|이번엔|그대로|향|색상|사이즈|별로|맘에)/.test(text)||/^(?:[가-힣\w ]{2,40})(?:으로|로|이 중요해|가 중요해)$/.test(text)))
   return {kind:"SHOPPING_FOLLOWUP",search:true};
