@@ -65,3 +65,10 @@ test("reject malformed checkpoints and do not trust arbitrary LLM task ids",()=>
  assert.deepEqual(cleaned.displayedProductIds,["p1","p2"]);
  assert.equal(cleaned.selectedProductId,undefined);
 });
+
+test("cart task is scoped and cannot inherit previous wishlist selections",()=>{
+ const old=begin();const cart=nextTask(owner,"CART",old);
+ assert.equal(cart.kind,"CART");assert.deepEqual(cart.displayedProductIds,[]);
+ assert.equal(taskForWishlistSelection(cart),undefined);
+ assert.equal(ownedTask(cart,owner)?.kind,"CART");
+});
