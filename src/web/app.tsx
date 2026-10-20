@@ -776,6 +776,11 @@ function App() {
             setAgentOpen(null);
             goto({ name: "product", id, variantId });
           }}
+          onOpenCart={() => {setAgentOpen(null);goto({name:"cart"});}}
+          onOpenCheckout={() => {if(!checkoutEnabled)return;setAgentOpen(null);goto({name:"checkout"});}}
+          onOpenOrders={() => {setAgentOpen(null);goto({name:"orders"});}}
+          onOpenOrder={(id) => {setAgentOpen(null);goto({name:"order",id});}}
+          checkoutEnabled={checkoutEnabled}
           onCartChanged={refreshCart}
           onClose={() => setAgentOpen(null)}
         />
