@@ -66,7 +66,7 @@ test("QA11 preference card stacks field and compact confirm buttons with respons
  assert.match(tsx,/className="brain-preference-actions"/);
  assert.match(css,/\.brain-panel \.brain-preference-save\{[\s\S]*?display:grid/);
  assert.match(css,/\.brain-panel \.brain-preference-field select\{[\s\S]*?min-height:44px/);
- assert.match(css,/\.brain-panel \.brain-preference-actions \.btn\{[\s\S]*?min-height:40px/);
+ assert.match(css,/\.brain-panel \.brain-preference-actions \.btn\{[\s\S]*?min-height:44px/);
  assert.match(css,/@media\(max-width:420px\)\{\s*\.brain-panel \.brain-preference-save/);
  assert.match(css,/flex-wrap:wrap/);
 });
