@@ -132,3 +132,29 @@ test("H4 missing shopping requirement can ask a question without an unnecessary 
  assert.equal(getCounts().retrievals,0);
  assert.match(result.explanation?.text??"",/용도의 이어폰/);
 });
+
+test("H4 agent clarification is checkpointed and a neutral answer resumes the same shopping task",async()=>{
+ const {routeBrainMessage}=await import("../../src/brain/routing.ts");
+ const provider={chat:async(messages:Array<{content?:string|null}>)=>{
+  const data=JSON.parse(messages.at(-1)?.content??"{}");
+  if(data.user_message==="무선 이어폰 추천해줘")return {content:"어떤 상황에서 사용할 이어폰을 찾으세요?"};
+  if(data.user_message==="상관없어요"){
+   if(!data.observed_tools.length)return {content:null,tool_calls:[{id:"s",name:"search_products",arguments:"{}"}]};
+   return {content:"검증 완료"};
+  }
+  return {content:"완료"};
+ }};
+ const {deps,getCounts}=baseDeps(provider);
+ deps.route=routeBrainMessage;
+ const thread=crypto.randomUUID();
+ const graph=createPersistentResearchGraph(deps,new MemorySaver() as never);
+ const first=await graph.invoke(request("무선 이어폰 추천해줘",thread));
+ assert.equal(first.taskState?.kind,"DISCOVERY");
+ assert.equal(first.taskState?.phase,"AWAITING_INPUT");
+ assert.equal(first.taskState?.pendingQuestion,"agent_followup");
+ assert.equal(getCounts().retrievals,0);
+ const second=await graph.invoke(request("상관없어요",thread));
+ assert.equal(getCounts().retrievals,1);
+ assert.equal(second.taskState?.phase,"ACTIVE");
+ assert.equal(second.ranking.ranked[0]?.candidate.productId,"p1");
+});
