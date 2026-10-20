@@ -1877,3 +1877,13 @@ button.cart-thumb { border: 0; padding: 0; cursor: pointer; }
 .brain-panel .brain-price-breakdown .brain-price-total{border-top:1px solid var(--line);margin-top:3px;padding-top:7px}
 .brain-panel .brain-price-breakdown .brain-price-total dd{font-size:16px;line-height:1.35;font-weight:750;color:var(--text)}
 @media(max-width:380px){.brain-panel .brain-price-breakdown>div{align-items:flex-start}.brain-panel .brain-price-breakdown .brain-price-total dd{font-size:15px}}
+
+/* QA10: independent product-review report; never inherits ranking badges. */
+.brain-panel .brain-review-summary{display:grid;gap:12px;min-width:0}
+.brain-panel .brain-review-summary-header b{font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.brain-panel .brain-review-summary-header p{margin:4px 0 0}
+.brain-panel .brain-review-citations summary{cursor:pointer;font-size:12px;font-weight:600;min-height:32px;line-height:32px}
+.brain-panel .brain-review-citations ul{list-style:none;padding:0;margin:8px 0 0;display:grid;gap:9px}
+.brain-panel .brain-review-citations li{padding:10px 12px;border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere;font-size:12px;line-height:1.7}
+.brain-panel .brain-review-citations li small{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+@media(max-width:420px){.brain-panel .brain-review-summary{padding:14px}.brain-panel .brain-review-citations li{padding:9px 10px}}
