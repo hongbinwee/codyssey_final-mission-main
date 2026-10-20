@@ -10,6 +10,7 @@ import {curateRecommendations,type CommerceActivity} from "./recommendation-stra
 import type {PlanExtraction,ShoppingPlan} from "./shopping-plan.ts";
 import {resolveShoppingPlan} from "./shopping-plan.ts";
 import {parseKrwTenThousandBand} from "./price-band.ts";
+import {requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "./review-sort.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {WishlistItem,WishlistView} from "./wishlist-task.ts";
 import type {ShoppingHandoff} from "./shopping-handoff.ts";
@@ -26,6 +27,7 @@ export interface ResearchResult {
  shoppingPlan?:ShoppingPlan;
  agentUi?:WishlistView;
  shoppingHandoffs?:ShoppingHandoff[];
+ reviewSortInfo?:{aspect:string;status:"VERIFIED_SAMPLE_ORDER"|"INSUFFICIENT";sampledReviewIds:number;positiveCounts:Record<string,number>};
  taskState?:AgentTaskState;
  explanation?:GroundedExplanation;
  intentKind?:BrainIntentKind;
@@ -105,6 +107,11 @@ export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous
  const explicitBand=parseKrwTenThousandBand(req.userMessage);
  if(explicitBand)plan={...plan,...explicitBand};
  else if(intent.budgetMode==="SET")plan={...plan,minTotalWon:undefined};
+ const requestedAspect=requestedPositiveReviewSort(req.userMessage);
+ const cleared=/리뷰\s*(?:순|기준|정렬)\s*(?:없애|취소|해제)|(?:정렬|순서)\s*(?:상관없|초기화)|(?:가격|평점)\s*(?:낮은|높은|많은|좋은)?\s*순/.test(req.userMessage);
+ const changedTask=intent.queryMode==="SET"&&previous&&plan.query!==previous.query;
+ plan={...plan,...(requestedAspect?{reviewSortAspect:requestedAspect}:
+   !cleared&&!changedTask&&previous?.reviewSortAspect?{reviewSortAspect:previous.reviewSortAspect}:{reviewSortAspect:undefined})};
  if(!plan.query||plan.query.length>200)throw new Error("invalid shopping plan");
  return plan;
 }
@@ -123,7 +130,8 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
  let fetched:Awaited<ReturnType<RetrieverPort['search']>>;
  try{fetched=await deps.retriever.search({query:[plan.query,plan.interview?.purpose].filter(Boolean).join(" ").slice(0,250),maxTotalWon:plan.maxTotalWon,
    requiredConditions:plan.requiredConditions,preferences:searchPreferences,requestId:req.requestId,originalQuestion:req.userMessage,
-   ...(plan.category?{category:plan.category}:{})});}catch{throw new RetrievalUnavailableError();}
+   ...(plan.category?{category:plan.category}:{}),
+   ...(plan.reviewSortAspect?{reviewSortAspect:plan.reviewSortAspect}:{})});}catch{throw new RetrievalUnavailableError();}
  if(!fetched||!Array.isArray(fetched.candidates)||!Array.isArray(fetched.evidence)||
     fetched.candidates.length>100||fetched.evidence.length>2500)throw new Error("invalid retrieval result");
  if(deps.hermes&&/(리뷰.?많|후기.?많|리뷰 수|후기 수)/.test(req.userMessage)){
@@ -146,7 +154,10 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
   baseRanking.rejected.push(...removed.map(x=>({candidate:x.candidate,reasons:["user_excluded"]})));
  }
  const activity=deps.activity?await deps.activity(req.actorUserId):undefined;
- const ranking=deps.activity?curateRecommendations(baseRanking,activity):baseRanking;
+ const reviewSort=plan.reviewSortAspect?
+   sortByVerifiedPositiveReviews(baseRanking,fetched.evidence,plan.reviewSortAspect):null;
+ // Explicit user order outranks cart/wishlist, recommendation slots and generic personalized cost scores.
+ const ranking=reviewSort?reviewSort.ranking:deps.activity?curateRecommendations(baseRanking,activity):baseRanking;
  const conditionOnlyReferences=ranking.rejected.filter(item=>
    isConditionOnlySyntheticReference(item,plan.requiredConditions,fetched.evidence));
  if(conditionOnlyReferences.length){
@@ -157,6 +168,8 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
  const rankMs=performance.now()-rankedAt;
  return {
    result:{conversationId:req.conversationId,messageId:prepared.messageId,clientActionId:req.clientActionId,ranking,
+     ...(reviewSort?{reviewSortInfo:{aspect:plan.reviewSortAspect!,status:reviewSort.status,
+       sampledReviewIds:reviewSort.sampledReviewIds,positiveCounts:Object.fromEntries(reviewSort.counts)}}:{}),
      shoppingPlan:{...plan,lastDisplayedProductIds:[...new Set([...ranking.ranked.map(x=>x.candidate.productId),...ranking.referenceOnly.map(x=>x.candidate.productId)])].slice(0,3)},trace:{...fetched.trace,memoryMs:prepared.memoryMs,
        intentMs:Math.max(0,retrievalStart-prepared.startedAt-prepared.memoryMs),
        retrievalMs,rankMs,totalMs:performance.now()-prepared.startedAt}},
