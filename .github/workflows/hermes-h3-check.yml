@@ -45,3 +45,6 @@ jobs:
           tests/unit/brain-v4-flow.test.ts
           tests/unit/brain-routing.test.ts
           tests/unit/brain-recommendation-followup.test.ts
+      - name: Full unit regression
+        timeout-minutes: 7
+        run: npm run test:unit
