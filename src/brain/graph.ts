@@ -1,6 +1,7 @@
 import {guardBrainMessage} from './routing.ts';
 import {runHermesReadLoop} from "./hermes-tools.ts";
 import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.ts";
+import {ownedTask,nextTask,retainTask,taskForWishlistSelection,type AgentTaskState,type TaskScope} from "./task-state.ts";
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
 import {interviewAnswer,needsInterview,rememberInterview} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
@@ -26,7 +27,8 @@ const State=Annotation.Root({
  researchResult:Annotation<ResearchResult>()
  ,intentRoute:Annotation<BrainRoute>(),routeMs:Annotation<number>(),
  priorExplanation:Annotation<import("./grounded-response.ts").GroundedExplanation|null>(),
- wishlistRequest:Annotation<WishlistIntent|null>()
+ wishlistRequest:Annotation<WishlistIntent|null>(),
+ activeTask:Annotation<AgentTaskState|null>()
 });
 /**
  * Four explicit phases, each with a persisted checkpoint. Only a server-owned
@@ -43,6 +45,7 @@ export function createPersistentResearchGraph(
  if(fencing&&!turnLock)throw Error("fenced Brain requires distributed turn lock");
  const activeLease=new AsyncLocalStorage<TurnLease>();
  const verify=async()=>{await activeLease.getStore()?.assertHeld();};
+ const taskScope=(request:GraphRequest):TaskScope=>({actorUserId:request.actorUserId,conversationId:request.conversationId,datasetVersion:deps.datasetVersion});
  const unavailable=(request:GraphRequest,prepared:PreparedTurn,plan:ShoppingPlan,route:BrainRoute)=>({
    researchResult:{conversationId:request.conversationId,messageId:prepared.messageId,clientActionId:request.clientActionId,
      intentKind:route.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,
@@ -60,16 +63,17 @@ export function createPersistentResearchGraph(
    .addNode("route",async state=>{
      const started=performance.now();
      const previous=state.researchResult?.shoppingPlan;
+     const activeTask=ownedTask(state.researchResult?.taskState,taskScope(state.request));
      const priorExplanation=explainPreviousRecommendation(state.request.userMessage,state.researchResult,deps.datasetVersion);
-     if(priorExplanation){await verify();return {priorExplanation,intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},
+     if(priorExplanation){await verify();return {priorExplanation,activeTask,intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},
        routeMs:performance.now()-started};}
-     const wishlistRequest=deps.wishlist?wishlistIntent(state.request.userMessage,state.researchResult?.agentUi):null;
-     if(wishlistRequest){await verify();return {wishlistRequest,priorExplanation:null,
+     const wishlistRequest=deps.wishlist?wishlistIntent(state.request.userMessage,taskForWishlistSelection(activeTask)):null;
+     if(wishlistRequest){await verify();return {wishlistRequest,activeTask,priorExplanation:null,
        intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},routeMs:performance.now()-started};}
      const answer=deps.clarifyBeforeSearch&&interviewAnswer(state.request.userMessage,previous);
      const follow=previous&&['다른 상품 보기','다른 제품 보기','조건 바꾸기'].includes(state.request.userMessage.trim());
      const route=guardBrainMessage(state.request.userMessage)??(answer||follow?{kind:"SHOPPING_FOLLOWUP" as const,search:true}:await (deps.route?.(state.request.userMessage,state.researchResult?.shoppingPlan)??{kind:"SHOPPING_SEARCH" as const,search:true}));
-     await verify();return {intentRoute:route,priorExplanation:null,wishlistRequest:null,routeMs:performance.now()-started};
+     await verify();return {intentRoute:route,activeTask,priorExplanation:null,wishlistRequest:null,routeMs:performance.now()-started};
    })
    .addNode("explain_previous",async state=>{
      const start=performance.now();
@@ -92,12 +96,15 @@ export function createPersistentResearchGraph(
      let ready=!!deps.wishlist;
      if(deps.wishlist){try{items=await deps.wishlist(state.request.actorUserId);}catch{ready=false;}}
      await verify();
-     const reply=ready?wishlistReply(state.wishlistRequest,items,state.researchResult?.agentUi):null;
+     const reply=ready?wishlistReply(state.wishlistRequest,items,taskForWishlistSelection(state.activeTask)):null;
      const researchResult:ResearchResult={
        conversationId:state.request.conversationId,messageId:state.prepared.messageId,
        clientActionId:state.request.clientActionId,intentKind:"SHOPPING_FOLLOWUP",
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
        ...(reply?{agentUi:reply.view}:{}),datasetVersion:deps.datasetVersion,
+       taskState:nextTask(taskScope(state.request),"WISHLIST",state.activeTask,{
+         phase:reply?"ACTIVE":"UNAVAILABLE",displayedProductIds:reply?.view.items.map(item=>item.productId)??[],
+         selectedProductId:reply?.view.selectedProductId}),
        explanation:{kind:"CONVERSATION",items:[],limitations:[],text:reply?.text??"지금은 찜 목록을 불러올 수 없어요. 잠시 후 다시 확인해 주세요."},
        trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,
          responseMs:performance.now()-started,totalMs:performance.now()-state.prepared.startedAt}};
@@ -112,6 +119,8 @@ export function createPersistentResearchGraph(
      const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,
        clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,
        ...(previous?{shoppingPlan:previous}:{}),
+       ...(state.intentRoute.kind==="CS_REQUEST"?{taskState:nextTask(taskScope(state.request),"ORDER",state.activeTask,{phase:"UNAVAILABLE"})}
+         :{taskState:retainTask(state.activeTask,taskScope(state.request))}),
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
        explanation,
        datasetVersion:deps.datasetVersion,trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,responseMs:performance.now()-started,
@@ -127,7 +136,9 @@ export function createPersistentResearchGraph(
    .addNode("clarify",async state=>{
      const questions=needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories);
      const plan={...state.shoppingPlan,interview:{...state.shoppingPlan.interview,answered:state.shoppingPlan.interview?.answered??[],pending:questions.map(q=>q.key)}};
-     const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},explanation:{kind:"CLARIFICATION",text:questions[0]?.text??"원하는 조건을 알려주세요.",items:[],limitations:[],clarification:{questions}},trace:{memoryMs:state.prepared.memoryMs,intentMs:performance.now()-state.prepared.startedAt-state.prepared.memoryMs,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
+     const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,
+       taskState:nextTask(taskScope(state.request),state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY",state.activeTask,
+         {phase:"AWAITING_INPUT",pendingQuestion:questions[0]?.key}),ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},explanation:{kind:"CLARIFICATION",text:questions[0]?.text??"원하는 조건을 알려주세요.",items:[],limitations:[],clarification:{questions}},trace:{memoryMs:state.prepared.memoryMs,intentMs:performance.now()-state.prepared.startedAt-state.prepared.memoryMs,retrievalMs:0,rankMs:0,responseMs:0,totalMs:performance.now()-state.prepared.startedAt}};
      await verify();return {shoppingPlan:plan,researchResult,evidence:[]};
    })
    .addNode("deep",async state=>{
@@ -209,6 +220,8 @@ export function createPersistentResearchGraph(
        const selected=researchResult.ranking.ranked.filter(row=>row.candidate.commerceVerified===true&&(researchResult.explanation.failure||researchResult.explanation.items.some(item=>item.productId===row.candidate.productId&&item.variantId===row.candidate.variantId)));
        researchResult.shoppingPlan={...researchResult.shoppingPlan,lastDisplayedProductIds:[...new Set([...selected,...researchResult.ranking.referenceOnly].map(row=>row.candidate.productId))].slice(0,3)};
      }
+     researchResult.taskState=nextTask(taskScope(state.request),state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY",state.activeTask,
+       {displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
      researchResult.trace={...researchResult.trace,routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
        totalMs:performance.now()-state.prepared.startedAt};
      await verify();
