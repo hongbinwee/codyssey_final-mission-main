@@ -102,7 +102,7 @@ test("registered actor-owned order IDs support order and shipping follow-ups",as
  let observed=0;
  const ports=createHermesReadPorts({actorUserId:"alice",catalog:mockCatalog as never,ownedCommerce:true,
   orders:async()=>({orders:[{id:"order-a",created_at:"2026-10-20",item_summary:"이어폰",total_won:30000,
-   order_status:"CONFIRMED",shipping_status:"IN_TRANSIT",cancel_eligible:false}],hasMore:false}),
+   order_status:"CONFIRMED",shipping_status:"IN_TRANSIT",payment_status:"PAID",refund_status:null,cancel_status:null,cancel_eligible:false}],hasMore:false}),
   order:async(id)=>{assert.equal(id,"order-a");observed++;return {id,status:"CONFIRMED",created_at:"2026-10-20",total_won:30000,
    cancel_eligible:false,shipping:{status:"IN_TRANSIT"},items:[],address_snapshot:{phone:"private"}} as never;},
   shipping:async(id)=>{assert.equal(id,"order-a");observed++;return {order_id:id,information:"AVAILABLE",status:"IN_TRANSIT",
