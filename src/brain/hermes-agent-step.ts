@@ -62,7 +62,7 @@ export async function decideHermesAction(input:{
  const details={user_message:input.message.slice(0,1200),
   ...(input.plan?{current_shopping_plan:{query:input.plan.query,maxTotalWon:input.plan.maxTotalWon,
     requiredConditions:input.plan.requiredConditions.slice(0,8)}}:{}),
-  previous_task:input.task?{kind:input.task.kind,phase:input.task.phase,displayedProductIds:input.task.displayedProductIds.slice(0,8)}:null,
+  previous_task:input.task?{kind:input.task.kind,phase:input.task.phase,pendingQuestion:input.task.pendingQuestion,displayedProductIds:input.task.displayedProductIds.slice(0,8)}:null,
   confirmed_preferences:input.memories.slice(0,3).map(m=>({key:m.key,value:m.value})),
   observed_tools:observations.slice(0,HERMES_TOOL_LIMIT),remaining_calls:HERMES_TOOL_LIMIT-observations.length};
  try{
