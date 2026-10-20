@@ -3,6 +3,7 @@ import type {PersistentConversations,PersistentPreferences} from "./persistent-s
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {WishlistView} from "./wishlist-task.ts";
+import type {AgentTaskState} from "./task-state.ts";
 import {BrainModelOutputError} from "./intent.ts";
 import type {BrainIntentKind} from "./routing.ts";
 import {executionMode} from "./execution-mode.ts";
@@ -10,7 +11,7 @@ import {executionMode} from "./execution-mode.ts";
 export interface BrainGraphPort {
   invoke(input:{actorUserId:string;conversationId:string;requestId:string;clientActionId:string;userMessage:string}):Promise<{
     conversationId:string;messageId:string;ranking:RankingResult;trace:Record<string,number>;
-    shoppingPlan?:ShoppingPlan;agentUi?:WishlistView;explanation?:GroundedExplanation;intentKind?:BrainIntentKind;datasetVersion?:string;
+    shoppingPlan?:ShoppingPlan;agentUi?:WishlistView;taskState?:AgentTaskState;explanation?:GroundedExplanation;intentKind?:BrainIntentKind;datasetVersion?:string;
   }>;
   getOwnedState(actorUserId:string,conversationId:string):Promise<{values?:Record<string,unknown>}>;
 }
