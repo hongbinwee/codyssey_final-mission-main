@@ -93,3 +93,29 @@ tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeN
 
 ### Next: H3, then H4
 H2 provides safe task identity and continuity; it does **not** implement autonomous replanning. H3 must expose a small set of actor-owned cart/product/review/order read Tools. H4 must remove mandatory searches from non-search requests and actually use Tool observations to decide the next permitted Tool, ask a question, or finish. Never replace this with eight hard-coded dialog scripts.
+
+## H3 — Reusable read-only Shopping Tools (2026-10-20)
+
+Implementation: `src/brain/hermes-read-ports.ts`, `src/brain/hermes-tools.ts`, `src/brain/read-flow.ts`, `src/brain/graph.ts`, `src/brain/runtime.ts`.
+
+- H3 adds six bounded read capabilities: `get_cart`, `get_product_detail`, `get_product_reviews`, `get_orders`, `get_order`, `get_shipping_status`. Together with `get_purchase_history`, `get_wishlist`, `search_products`, there are nine registered names, **conditionally exposed** according to the available tool ports.
+- `get_cart` intentionally uses `SELECT` on an existing actor-owned cart followed by the existing read-only `cartView`. **Do not** use the ordinary `getCart` here: it creates a cart with `INSERT` on an empty account.
+- Product facts (current variants, price, shipping, stock availability) come from Commerce. Review reads return up to five excerpts with rating and `REAL`/`SYNTHETIC` provenance; a review-filter query is not a claim about the full review population.
+- Orders are scoped by authenticated session actor in the underlying Commerce services. H3 sends only bounded order/status/amount/item summaries to the model, never address snapshots or payment details.
+- Owned-cart/orders tools are enabled only when `qaCommerceActivityAllowed` confirms an explicitly matching QA Commerce DB + catalog identity. Product/review reads use the configured catalog. No model-chosen actor/user IDs.
+- Product detail/review tool arguments must refer to product IDs observed in an earlier tool response. Order detail/shipping IDs must first appear in the authenticated `get_orders` result. Strict JSON argument schemas, unknown field rejection, no parallel partial dispatch, distinct-call tracking, at most five read Tool calls and a bounded decision deadline are enforced.
+- The Tool Loop exposes observed results to the LLM for selection of the **next** enabled read Tool; it never accepts its final free text as canonical product rankings, factual order results, or permission to mutate state.
+
+### Real CI execution
+
+The dedicated branch-only `.github/workflows/hermes-h3-check.yml` executed the committed repository, installed dependencies with `npm ci`, then ran `npm run check`, `npm run build`, and the H1/H2/H3 unit-test selection.
+
+**PASS: Typecheck, Build, 31/31 unit tests**, run `39348239920` at commit `92218dca34f005a9adc9bcdc2afe6e56ca29f537`. CI record: https://github.com/hongbinwee/codyssey_final-mission-main/actions/runs/39348239920
+
+Tests exercise cart no-create/no-write, actor-gated read ports, product/review facts, redaction of sensitive order fields, two-step Tool-result-conditioned selection, unknown IDs, unexpected JSON arguments, and order→shipping lookup sequences.
+
+**Still NOT_RUN:** real connected Commerce DB/API actor-isolation, browser E2E, live LLM/RAG quality and latency measurement, full unit suite beyond this named selection, QA server deployment.
+
+### Important H3/H4 boundary
+
+H3 **exposes the reusable read tools to the existing deep Hermes loop**. It does not yet reroute standalone user messages such as "내 주문 보여줘" away from the existing CS static response. Nor does it remove the `graph.ts` deep recommendation path's mandatory retrieval or replace current recommendation explanation logic. Those are **H4 dynamic action-policy/replanning** work, not evidence that H3 enables every multi-step user workflow. Keep scenario examples as evaluation cases, never hard-code eight conversational scripts.
