@@ -1,3 +1,4 @@
+import {positiveForAspect} from "./review-sort.ts";
 import {MAX_DISPLAY_PRODUCTS,type Aspect,type EvidenceRecord,type ProductCandidate,type RankingResult} from "./contracts.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import type {ChatMsg,Provider} from "../llm.ts";
@@ -33,7 +34,9 @@ function displayRows(ranking:RankingResult):DisplayRow[]{
 export function buildGroundedExplanation(ranking:RankingResult,evidence:EvidenceRecord[],plan:ShoppingPlan):GroundedExplanation{
  const found=new Map(evidence.map(e=>[e.id,e]));
  const safeName=(v:string|undefined,fallback:string)=>(v&&v!==fallback?v:"상품").slice(0,160);
- const budget=plan.maxTotalWon===null?'':`${plan.maxTotalWon.toLocaleString("ko-KR")}원 이하 예산`;
+ const budget=plan.maxTotalWon===null?'':plan.minTotalWon!==undefined?
+   `배송비 포함 ${plan.minTotalWon.toLocaleString("ko-KR")}~${plan.maxTotalWon.toLocaleString("ko-KR")}원`:
+   `배송비 포함 ${plan.maxTotalWon.toLocaleString("ko-KR")}원 이하 예산`;
  const criteria=plan.requiredConditions.length
    ?`요청 조건: ${plan.requiredConditions.slice(0,12).join(", ")}.`:"";
  const visible=displayRows(ranking),rankedRows=visible.filter(row=>row.ranked),referenceCount=visible.filter(row=>!row.ranked).length;
@@ -63,7 +66,8 @@ export function buildGroundedExplanation(ranking:RankingResult,evidence:Evidence
      ids.push(...legitimate);
    }
    const price=(candidate.unitPriceWon??0)+(candidate.shippingFeeWon??0);
-   const verifiedReview=evidence.find(e=>evidence.filter(other=>other.id===e.id).length===1&&e.kind==='REVIEW'&&e.verified===true&&e.productId===candidate.productId&&(e.variantId===null||e.variantId===candidate.variantId)&&e.datasetVersion===candidate.datasetVersion&&['REAL','SYNTHETIC'].includes(e.sourceKind??'')&&typeof e.text==='string'&&e.text.length>=8&&e.text.length<=600&&![candidate.productId,candidate.variantId,e.sourceId??''].some(id=>id&&idOccurs(e.text!,id))&&!/https?:\/\/|시스템|프롬프트|비밀번호|api\s*key|ignore.{0,20}instruction|sk-/i.test(e.text));
+   const verifiedReview=evidence.find(e=>(!plan.reviewSortAspect||typeof e.text==="string"&&positiveForAspect(e.text,plan.reviewSortAspect))&&
+    evidence.filter(other=>other.id===e.id).length===1&&e.kind==='REVIEW'&&e.verified===true&&e.productId===candidate.productId&&(e.variantId===null||e.variantId===candidate.variantId)&&e.datasetVersion===candidate.datasetVersion&&['REAL','SYNTHETIC'].includes(e.sourceKind??'')&&typeof e.text==='string'&&e.text.length>=8&&e.text.length<=600&&![candidate.productId,candidate.variantId,e.sourceId??''].some(id=>id&&idOccurs(e.text!,id))&&!/https?:\/\/|시스템|프롬프트|비밀번호|api\s*key|ignore.{0,20}instruction|sk-/i.test(e.text));
    const fit=plan.maxTotalWon!==null&&price<=plan.maxTotalWon?'배송비 포함 예산 안의 상품이에요. ':'';
    const reason=fit+(verifiedReview?`${verifiedReview.sourceKind==='SYNTHETIC'?'합성 리뷰':'수집 리뷰'}에 “${verifiedReview.text!.slice(0,100)}${verifiedReview.text!.length>100?'…':''}”라는 의견이 있어요.`:'상품 정보와 말씀하신 조건을 기준으로 골랐어요.');
    if(verifiedReview)ids.push(verifiedReview.id);
