@@ -14,6 +14,7 @@ import {requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "./revie
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {WishlistItem,WishlistView} from "./wishlist-task.ts";
 import type {ShoppingHandoff} from "./shopping-handoff.ts";
+import type {VerifiedReviewSummarySource} from "./review-summary.ts";
 import type {AgentTaskState} from "./task-state.ts";
 import type {BrainRoute,BrainIntentKind} from "./routing.ts";
 
@@ -28,6 +29,7 @@ export interface ResearchResult {
  agentUi?:WishlistView;
  shoppingHandoffs?:ShoppingHandoff[];
  reviewSortInfo?:{aspect:string;status:"VERIFIED_SAMPLE_ORDER"|"INSUFFICIENT";sampledReviewIds:number;positiveCounts:Record<string,number>};
+ reviewSummary?:{productId:string;name:string;sampled:number;totalMatching:number;citations:{sourceId:string;quote:string;sourceKind:"REAL"|"SYNTHETIC";sourceVariantId:string|null}[]};
  taskState?:AgentTaskState;
  explanation?:GroundedExplanation;
  intentKind?:BrainIntentKind;
@@ -35,6 +37,8 @@ export interface ResearchResult {
 }
 export interface ResearchDeps {
  clarifyBeforeSearch?:boolean;
+ reviewSummary?:VerifiedReviewSummarySource;
+ reviewSummaryProvider?:Pick<Provider,"chat">;
  hermes?:{provider:Pick<Provider,"chat">;history:(actorUserId:string)=>Promise<PurchaseSnapshot[]>;reviewCount:(productId:string)=>Promise<number|null>;
   toolPorts?:(actorUserId:string)=>Partial<Pick<HermesToolPort,"cart"|"product"|"reviews"|"orders"|"order"|"shipping">>};
  datasetVersion?:string;
