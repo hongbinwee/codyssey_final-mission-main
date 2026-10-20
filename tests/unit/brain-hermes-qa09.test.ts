@@ -6,6 +6,7 @@ import {rankProducts} from "../../src/brain/personalization.ts";
 import {curateRecommendations} from "../../src/brain/recommendation-strategies.ts";
 import {positiveForAspect,requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "../../src/brain/review-sort.ts";
 import {resolveTurnPlan,retrieveTurn} from "../../src/brain/read-flow.ts";
+import {parseV4Response} from "../../src/brain/rag-adapter.ts";
 import type {EvidenceRecord,ProductCandidate} from "../../src/brain/contracts.ts";
 import type {ResearchDeps} from "../../src/brain/read-flow.ts";
 
@@ -133,4 +134,27 @@ test("QA09 price breakdown is wired in the Brain card and CSS wraps narrow total
  assert.match(tsx,/Number\.isSafeInteger\(p\.unitPriceWon\+p\.shippingFeeWon\)/);
  assert.match(tsx,/금액 확인 필요/);assert.match(css,/\.brain-price-breakdown/);
  assert.match(css,/overflow-wrap:anywhere/);
+});
+
+test("QA09 v4 RAG can return ten distinct products for an explicit review sort only",()=>{
+ const item=(n:number)=>({product_id:"p-"+n,rrf_score:.9,evidence:[
+  {source_type:"product",source_id:"product-"+n,evidence_text:"설명"}]});
+ const response={dataset_version:"qa09",items:Array.from({length:10},(_,n)=>item(n))};
+ assert.throws(()=>parseV4Response(response,"qa09"),/shape mismatch/);
+ assert.equal(parseV4Response(response,"qa09",10).items.length,10);
+});
+test("QA09 multiple RAG chunks of one original review are deduplicated before Commerce lookup",()=>{
+ const chunk=(snippet:string)=>({source_id:"review-1",source_type:"review",product_id:"p1",
+  evidence_text:snippet,source_metadata:{variant_id:"v1",source_kind:"REAL",synthetic:false}});
+ const items=[{product_id:"p1",rrf_score:.9,evidence:[
+  chunk("촉촉해요"),chunk("피부가 좋아요"),chunk("또 바르고 싶어요")]}];
+ const parsed=parseV4Response({dataset_version:"qa09",items},"qa09",10);
+ assert.deepEqual(parsed.items[0].evidence.map(x=>x.sourceId),["review-1"]);
+ assert.throws(()=>parseV4Response({dataset_version:"qa09",items:[
+  items[0],{product_id:"p2",rrf_score:.8,evidence:[{...chunk("촉촉해요"),product_id:"p2"}]}
+ ]},"qa09",10),/collision/);
+ assert.throws(()=>parseV4Response({dataset_version:"qa09",items:[
+  {product_id:"p1",rrf_score:.9,evidence:[
+   chunk("촉촉해요"),{...chunk("촉촉해요"),source_metadata:{variant_id:"other",source_kind:"REAL",synthetic:false}}]}
+ ]},"qa09",10),/collision/);
 });
