@@ -39,6 +39,7 @@ jobs:
           tests/unit/brain-hermes-h3.test.ts
           tests/unit/brain-hermes-h4.test.ts
           tests/unit/brain-hermes-h5.test.ts
+          tests/unit/brain-hermes-h5-flow.test.ts
           tests/unit/brain-wishlist-task.test.ts
           tests/unit/brain-task-state.test.ts
           tests/unit/brain-task-multiturn.test.ts
