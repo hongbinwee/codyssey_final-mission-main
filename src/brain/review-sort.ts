@@ -14,7 +14,7 @@ export function requestedPositiveReviewSort(message:string):string|null{
  return aspect.length>=2&&aspect.length<=20?aspect:null;
 }
 
-function positiveForAspect(text:string,aspect:string):boolean{
+export function positiveForAspect(text:string,aspect:string):boolean{
  if(!text||text.length>600)return false;
  const normalized=text.normalize("NFKC");
  const chunks=normalized.split(/[.!\n。]/);
