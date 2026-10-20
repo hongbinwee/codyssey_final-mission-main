@@ -12,7 +12,7 @@ export interface GroundedExplanation {
  citations?:{productId:string;variantId:string;sourceVariantId?:string|null;sourceId:string;sourceKind:"REAL"|"SYNTHETIC";quote:string}[];
  limitations:string[];
  failure?:{code:"MODEL_TIMEOUT"|"MODEL_RATE_LIMIT"|"MODEL_HTTP_ERROR"|"MODEL_UNAVAILABLE"|"RETRIEVAL_UNAVAILABLE";httpStatus?:number};
- kind:"CLARIFICATION"|"VERIFIED_CANDIDATES"|"REFERENCE_ONLY"|"NO_MATCH"|"LLM_GROUNDED"|"EVIDENCE_INSUFFICIENT"|"CONVERSATION";
+ kind:"CLARIFICATION"|"VERIFIED_CANDIDATES"|"REFERENCE_ONLY"|"NO_MATCH"|"LLM_GROUNDED"|"EVIDENCE_INSUFFICIENT"|"REVIEW_SUMMARY"|"CONVERSATION";
 }
 type DisplayRow={candidate:ProductCandidate;ranked:boolean;limitations?:string[]};
 function displayRows(ranking:RankingResult):DisplayRow[]{
