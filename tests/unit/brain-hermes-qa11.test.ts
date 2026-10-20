@@ -94,7 +94,7 @@ test("QA11 selection change invalidates pending proposal and approval only persi
  assert.match(tsx,/lock\.current=true;setBusy\(true\)/);
 });
 test("QA11 uncertain confirmation reconciles persisted memory rather than overwriting it or claiming a fresh write",()=>{
- assert.match(tsx,/Confirmation can commit even when the HTTP reply is lost/);
+ assert.match(tsx,/A consumed confirmation or a lost HTTP reply may already be committed/);
  assert.match(tsx,/synced\.ok&&synced\.data\.some\(m=>m\.key==="price_priority"&&m\.value===expected\)/);
  assert.match(tsx,/r\.error\.code==="CONFIRMATION_REQUIRED"/);
  assert.match(tsx,/setPreferencesReady\(result\.ok\)/);
