@@ -70,6 +70,15 @@ test("QA11 preference card stacks field and compact confirm buttons with respons
  assert.match(css,/@media\(max-width:420px\)\{\s*\.brain-panel \.brain-preference-save/);
  assert.match(css,/flex-wrap:wrap/);
 });
+test("QA11 stored preference retry and delete controls retain native buttons and 44px touch targets at narrow widths",()=>{
+ assert.match(tsx,/<button className="link brain-preference-retry" disabled=\{busy\|\|restoring\}/);
+ assert.match(tsx,/<button className="link" onClick=\{\(\)=>void clear\(\)\} disabled=\{busy\|\|restoring\}>저장한 가격 기준 삭제<\/button>/);
+ assert.match(css,/\.brain-panel \.brain-memory \.link\{[^}]*min-height:44px/);
+ assert.match(css,/\.brain-panel \.brain-preference-retry\{[^}]*min-height:44px/);
+ assert.match(css,/\.brain-panel \.brain-memory \.link\{[^}]*width:fit-content[^}]*max-width:100%[^}]*white-space:normal/);
+ assert.match(css,/\.brain-panel \.brain-preference-retry\{[^}]*width:fit-content[^}]*max-width:100%[^}]*white-space:normal/);
+ assert.match(css,/@media\(max-width:420px\)\{[\s\S]*?\.brain-panel \.brain-preference-actions \.btn\{max-width:100%\}/);
+});
 test("QA11 core shopping CTAs render before the secondary preference save card",()=>{
  assert.ok(tsx.indexOf('{showExplore&&!busy&&')<tsx.indexOf('className="state-box brain-preference-save"'));
  assert.match(tsx,/조건 바꾸기/);assert.match(tsx,/다른 상품 보기/);

@@ -73,15 +73,20 @@ export async function summarizeNamedProductReviews(input:{
  const allowedOptions=new Set(detail.variants.map(v=>v.variant_id));
  const byId=new Map<string,ReviewsResult["reviews"][number]>();
  for(const rev of result.reviews){
-  if(!idOk(rev.id)||rev.product_id!==chosen||rev.variant_id!==null&&!allowedOptions.has(rev.variant_id)||
-     !["REAL","SYNTHETIC"].includes(rev.source_kind)||!rev.source_ref||typeof rev.body!=="string"||unsafeReview(rev.body)||
-     !Number.isFinite(rev.rating)||rev.rating<1||rev.rating>5)continue;
+  if(!idOk(rev.id))continue;
   const prior=byId.get(rev.id);
-  if(prior&&(prior.body!==rev.body||prior.variant_id!==rev.variant_id||prior.source_kind!==rev.source_kind))
+  if(prior&&(prior.body!==rev.body||prior.product_id!==rev.product_id||
+    prior.variant_id!==rev.variant_id||prior.rating!==rev.rating||
+    prior.source_kind!==rev.source_kind||prior.source_ref!==rev.source_ref))
    return {kind:"NOT_FOUND",text:"리뷰의 원본 정보를 확인하지 못해 요약을 보류했어요."};
   byId.set(rev.id,rev);
  }
- const reviews=[...byId.values()].slice(0,20);
+ const reviews=[...byId.values()].filter(rev=>
+  rev.product_id===chosen&&(rev.variant_id===null||allowedOptions.has(rev.variant_id))&&
+  ["REAL","SYNTHETIC"].includes(rev.source_kind)&&!!rev.source_ref&&
+  typeof rev.body==="string"&&!unsafeReview(rev.body)&&Number.isFinite(rev.rating)&&
+  rev.rating>=1&&rev.rating<=5
+ ).slice(0,20);
  const name=safeName(detail.product.name);
  if(!reviews.length)return {kind:"SUMMARY",productId:chosen!,productName:name,sampled:0,
    totalMatching:result.total_matching,text:name+"에 대해 확인할 수 있는 리뷰가 없어요.",citations:[]};

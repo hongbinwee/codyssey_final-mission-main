@@ -479,7 +479,7 @@ test("local trace counts reviews separately from Commerce spec evidence",async()
   assert.equal(result.trace?.verifiedReviewCount,1);
 });
 
-test("v4 parser rejects another version and duplicate product or source IDs but accepts zero items", () => {
+test("v4 parser rejects another version and duplicate products but accepts zero items", () => {
   const parse = (rag as unknown as {
     parseV4Response?: (raw: unknown, expectedVersion: string) => { items: unknown[] };
   }).parseV4Response;
@@ -492,10 +492,6 @@ test("v4 parser rejects another version and duplicate product or source IDs but 
   duplicateProduct.items.push(structuredClone(duplicateProduct.items[0]));
   assert.throws(() => parse(duplicateProduct, DATASET_VERSION), /duplicate/i);
 
-  const duplicateSource = v4Response();
-  duplicateSource.items[0].evidence.push(structuredClone(duplicateSource.items[0].evidence[0]));
-  assert.throws(() => parse(duplicateSource, DATASET_VERSION), /duplicate/i);
-
   assert.deepEqual(parse({ dataset_version: DATASET_VERSION, items: [] }, DATASET_VERSION).items, []);
   const fiveItems={dataset_version:DATASET_VERSION,items:Array.from({length:5},(_,index)=>({
     product_id:`p-${index}`,rrf_score:.5,evidence:[],
@@ -503,6 +499,27 @@ test("v4 parser rejects another version and duplicate product or source IDs but 
   assert.equal(parse(fiveItems,DATASET_VERSION).items.length,5);
   const sixItems={...fiveItems,items:[...fiveItems.items,{product_id:"p-5",rrf_score:.5,evidence:[]}]};
   assert.throws(()=>parse(sixItems,DATASET_VERSION),/shape|limit/i);
+});
+
+test("v4 deduplicates one original review only within matching product, option and provenance", () => {
+  const response = v4Response();
+  response.items[0].evidence.push(structuredClone(response.items[0].evidence[0]));
+  const parsed = rag.parseV4Response(response, DATASET_VERSION);
+  assert.equal(parsed.items[0].evidence.length, 1);
+  assert.equal(parsed.items[0].evidence[0].sourceId, response.items[0].evidence[0].source_id);
+
+  const otherProduct = structuredClone(response);
+  otherProduct.items.push({ ...structuredClone(otherProduct.items[0]), product_id: "different-product" });
+  assert.throws(() => rag.parseV4Response(otherProduct, DATASET_VERSION), /collision|scope/i);
+
+  const otherOption = structuredClone(response);
+  otherOption.items[0].evidence[1].source_metadata.variant_id = "different-option";
+  assert.throws(() => rag.parseV4Response(otherOption, DATASET_VERSION), /collision/i);
+
+  const otherSource = structuredClone(response);
+  otherSource.items[0].evidence[1].source_metadata.source_kind = "REAL";
+  otherSource.items[0].evidence[1].source_metadata.synthetic = false;
+  assert.throws(() => rag.parseV4Response(otherSource, DATASET_VERSION), /collision/i);
 });
 
 test("v4 requires an exact configured version and ReviewLookup", () => {

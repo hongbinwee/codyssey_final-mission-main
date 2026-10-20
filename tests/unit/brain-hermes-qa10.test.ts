@@ -86,11 +86,30 @@ test("QA10 source filtering never includes wrong-product or wrong-variant review
  if(result.kind==="SUMMARY"){assert.equal(result.sampled,1);assert.equal(result.citations.length,1);
   assert.equal(result.citations[0].sourceId,"ok");}
 });
-test("QA10 review IDs must not conflict with other text, option or provenance",async()=>{
+const originalDuplicateReview=review("dup",5,"좋아요");
+const duplicateReviewConflicts=[
+ {field:"body",review:{...originalDuplicateReview,body:"별로예요"}},
+ {field:"product",review:{...originalDuplicateReview,product_id:"p2"}},
+ {field:"variant",review:{...originalDuplicateReview,variant_id:"v-fake"}},
+ {field:"rating",review:{...originalDuplicateReview,rating:1}},
+ {field:"source kind",review:{...originalDuplicateReview,source_kind:"SYNTHETIC" as const}},
+ {field:"source reference",review:{...originalDuplicateReview,source_ref:"other-source"}}
+];
+for(const conflict of duplicateReviewConflicts)test(
+ "QA10 duplicate review ID conflicting "+conflict.field+" is rejected in either row order",async()=>{
+  for(const reviews of [[originalDuplicateReview,conflict.review],[conflict.review,originalDuplicateReview]]){
+   const result=await summarizeNamedProductReviews({request:request(),previousDisplayedIds:[],source:fixture({
+    reviews:async()=>({...reports,reviews})
+   })});
+   assert.equal(result.kind,"NOT_FOUND");
+  }
+ });
+test("QA10 exact duplicate review IDs are deduplicated",async()=>{
  const result=await summarizeNamedProductReviews({request:request(),previousDisplayedIds:[],source:fixture({
-  reviews:async()=>({...reports,reviews:[review("dup",5,"좋아요"),review("dup",1,"별로예요")]})
+  reviews:async()=>({...reports,reviews:[originalDuplicateReview,{...originalDuplicateReview}]})
  })});
- assert.equal(result.kind,"NOT_FOUND");
+ assert.equal(result.kind,"SUMMARY");
+ if(result.kind==="SUMMARY"){assert.equal(result.sampled,1);assert.equal(result.citations.length,1);}
 });
 test("QA10 empty reviews return informative summary without invented pros, cons or percentages",async()=>{
  const result=await summarizeNamedProductReviews({request:request(),previousDisplayedIds:[],source:fixture({

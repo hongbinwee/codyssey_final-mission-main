@@ -117,6 +117,78 @@ test("QA09 plan retains review sort and price band on follow-up; clears on expli
  const cleared=await resolveTurnPlan(req("이번엔 가격순으로"),prepared,next,deps);
  assert.equal(cleared.reviewSortAspect,undefined);
 });
+test("QA09 cancelled and reset review sorting stays cleared across follow-ups and preserves plan context",async()=>{
+ const base={query:"세럼",queryMode:"KEEP",budgetMode:"KEEP",requirementsMode:"KEEP",
+  context:{maxTotalWon:null,requiredConditions:[],currentPreferences:{}}};
+ const deps={intent:{extract:async()=>base}} as unknown as ResearchDeps;
+ const prepared={messageId:"m",memories:[],startedAt:performance.now(),memoryMs:0};
+ const req=(msg:string)=>({actorUserId:"me",conversationId:"thread",requestId:"req",clientActionId:"a",userMessage:msg});
+ const previous={...plan(),revision:4,requiredConditions:["fragrance_free"],currentPreferences:{price_priority:"value" as const}};
+ for(const message of ["촉촉하다는 리뷰가 많은 순 말고 그냥 추천해줘","리뷰 정렬 초기화","정렬 기준은 상관없어","촉촉하다는 리뷰가 많은 순 취소해줘","촉촉하다는 후기가 많은 순으로 해제해줘"]){
+  const cleared=await resolveTurnPlan(req(message),prepared,previous,deps);
+  assert.equal(cleared.reviewSortAspect,undefined,message);
+  assert.equal(cleared.minTotalWon,10000,message);assert.equal(cleared.maxTotalWon,39999,message);
+  assert.deepEqual(cleared.requiredConditions,["fragrance_free"],message);
+  assert.deepEqual(cleared.currentPreferences,{price_priority:"value"},message);
+  const followup=await resolveTurnPlan(req("향이 은은한 것만"),prepared,cleared,deps);
+  assert.equal(followup.reviewSortAspect,undefined,message+" follow-up");
+  assert.equal(followup.minTotalWon,10000,message+" follow-up");
+  assert.deepEqual(followup.requiredConditions,["fragrance_free"],message+" follow-up");
+  const reapplied=await resolveTurnPlan(req("촉촉하다는 리뷰가 많은 순으로 추천해줘"),prepared,followup,deps);
+  assert.equal(reapplied.reviewSortAspect,"촉촉",message+" explicitly reapplied");
+  assert.equal(reapplied.minTotalWon,10000,message+" explicitly reapplied");
+ }
+});
+test("QA09 cancelling review sorting restores cart personalization",async()=>{
+ const base={query:"세럼",queryMode:"KEEP",budgetMode:"KEEP",requirementsMode:"KEEP",
+  context:{maxTotalWon:null,requiredConditions:[],currentPreferences:{}}};
+ const deps={intent:{extract:async()=>base}} as unknown as ResearchDeps;
+ const prepared={messageId:"m",memories:[],startedAt:performance.now(),memoryMs:0};
+ const req=(msg:string)=>({actorUserId:"me",conversationId:"thread",requestId:"req",clientActionId:"a",userMessage:msg});
+ const previous={...plan(),requiredConditions:[]};
+ const message="촉촉하다는 리뷰가 많은 순 말고 그냥 추천해줘";
+ const cancelled=await resolveTurnPlan(req(message),prepared,previous,deps);
+ const {products,reviews}=fixture();
+ const retrieval={retriever:{search:async()=>({candidates:products,evidence:reviews})},
+  activity:async()=>({cartProductIds:["cheap"],wishlistProductIds:[]})} as unknown as ResearchDeps;
+ const result=await retrieveTurn(req(message),prepared,cancelled,retrieval);
+ assert.equal(result.result.shoppingPlan?.reviewSortAspect,undefined);
+ assert.equal(result.result.reviewSortInfo,undefined);
+ assert.equal(result.result.ranking.ranked[0]?.candidate.productId,"cheap");
+});
+test("QA09 contracted negation is rejected without letting another property negate a positive",()=>{
+ for(const text of ["촉촉한 것 같진 않다.","촉촉한 것 같지는 않다.","촉촉해 보이진 않다."])
+  assert.equal(positiveForAspect(text,"촉촉"),false,text);
+ assert.equal(positiveForAspect("피부가 촉촉한 것 같아요.","촉촉"),true);
+ assert.equal(positiveForAspect("향은 진하지 않지만 피부는 촉촉한 것 같아요.","촉촉"),true);
+});
+test("QA09 deduplicated review chunks reject same-aspect conflict but retain unrelated-property positives",()=>{
+ const products=[candidate("mixed",16000),candidate("other",26000)];
+ const rows=[
+  evidence("mixed-ok","mixed","피부가 촉촉해요."),
+  evidence("mixed-ok","mixed","향은 진하지 않아요."),
+  evidence("mixed-conflict","mixed","바른 뒤 촉촉해요."),
+  evidence("mixed-conflict","mixed","촉촉하지 않아요."),
+  evidence("other-one","other","피부가 촉촉해요.")];
+ const sorted=sortByVerifiedPositiveReviews(rankProducts(products,rows,plan(),[]),rows,"촉촉");
+ assert.equal(sorted.status,"VERIFIED_SAMPLE_ORDER");
+ assert.equal(sorted.counts.get("mixed"),1);
+ assert.equal(sorted.counts.get("other"),1);
+});
+test("QA09 sampled zero-positive candidate stays ranked while a no-sample candidate is reference-only",()=>{
+ const products=[candidate("positive-a",15000),candidate("positive-b",16000),
+  candidate("sampled-zero",17000),candidate("unsampled",18000)];
+ const rows=[evidence("a-one","positive-a","피부가 촉촉해요."),
+  evidence("b-one","positive-b","피부가 촉촉해요."),
+  evidence("zero-one","sampled-zero","흡수가 빨라요.")];
+ const sorted=sortByVerifiedPositiveReviews(rankProducts(products,rows,plan(),[]),rows,"촉촉");
+ assert.equal(sorted.status,"VERIFIED_SAMPLE_ORDER");
+ assert.deepEqual(sorted.ranking.ranked.map(x=>x.candidate.productId).sort(),
+  ["positive-a","positive-b","sampled-zero"]);
+ assert.equal(sorted.counts.get("sampled-zero"),0);
+ assert.equal(sorted.counts.has("unsampled"),false);
+ assert.ok(sorted.ranking.referenceOnly.some(x=>x.candidate.productId==="unsampled"));
+});
 test("QA09 retrieve integration preserves requested rank ahead of cart/previous-purchase personalization",async()=>{
  const {products,reviews}=fixture();let inputs:any[]=[];
  const deps={retriever:{search:async(input:unknown)=>{inputs.push(input);return {candidates:products,evidence:reviews};}},
@@ -242,4 +314,14 @@ test("QA09 Commerce-unverified candidates are never counted as a verified user-r
  assert.equal(sorted.status,"INSUFFICIENT");
  assert.equal(sorted.ranking.ranked.length,0);
  assert.ok(sorted.ranking.referenceOnly.some(x=>x.candidate.productId==="unverified"));
+});
+
+
+test("QA09 attribution survives contrast boundaries without discarding firsthand positives",()=>{
+ for(const text of ["광고에서는 촉촉하다지만 실제로 써보니 별로예요.",
+  "친구는 촉촉하다지만 저는 잘 모르겠어요.","남들은 촉촉하다는데 저는 별로예요."])
+  assert.equal(positiveForAspect(text,"촉촉"),false,text);
+ for(const text of ["향은 진하지 않지만 피부는 촉촉해요.",
+  "광고에서는 향이 좋다지만 직접 써보니 피부는 촉촉해요."])
+  assert.equal(positiveForAspect(text,"촉촉"),true,text);
 });

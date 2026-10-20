@@ -3,8 +3,17 @@
  */
 import type {EvidenceRecord,RankingResult,RankedCandidate} from "./contracts.ts";
 
+/** Cancellation applies to sorting, never to unrelated budget/product conditions. */
+export function isReviewSortCancelled(message:string):boolean{
+ const text=message.trim().replace(/\s+/g," ");
+ return /(?:리뷰|후기)\s*(?:순|기준|정렬)(?:\s*기준)?(?:은|는|을|를)?\s*(?:없애|취소|해제|초기화|빼|제외|하지\s*마)/.test(text)||
+  /(?:정렬|순서)(?:\s*기준)?(?:은|는|을|를)?\s*(?:상관없|초기화|취소|해제|없애|빼|하지\s*마)/.test(text)||
+  /(?:리뷰|후기).{0,40}(?:많은\s*순|많이\s*(?:언급|나온|나오는)\s*순)(?:으로|은|는|이|가)?\s*(?:말고|아닌|아니|제외|빼고|취소|해제|초기화|없애|하지\s*마)/.test(text);
+}
+
 export function requestedPositiveReviewSort(message:string):string|null{
  const text=message.trim().replace(/\s+/g," ");
+ if(isReviewSortCancelled(text))return null;
  if(!/(?:리뷰|후기)/.test(text)||!/(?:많은\s*순|많이\s*(?:언급|나온)\s*순|많은\s*(?:순서|순으로)|많이\s*나오는\s*순)/.test(text))return null;
  // The sort subject must be attached to the review clause. If ambiguous, do not silently infer a sort.
  const m=/(?:^|\s|에서\s*)([가-힣]{2,20}?)(?:하다는|하다고|했다는|한\s*편이라는|하단|하다는\s*긍정적인)\s*(?:긍정적인\s*)?(?:리뷰|후기)(?:가|이|를|를\s*가장)?\s*(?:많은|많이)/.exec(text)||
@@ -17,23 +26,33 @@ export function requestedPositiveReviewSort(message:string):string|null{
 export function positiveForAspect(text:string,aspect:string):boolean{
  if(!text||text.length>600)return false;
  const normalized=text.normalize("NFKC");
- const chunks=normalized.split(/[.!\n。]/);
+ const chunks=normalized.split(/[.!\n。,;]|(?:지만|는데)\s*/);
  for(const clause of chunks){
   if(!clause.includes(aspect))continue;
   // Interrogation, attribution, quotation and negation all invalidate positive evidence.
-  if(/[?？]/.test(clause)||/(?:후기|리뷰|누가|남들|사람들|친구|타인|광고).{0,16}(?:말|하대|했대|그렇다)/.test(clause)||
+  if(/[?？]/.test(clause)||/(?:후기|리뷰|광고)(?:에서(?:는)?|에선|에는)|(?:친구|타인|남들|사람들)(?:은|는|이|가)/.test(clause)||
+   /(?:후기|리뷰|누가|남들|사람들|친구|타인|광고).{0,16}(?:말|하대|했대|그렇다)/.test(clause)||
    /(?:라고|이라는|라는|다고)\s*(?:하던데|들었|봤|적혀|써있|했다|해서|하지만)/.test(clause)||
    /["“”'‘’]/.test(clause))continue;
   const at=clause.indexOf(aspect);
-  const around=clause.slice(Math.max(0,at-10),Math.min(clause.length,at+45));
+  const around=clause.slice(at,Math.min(clause.length,at+45));
   if(/(?:안\s*|못\s*|덜\s*|별로\s*|전혀\s*|그다지\s*|생각보다\s*안\s*)$/.test(clause.slice(Math.max(0,at-15),at))||
-     /(?:하지\s*않|하지\s*못|하지\s*않아|하지\s*않았|하지\s*않음|하지\s*않는|하진\s*않|하지\s*않더|하지\s*못해|지\s*않|지\s*못|아니|않아|별로|부족|없어|실망|아쉽|불만|과장|그렇지\s*않)/.test(around))continue;
+     /(?:진\s*않|지는\s*않|않(?:다|음|네|더|았|는|을)|하지\s*않|하지\s*못|하지\s*않아|하지\s*않았|하지\s*않음|하지\s*않는|하진\s*않|하지\s*않더|하지\s*못해|지\s*않|지\s*못|아니|않아|별로|부족|없어|실망|아쉽|불만|과장|그렇지\s*않)/.test(around))continue;
   // Presence alone is insufficient: require an affirmative adjectival ending or explicit approval.
   const suffix=clause.slice(at+aspect.length,at+aspect.length+24);
   if(/^(?:해요|해서|했고|하고|한\s*편|합니다|함이\s*(?:좋|느껴|만족)|하네요|해|하다(?=$|\s|[,;])|하더라|했어요|한데|한\s*것|하게|하게\s*느껴|한\s*느낌)/.test(suffix)||
      /^(?:함|한|함이).{0,12}(?:좋|만족|추천)/.test(suffix))return true;
  }
  return false;
+}
+
+/** Only contradictory opinions about the requested aspect invalidate a positive chunk. */
+function negativeForAspect(text:string,aspect:string):boolean{
+ return text.normalize("NFKC").split(/[.!\n。,;]|(?:지만|는데)\s*/).some(clause=>{
+  const at=clause.indexOf(aspect);if(at<0)return false;
+  return /(?:안\s*|못\s*|덜\s*|별로\s*|전혀\s*)$/.test(clause.slice(Math.max(0,at-15),at))||
+   /(?:지\s*않|진\s*않|지는\s*않|지\s*못|아니|않(?:아|다|음|네|더|았|는|을)|별로|부족|없어|실망|아쉽|불만|과장)/.test(clause.slice(at,at+45));
+ });
 }
 
 export interface PositiveReviewSortResult{
@@ -57,6 +76,7 @@ export function sortByVerifiedPositiveReviews(
  }
  const unique=new Set<string>();
  const selected:RankedCandidate[]=[];
+ const unsampled:RankedCandidate[]=[];
  const unverifiable=ranking.ranked.filter(row=>row.candidate.commerceVerified!==true);
  for(const [productId,rows] of byProduct){
   let bestRow:RankedCandidate|null=null,bestCount=-1;
@@ -73,18 +93,22 @@ export function sortByVerifiedPositiveReviews(
     (e.sourceKind==="REAL"||e.sourceKind==="SYNTHETIC"&&p.isSimulated===true&&p.qaRankingEligible===true));
    const reviews=new Map<string,EvidenceRecord[]>();
    for(const e of scoped){const group=reviews.get(e.sourceId!)??[];group.push(e);reviews.set(e.sourceId!,group);}
+   if(!reviews.size)continue;
    let count=0;
    for(const [reviewId,group] of reviews){
     unique.add(productId+":"+reviewId);
     const positives=group.filter(e=>positiveForAspect(e.text!,aspect));
-    const negative=group.some(e=>/(?:하지\s*않|지\s*않|안\s*|별로|아쉽|불만|실망|부족)/.test(e.text!));
-    if(positives.length&&(!negative||group.every(e=>positiveForAspect(e.text!,aspect))))count++;
+    const negative=group.some(e=>negativeForAspect(e.text!,aspect));
+    if(positives.length&&!negative)count++;
    }
    if(count>bestCount){bestRow=row;bestCount=count;}
   }
   if(bestRow){selected.push(bestRow);counts.set(productId,bestCount);}
+  else if(rows.some(row=>row.candidate.commerceVerified===true))unsampled.push(rows.find(row=>row.candidate.commerceVerified===true)!);
  }
- const referenceOnly=[...ranking.referenceOnly,...unverifiable.map(row=>({
+ const referenceOnly=[...ranking.referenceOnly,...unsampled.map(row=>({
+  candidate:row.candidate,reasons:["review_sort_sample_unavailable"]
+ })),...unverifiable.map(row=>({
   candidate:row.candidate,reasons:["commerce_identity_unverified"]
  }))];
  const positiveProducts=[...counts.values()].filter(n=>n>0).length;

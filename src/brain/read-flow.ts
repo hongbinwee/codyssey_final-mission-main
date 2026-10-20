@@ -10,7 +10,7 @@ import {curateRecommendations,type CommerceActivity} from "./recommendation-stra
 import type {PlanExtraction,ShoppingPlan} from "./shopping-plan.ts";
 import {resolveShoppingPlan} from "./shopping-plan.ts";
 import {parseKrwTenThousandBand} from "./price-band.ts";
-import {requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "./review-sort.ts";
+import {isReviewSortCancelled,requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "./review-sort.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {WishlistItem,WishlistView} from "./wishlist-task.ts";
 import type {ShoppingHandoff} from "./shopping-handoff.ts";
@@ -112,9 +112,10 @@ export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous
  if(explicitBand)plan={...plan,...explicitBand};
  else if(intent.budgetMode==="SET")plan={...plan,minTotalWon:undefined};
  const requestedAspect=requestedPositiveReviewSort(req.userMessage);
- const cleared=/리뷰\s*(?:순|기준|정렬)\s*(?:없애|취소|해제)|(?:정렬|순서)\s*(?:상관없|초기화)|(?:가격|평점)\s*(?:낮은|높은|많은|좋은)?\s*순/.test(req.userMessage);
+ const cleared=isReviewSortCancelled(req.userMessage)||
+  /(?:가격|평점)\s*(?:낮은|높은|많은|좋은)?\s*순/.test(req.userMessage);
  const changedTask=intent.queryMode==="SET"&&previous&&plan.query!==previous.query;
- plan={...plan,...(requestedAspect?{reviewSortAspect:requestedAspect}:
+ plan={...plan,...(requestedAspect&&!cleared?{reviewSortAspect:requestedAspect}:
    !cleared&&!changedTask&&previous?.reviewSortAspect?{reviewSortAspect:previous.reviewSortAspect}:{reviewSortAspect:undefined})};
  if(!plan.query||plan.query.length>200)throw new Error("invalid shopping plan");
  return plan;
