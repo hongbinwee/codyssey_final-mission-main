@@ -83,7 +83,11 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
        {recommendationRole==="PERSONALIZED"&&!personalizationSignals?.length&&<p className="muted sm">현재 조건과 검증된 상품 근거로 비교한 후보예요.</p>}
        {explanation?.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))?.reason&&<div className="brain-product-reason"><BrainAnswer text={explanation.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))!.reason!}/></div>}
        {(p.keywords??[]).filter(k=>!/(?:type|sub_category|source_kind|[a-z]+_[a-z]+)/.test(k)).slice(0,3).map((keyword,i)=><span key={i} className="chip">{keyword}</span>)}
-       {reference&&<p className="muted sm">말씀하신 조건에 맞는지 더 확인이 필요한 상품이에요.</p>}
+       {reference&&<p className="muted sm">{
+        ranking.referenceOnly.some(row=>row.candidate.productId===p.productId&&row.reasons.includes("review_sort_evidence_insufficient"))?
+        "확인된 리뷰가 부족해 요청하신 순위는 정하지 않았어요.":
+        "말씀하신 조건에 맞는지 더 확인이 필요한 상품이에요."
+       }</p>}
        {p.commerceVerified!==true&&<p className="muted sm">상품 확인 전 · 상세보기 준비 중</p>}
        {!reference&&onExcludeProduct&&<div className="brain-product-footer"><button className="link brain-product-exclude" onClick={()=>onExcludeProduct(p.productId)}>이 상품은 빼주세요</button></div>}
      </div>
