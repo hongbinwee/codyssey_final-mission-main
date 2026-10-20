@@ -109,6 +109,7 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
  const [pending,setPending]=useState<string|null>(null);
  const [pendingValue,setPendingValue]=useState<typeof selected|null>(null);
  const [memories,setMemories]=useState<MemoryItem[]>([]);
+ const [preferencesReady,setPreferencesReady]=useState(false);
  const [entries,setEntries]=useState<Entry[]>([]);
  const [busy,setBusy]=useState(false);
  const [restoring,setRestoring]=useState(true);
@@ -135,8 +136,9 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
    }).finally(()=>{if(generation===epoch.current)setRestoring(false);});
    void listConversations(generation);
    void apiSafe<MemoryItem[]>("/api/brain/preferences").then(r=>{
-     if(generation!==epoch.current||!r.ok)return;
-     setMemories(r.data);
+     if(generation!==epoch.current)return;
+     if(!r.ok){setPreferencesReady(false);return;}
+     setPreferencesReady(true);setMemories(r.data);
      const preference=r.data.find(m=>m.key==="price_priority");
      if(preference&&["value","balanced","performance"].includes(preference.value))
        setSelected(preference.value as typeof selected);
@@ -147,6 +149,7 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
 
  const refresh=async()=>{
    const result=await apiSafe<MemoryItem[]>("/api/brain/preferences");
+   setPreferencesReady(result.ok);
    if(result.ok){
      setMemories(result.data);
      const preference=result.data.find(m=>m.key==="price_priority");
@@ -215,7 +218,7 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
    }finally{lock.current=false;setBusy(false);}
  };
  const propose=async()=>{
-   if(!conversation||!sourceMessage||lock.current||restoring||alreadySaved)return;
+   if(!conversation||!sourceMessage||lock.current||restoring||!preferencesReady||alreadySaved)return;
    const value=selected;
    lock.current=true;setBusy(true);setError("");setNotice("");
    try{
@@ -244,7 +247,16 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
      }else if(r.error.code==="CONFIRMATION_REQUIRED"){
        setPending(null);setPendingValue(null);
        setError("확인 시간이 지났거나 이미 처리한 요청이에요. 저장하기를 다시 눌러 주세요.");
-     }else setError("가격 기준 저장에 실패했어요. 저장 확인을 다시 눌러 주세요.");
+     }else{
+       // Confirmation can commit even when the HTTP reply is lost; reconcile
+       // before inviting a retry with a consumed confirmation token.
+       const synced=await apiSafe<MemoryItem[]>("/api/brain/preferences");
+       if(synced.ok&&synced.data.some(m=>m.key==="price_priority"&&m.value===expected)){
+         setMemories(synced.data);setPreferencesReady(true);
+         setPending(null);setPendingValue(null);
+         setNotice("가격 기준을 저장했어요. 다음 상품 추천부터 반영할게요.");
+       }else setError("가격 기준 저장 결과를 확인하지 못했어요. 다시 확인하거나 잠시 후 시도해 주세요.");
+     }
    }finally{lock.current=false;setBusy(false);}
  };
  const cancelPending=()=>{
@@ -321,6 +333,7 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
          {e.reply.explanation?.kind!=="CONVERSATION"&&e.reply.explanation?.kind!=="CLARIFICATION"&&<BrainRanking explanation={e.reply.explanation} ranking={e.reply.ranking} onOpenProduct={onOpenProduct} onExcludeProduct={i===entries.length-1&&!busy?(id)=>sendChoice(`이 상품 제외: ${id}`):undefined}/>}
        </>}
      </div>)}
+     {showExplore&&!busy&&<div className="brain-explore"><button className="btn" disabled={restoring} onClick={()=>sendChoice("조건 바꾸기")}>조건 바꾸기</button><button className="btn" disabled={restoring} onClick={()=>sendChoice("다른 상품 보기")}>다른 상품 보기</button></div>}
      {sourceMessage&&conversation&&(entries.at(-1)?.reply?.ranking.ranked.length??0)>0&&<section className="state-box brain-preference-save" aria-label="가격 기준 저장">
        <div className="brain-preference-intro">
          <h3>이 가격 기준을 기억해둘까요?</h3>
@@ -345,8 +358,10 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
          </div>:
          <div className="brain-preference-actions">
            {alreadySaved?<p role="status" className="brain-preference-saved">현재 저장된 기준이에요.</p>:
-             <button className="btn primary" onClick={()=>void propose()} disabled={busy||restoring||!conversation||!sourceMessage}>저장하기</button>}
+             <button className="btn primary" onClick={()=>void propose()} disabled={busy||restoring||!preferencesReady||!conversation||!sourceMessage}>저장하기</button>}
          </div>}
+       {!preferencesReady&&<button className="link brain-preference-retry" disabled={busy||restoring}
+         onClick={()=>void refresh()}>저장된 선호 다시 확인</button>}
        <p className="brain-preference-note">원할 때 저장하고, 나중에 바꿀 수 있어요.</p>
      </section>}
      {memories.length>0&&<section className="state-box brain-memory" aria-label="저장된 선호">
@@ -355,7 +370,7 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
        {storedPrice&&<button className="link" onClick={()=>void clear()} disabled={busy||restoring}>저장한 가격 기준 삭제</button>}
      </section>}
      {interview.questions.length>0&&<section className="state-box brain-interview" aria-label="추천 조건 확인"><div className="brain-interview-heading"><span className="brain-section-icon" aria-hidden="true">☷</span><div><span className="brain-eyebrow">맞춤 추천 준비</span><h3>원하는 조건을 알려주세요</h3></div></div>{interview.questions.map((q,index)=><fieldset key={q.key}><legend><span className="brain-question-number">{index+1}</span>{q.text}</legend><div className="brain-quick-choices">{q.choices.map(choice=><button key={choice} className="btn brain-choice" aria-label={choice} disabled={busy||restoring} onClick={()=>sendChoice(choice)}>{choice.replace(/^예산은 /,"")}</button>)}</div></fieldset>)}<p className="muted sm">아래 입력창에 원하는 조건을 직접 적어도 좋아요.</p></section>}
-     {showExplore&&!busy&&<div className="brain-explore"><button className="btn" disabled={restoring} onClick={()=>sendChoice("조건 바꾸기")}>조건 바꾸기</button><button className="btn" disabled={restoring} onClick={()=>sendChoice("다른 상품 보기")}>다른 상품 보기</button></div>}
+
      {notice&&<p role="status" className="muted sm">{notice}</p>}
      {error&&<p role="alert">{error}</p>}
      <div ref={bottom}/>
