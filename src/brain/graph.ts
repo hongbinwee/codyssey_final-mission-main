@@ -99,6 +99,18 @@ export function createPersistentResearchGraph(
      const answer=deps.clarifyBeforeSearch&&interviewAnswer(state.request.userMessage,previous);
      const follow=previous&&['다른 상품 보기','다른 제품 보기','조건 바꾸기'].includes(state.request.userMessage.trim());
      const route=guardBrainMessage(state.request.userMessage)??(answer||follow?{kind:"SHOPPING_FOLLOWUP" as const,search:true}:await (deps.route?.(state.request.userMessage,state.researchResult?.shoppingPlan)??{kind:"SHOPPING_SEARCH" as const,search:true}));
+     // A bounded follow-up answer continues the same suspended task; a clear new
+     // intent (including greetings and writes) is never captured by this path.
+     if(activeTask?.phase==="AWAITING_INPUT"&&activeTask.pendingQuestion==="agent_followup"&&
+       route.kind==="UNCERTAIN"&&guard?.kind!=="UNCERTAIN"&&deps.hermes){
+       const read=activeTask.kind==="ORDER"||activeTask.kind==="CART"||activeTask.kind==="WISHLIST";
+       const available=deps.hermes.toolPorts?.(state.request.actorUserId);
+       if(!read||available?.cart||available?.orders||deps.wishlist){
+         await verify();return {activeTask,agentRead:read,priorExplanation:null,wishlistRequest:null,
+           intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:!read},
+           routeMs:performance.now()-started};
+       }
+     }
      await verify();return {intentRoute:route,activeTask,priorExplanation:null,wishlistRequest:null,routeMs:performance.now()-started};
    })
    .addNode("explain_previous",async state=>{
@@ -263,7 +275,8 @@ export function createPersistentResearchGraph(
        ...(state.intentRoute.search&&state.shoppingPlan?{shoppingPlan:state.shoppingPlan}:{}),
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},datasetVersion:deps.datasetVersion,
        taskState:nextTask(taskScope(state.request),taskKind,state.activeTask,{
-         phase:state.agentStop==="RETRIEVAL_UNAVAILABLE"?"UNAVAILABLE":"ACTIVE",displayedProductIds:ids,
+         phase:state.agentStop==="RETRIEVAL_UNAVAILABLE"?"UNAVAILABLE":state.agentQuestion?"AWAITING_INPUT":"ACTIVE",
+         pendingQuestion:state.agentQuestion?"agent_followup":undefined,displayedProductIds:ids,
        }),
        explanation:{kind:"CONVERSATION",items:[],limitations:[],text},
        trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,
