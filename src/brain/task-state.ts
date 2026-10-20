@@ -4,7 +4,7 @@
  */
 export type AgentTaskKind="WISHLIST"|"CART"|"DISCOVERY"|"REVIEW_COMPARE"|"ORDER";
 export type AgentTaskPhase="ACTIVE"|"AWAITING_INPUT"|"UNAVAILABLE";
-export type PendingTaskQuestion="budget"|"purpose"|"product_type";
+export type PendingTaskQuestion="budget"|"purpose"|"product_type"|"agent_followup";
 export interface TaskScope {actorUserId:string;conversationId:string;datasetVersion?:string}
 export interface AgentTaskState extends TaskScope {
  schemaVersion:1;kind:AgentTaskKind;phase:AgentTaskPhase;revision:number;
@@ -13,7 +13,7 @@ export interface AgentTaskState extends TaskScope {
 }
 const kinds=new Set<AgentTaskKind>(["WISHLIST","CART","DISCOVERY","REVIEW_COMPARE","ORDER"]);
 const phases=new Set<AgentTaskPhase>(["ACTIVE","AWAITING_INPUT","UNAVAILABLE"]);
-const questions=new Set<PendingTaskQuestion>(["budget","purpose","product_type"]);
+const questions=new Set<PendingTaskQuestion>(["budget","purpose","product_type","agent_followup"]);
 const identifier=(x:unknown):x is string=>typeof x==="string"&&x.length>0&&x.length<=256&&!/[\u0000-\u001f]/.test(x);
 /** Only a previously published, matching conversation's task can be reused. */
 export function ownedTask(raw:unknown,scope:TaskScope):AgentTaskState|null{
