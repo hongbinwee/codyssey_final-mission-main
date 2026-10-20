@@ -1,4 +1,4 @@
-name: Hermes H1-H5 graph checks
+name: Hermes H1-H6 graph checks
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
         run: npm run check
       - name: Build storefront
         run: npm run build
-      - name: H1 H2 H3 H4 H5 unit regression
+      - name: H1 H2 H3 H4 H5 H6 unit regression
         run: >
           node --test
           tests/unit/brain-hermes-loop.test.ts
@@ -40,6 +40,7 @@ jobs:
           tests/unit/brain-hermes-h4.test.ts
           tests/unit/brain-hermes-h5.test.ts
           tests/unit/brain-hermes-h5-flow.test.ts
+          tests/unit/brain-hermes-h6.test.ts
           tests/unit/brain-wishlist-task.test.ts
           tests/unit/brain-task-state.test.ts
           tests/unit/brain-task-multiturn.test.ts
