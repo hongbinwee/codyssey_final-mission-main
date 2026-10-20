@@ -127,3 +127,7 @@ The H4 checkpointed LangGraph decide→execute→observe→replan code, determin
 ## H5 implementation checkpoint
 
 Implemented typed, server-derived Product/Cart/Checkout-quote/Orders/OrderDetail navigation-only handoffs, UI routing through the existing Commerce screens, explicit user-controlled cart/payment/cancel flows and H5 graph regression. **94/94 gated tests**, whole-repo Typecheck and Build passed in [GitHub Actions 39354074203](https://github.com/hongbinwee/codyssey_final-mission-main/actions/runs/39354074203). Full unit diagnostic **1,010 total / 965 passed / 44 failed / 1 skipped**; neither a complete regression PASS nor real browser/Commerce QA. Details: [HERMES_H5_SHOPPING_HANDOFF.md](./HERMES_H5_SHOPPING_HANDOFF.md). Next: H6 evaluation, real identity-isolation and final authorization UX QA.
+
+## H6 quality and optimization checkpoint
+
+Added allowlisted/bounded per-observation LLM inputs, H4 per-turn decision/tool timing Trace, H6 privacy-safe Tool-path/search/grounding/tenant/p95 evaluator, minimum live/connected sample gates and metadata-only CLI. Actual GitHub Actions [39355626901](https://github.com/hongbinwee/codyssey_final-mission-main/actions/runs/39355626901) **Typecheck/Build PASS, H1-H6 gated 105/105 PASS**. Broader suite **1,021 total / 976 passed / 44 failed / 1 skipped**, still diagnostic. Actual model/DB/browser measurements remain NOT_RUN in this turn. See [HERMES_H6_QA_OPTIMIZATION.md](./HERMES_H6_QA_OPTIMIZATION.md); no QA deployment authorized.
