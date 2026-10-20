@@ -35,7 +35,7 @@ export type ReviewSummaryOutcome=
    sampled:number;totalMatching:number;citations:{sourceId:string;quote:string;sourceKind:"REAL"|"SYNTHETIC";sourceVariantId:string|null}[]};
 const idOk=(x:unknown)=>typeof x==="string"&&x.length>0&&x.length<=128;
 /** Keep externally supplied instructions, links, personal contact and secrets out of model evidence and user citations. */
-const unsafeReview=(body:string)=>/https?:\\/\\/|(?:ignore|disregard).{0,30}(?:instruction|rule|prompt)|(?:system|developer)\\s*prompt|(?:시스템|개발자)\\s*프롬프트|(?:이전|모든)\\s*(?:지침|명령|규칙)\\s*무시|(?:api|인증)\\s*키|비밀번호|(?:주문|상품)\\s*취소\\s*(?:해|하라)|cancel.{0,20}order|(?:\\d{3}[- ]?\\d{3,4}[- ]?\\d{4})/i.test(body);
+const unsafeReview=(body:string)=>/https?:\/\/|(?:ignore|disregard).{0,30}(?:instruction|rule|prompt)|(?:system|developer)\s*prompt|(?:시스템|개발자)\s*프롬프트|(?:이전|모든)\s*(?:지침|명령|규칙)\s*무시|(?:api|인증)\s*키|비밀번호|(?:주문|상품)\s*취소\s*(?:해|하라)|cancel.{0,20}order|(?:\d{3}[- ]?\d{3,4}[- ]?\d{4})/i.test(body);
 const safeName=(x:string)=>x.replace(/[\r\n<>]/g," ").slice(0,100);
 /** This branch never requires stock, an active variant, a user budget, or RAG results. */
 export async function summarizeNamedProductReviews(input:{
