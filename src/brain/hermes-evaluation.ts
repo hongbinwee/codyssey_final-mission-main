@@ -11,6 +11,10 @@ export interface HermesEvalCase{
  grounded:boolean|null;actorIsolated:boolean|null;writeWithoutApproval:boolean;
  durationMs:number;
 }
+const permittedTools=new Set<string>(["get_purchase_history","search_products","get_wishlist","get_cart",
+ "get_product_detail","get_product_reviews","get_orders","get_order","get_shipping_status"]);
+const validModes=new Set<string>(["DETERMINISTIC_MOCK","LIVE_MODEL","CONNECTED_E2E"]);
+const validOutcomes=new Set<string>(["ANSWERED","CLARIFIED","SAFE_REFUSAL","ERROR"]);
 const matches=(a:readonly string[],b:readonly string[])=>a.length===b.length&&a.every((x,i)=>x===b[i]);
 const percentile=(a:number[],p:number)=>a.length?a[Math.ceil(a.length*p)-1]:null;
 export function summarizeHermesEvaluation(rows:readonly HermesEvalCase[]){
@@ -20,7 +24,12 @@ export function summarizeHermesEvaluation(rows:readonly HermesEvalCase[]){
   if(!/^[a-zA-Z0-9._-]{1,80}$/.test(r.caseId)||ids.has(r.caseId)||
    !Number.isFinite(r.durationMs)||r.durationMs<0||
    r.actualTools.length>5||r.expectedTools.length>5||
-   r.actualTools.some(t=>typeof t!=="string")||r.expectedTools.some(t=>typeof t!=="string"))
+   r.actualTools.some(t=>!permittedTools.has(t))||r.expectedTools.some(t=>!permittedTools.has(t))||
+   !validModes.has(r.mode)||!validOutcomes.has(r.outcomeActual)||
+   !["ANSWERED","CLARIFIED","SAFE_REFUSAL"].includes(r.outcomeExpected)||
+   typeof r.searchRequired!=="boolean"||typeof r.writeWithoutApproval!=="boolean"||
+   r.grounded!==null&&typeof r.grounded!=="boolean"||
+   r.actorIsolated!==null&&typeof r.actorIsolated!=="boolean")
    throw Error("invalid evaluation metadata");
   ids.add(r.caseId);
  }
