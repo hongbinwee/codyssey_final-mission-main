@@ -15,10 +15,11 @@ export interface DecisionsRouterOptions {
 }
 const KINDS:BrainIntentKind[]=[
   "GREETING","SOCIAL","CAPABILITY","SHOPPING_SEARCH",
-  "SHOPPING_FOLLOWUP","REVIEW_COMPARE","CS_REQUEST","UNCERTAIN",
+  "SHOPPING_FOLLOWUP","REVIEW_COMPARE","REVIEW_SUMMARY","CS_REQUEST","UNCERTAIN",
 ];
 const SEARCH=new Set<BrainIntentKind>(["SHOPPING_SEARCH","SHOPPING_FOLLOWUP","REVIEW_COMPARE"]);
 const REPLIES:Record<Exclude<BrainIntentKind,"SHOPPING_SEARCH"|"SHOPPING_FOLLOWUP"|"REVIEW_COMPARE">,string>={
+  REVIEW_SUMMARY:"어떤 상품의 리뷰를 정리할까요? 상품명을 알려주세요.",
   GREETING:BRAIN_GREETING,
   SOCIAL:"반가워요. 더 궁금한 점이 있으면 편하게 말씀해 주세요.",
   CAPABILITY:BRAIN_CAPABILITIES,
@@ -32,6 +33,7 @@ const CHOICES=[
   {value:"CAPABILITY",description:"What this shopping assistant can do, instructions or help using it."},
   {value:"SHOPPING_SEARCH",description:"New shopping need, product discovery or recommendation; may include a greeting or constraints such as fast delivery."},
   {value:"SHOPPING_FOLLOWUP",description:"Updates a prior shopping request, budget or preference; depends on the previous shopping plan."},
+  {value:"REVIEW_SUMMARY",description:"Summarize reviews of one identified product; not a recommendation or cross-product comparison."},
   {value:"REVIEW_COMPARE",description:"Compare product candidates or reviews, pros/cons, with product or prior shopping context."},
   {value:"CS_REQUEST",description:"The user's own order, delivery status, cancellation, refund, return or exchange."},
   {value:"UNCERTAIN",description:"Unclear, unrelated, unsupported or security-sensitive request; no reliable product search intent."},
