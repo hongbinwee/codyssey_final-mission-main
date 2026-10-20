@@ -119,3 +119,7 @@ Tests exercise cart no-create/no-write, actor-gated read ports, product/review f
 ### Important H3/H4 boundary
 
 H3 **exposes the reusable read tools to the existing deep Hermes loop**. It does not yet reroute standalone user messages such as "내 주문 보여줘" away from the existing CS static response. Nor does it remove the `graph.ts` deep recommendation path's mandatory retrieval or replace current recommendation explanation logic. Those are **H4 dynamic action-policy/replanning** work, not evidence that H3 enables every multi-step user workflow. Keep scenario examples as evaluation cases, never hard-code eight conversational scripts.
+
+## H4 implementation checkpoint
+
+The H4 checkpointed LangGraph decide→execute→observe→replan code, deterministic non-search read response, owned-order/cart routing and degraded verified-recommendation fallback are implemented in `feature/hermes-agent`. Whole-repo Typecheck/Build and H1-H4 scoped regression **80/80 PASS** at CI run [39352356535](https://github.com/hongbinwee/codyssey_final-mission-main/actions/runs/39352356535). See [HERMES_H4_AUTONOMOUS_LOOP.md](./HERMES_H4_AUTONOMOUS_LOOP.md) for exact design, security boundaries, full-unit diagnostic failures and H5/H6 live QA blockers. **Do not interpret CI success as full-unit success or live-model success.**
