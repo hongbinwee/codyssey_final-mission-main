@@ -18,6 +18,7 @@ import type {TurnLock,TurnLease} from "./turn-lock.ts";
 import type {FencedTurns} from "./fenced-turns.ts";
 import type {BrainRoute} from "./routing.ts";
 import {currentDatasetResult} from "./dataset-state.ts";
+import {validatedShoppingHandoffs} from "./shopping-handoff.ts";
 
 export type GraphRequest=BrainTrace & {clientActionId:string;userMessage:string};
 const State=Annotation.Root({
@@ -139,7 +140,7 @@ export function createPersistentResearchGraph(
        conversationId:state.request.conversationId,messageId:state.prepared.messageId,
        clientActionId:state.request.clientActionId,intentKind:"SHOPPING_FOLLOWUP",
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
-       ...(reply?{agentUi:reply.view}:{}),datasetVersion:deps.datasetVersion,
+       ...(reply?{agentUi:reply.view,shoppingHandoffs:validatedShoppingHandoffs({wishlist:reply.view})}:{}),datasetVersion:deps.datasetVersion,
        taskState:nextTask(taskScope(state.request),"WISHLIST",state.activeTask,{
          phase:reply?"ACTIVE":"UNAVAILABLE",displayedProductIds:reply?.view.items.map(item=>item.productId)??[],
          selectedProductId:reply?.view.selectedProductId}),
@@ -274,6 +275,7 @@ export function createPersistentResearchGraph(
        clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,
        ...(state.intentRoute.search&&state.shoppingPlan?{shoppingPlan:state.shoppingPlan}:{}),
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},datasetVersion:deps.datasetVersion,
+       shoppingHandoffs:validatedShoppingHandoffs({observations}),
        taskState:nextTask(taskScope(state.request),taskKind,state.activeTask,{
          phase:state.agentStop==="RETRIEVAL_UNAVAILABLE"?"UNAVAILABLE":state.agentQuestion?"AWAITING_INPUT":"ACTIVE",
          pendingQuestion:state.agentQuestion?"agent_followup":undefined,displayedProductIds:ids,
@@ -297,6 +299,11 @@ export function createPersistentResearchGraph(
        ...(state.intentRoute.kind==="CS_REQUEST"?{taskState:nextTask(taskScope(state.request),"ORDER",state.activeTask,{phase:"UNAVAILABLE"})}
          :{taskState:retainTask(state.activeTask,taskScope(state.request))}),
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
+       shoppingHandoffs:validatedShoppingHandoffs({
+         showOrdersForCancellation:state.intentRoute.kind==="CS_REQUEST"&&
+           /취소|환불|반품|교환/.test(state.request.userMessage)&&
+           !!deps.hermes?.toolPorts?.(state.request.actorUserId).orders,
+       }),
        explanation,
        datasetVersion:deps.datasetVersion,trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,responseMs:performance.now()-started,
          totalMs:performance.now()-state.prepared.startedAt}};
@@ -341,6 +348,7 @@ export function createPersistentResearchGraph(
        const selected=researchResult.ranking.ranked.filter(row=>row.candidate.commerceVerified===true&&(researchResult.explanation.failure||researchResult.explanation.items.some(item=>item.productId===row.candidate.productId&&item.variantId===row.candidate.variantId)));
        researchResult.shoppingPlan={...researchResult.shoppingPlan,lastDisplayedProductIds:[...new Set([...selected,...researchResult.ranking.referenceOnly].map(row=>row.candidate.productId))].slice(0,3)};
      }
+     researchResult.shoppingHandoffs=validatedShoppingHandoffs({ranking:researchResult.ranking});
      researchResult.taskState=nextTask(taskScope(state.request),state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY",state.activeTask,
        {displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
      researchResult.trace={...researchResult.trace,hermesToolCalls:(state.agentObservations??[]).length,routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
