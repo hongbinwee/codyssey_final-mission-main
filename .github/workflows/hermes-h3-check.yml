@@ -41,3 +41,7 @@ jobs:
           tests/unit/brain-task-state.test.ts
           tests/unit/brain-task-multiturn.test.ts
           tests/unit/brain-dataset-state.test.ts
+          tests/unit/brain-hermes-purchase.test.ts
+          tests/unit/brain-v4-flow.test.ts
+          tests/unit/brain-routing.test.ts
+          tests/unit/brain-recommendation-followup.test.ts
