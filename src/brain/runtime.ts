@@ -8,6 +8,8 @@ import {createCatalog,type CatalogSource} from "../catalog.ts";
 import {sql} from "../db.ts";
 import {readCommerceActivity} from "./commerce-signals.ts";
 import {purchaseSnapshots} from "./purchase-history.ts";
+import {createHermesReadPorts,readExistingCart} from "./hermes-read-ports.ts";
+import {listOrders,getOrder,getShippingStatus} from "../orders.ts";
 import {getWishlist} from "../wishlist.ts";
 import {qaCommerceDatabaseIdentityMatches} from "../qa-commerce.ts";
 import {assertServiceRole} from "../db.ts";
@@ -230,6 +232,25 @@ export async function createBrainRuntime(options:{
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:options.rag?.contract!=="v4",datasetVersion:options.rag?.datasetVersion,
      ...(options.hermesEnabled?{hermes:{provider:options.hermesProvider??options.provider,
        history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId),
+       toolPorts:(actorUserId:string)=>createHermesReadPorts({
+         actorUserId,catalog,ownedCommerce:ownQaCommerce,
+         ...(ownQaCommerce?{
+           cart:()=>readExistingCart(actorUserId),
+           orders:async()=>{
+             const result=await listOrders({actorUserId,origin:"AGENT"},{limit:10});
+             if(!result.ok)throw Error("owned orders unavailable");
+             return {orders:result.data.orders,hasMore:result.data.has_more};
+           },
+           order:async(orderId:string)=>{
+             const result=await getOrder({actorUserId,origin:"AGENT"},orderId);
+             return result.ok?result.data:null;
+           },
+           shipping:async(orderId:string)=>{
+             const result=await getShippingStatus({actorUserId,origin:"AGENT"},orderId);
+             return result.ok?result.data:null;
+           },
+         }:{})
+       }),
        reviewCount:async(productId:string)=>{const result=await catalog.getReviews({product_id:productId,limit:1});return result.ok?result.data.total_matching:null;}}}:{}),
      ...(options.hermesEnabled?{wishlist:async(actorUserId:string)=>{
        const result=await getWishlist({actorUserId,origin:"AGENT"});
