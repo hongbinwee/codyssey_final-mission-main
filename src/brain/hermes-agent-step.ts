@@ -155,8 +155,13 @@ export function summarizeAgentObservations(observations:readonly AgentObservatio
   return list?.length?"찜 목록에서 "+list.slice(0,4).map(x=>x.name).join(", ")+"을(를) 확인했어요.":"찜한 상품이 없어요.";
  }
  if(recent.tool==="get_product_detail"){
-  const item=data.product as {name:string;variants:Array<{priceWon:number}>};
-  return item?"확인된 상품은 "+item.name+"이고, 옵션 가격은 "+(item.variants[0]?.priceWon?.toLocaleString("ko-KR")??"미확인")+"원부터예요.":"상품 정보를 확인하지 못했어요.";
+  const item=data.product as {name:string;active:boolean;variants:Array<{priceWon:number;availability:string}>;shippingFeeWon:number};
+  if(!item)return "상품 정보를 확인하지 못했어요.";
+  const prices=item.active?item.variants.filter(v=>v.availability==="AVAILABLE"&&Number.isSafeInteger(v.priceWon)&&v.priceWon>=0).map(v=>v.priceWon):[];
+  if(!prices.length)return "확인된 "+item.name+"의 구매 가능한 옵션이 현재 없어요.";
+  const min=Math.min(...prices);
+  return item.name+"의 현재 판매 가능한 옵션 최저가는 "+min.toLocaleString("ko-KR")+"원이고, 배송비는 "+
+    item.shippingFeeWon.toLocaleString("ko-KR")+"원이에요. 최종 금액은 상품 상세에서 확인해 주세요.";
  }
  if(recent.tool==="get_product_reviews"){
   const review=data.review_evidence as {reviews:Array<{rating:number;body:string}>;totalMatching:number};
