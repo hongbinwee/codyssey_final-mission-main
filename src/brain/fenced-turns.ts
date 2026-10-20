@@ -1,13 +1,14 @@
 import {createHash,randomUUID} from "node:crypto";
 import type {BrainSqlDatabase} from "./persistent-store.ts";
 import type {ResearchResult} from "./read-flow.ts";
+import {sanitizePageContext,type SafePageContext} from './page-context.ts';
 
 /**
  * AI-only canonical publication. Every attempt uses a fresh, private LangGraph
  * checkpoint thread. The unfenced upstream Saver may write stale attempt data,
  * but it can NEVER publish that data as the conversation's canonical result.
  */
-type Action={actorUserId:string;conversationId:string;clientActionId:string;userMessage:string};
+type Action={actorUserId:string;conversationId:string;clientActionId:string;userMessage:string;pageContext?:SafePageContext};
 type FenceRow={generation:string|number;published_action_id:string|null};
 type ReceiptRow={input_digest:string;status:string;completed_result:unknown;checkpoint_thread_id:string|null};
 type LatestRow={completed_result:unknown;checkpoint_thread_id:string};
@@ -15,14 +16,19 @@ export type FencedClaim=
   |{kind:"replay";result:ResearchResult}
   |{kind:"run";generation:string;attemptId:string;prior:ResearchResult|null};
 
-const digest=(action:Action)=>createHash("sha256").update(JSON.stringify([
-  action.actorUserId,action.conversationId,action.clientActionId,action.userMessage
-])).digest("hex");
+const digest=(action:Action)=>{
+ const page=sanitizePageContext(action.pageContext);
+ // Keep legacy fingerprints unchanged for requests without navigation context.
+ return createHash("sha256").update(JSON.stringify([
+  action.actorUserId,action.conversationId,action.clientActionId,action.userMessage,
+  ...(page?[[page.screen??null,page.product_id??null,page.order_id??null]]:[])
+ ])).digest("hex");
+};
 
 function checkedResult(raw:unknown,conversationId:string):ResearchResult {
   const r=(typeof raw==="string"?JSON.parse(raw):raw) as ResearchResult;
   if(!r||typeof r!=="object"||r.conversationId!==conversationId||
-    typeof r.messageId!=="string"||!r.explanation||(!r.shoppingPlan&&r.explanation.kind!=="CONVERSATION"))
+    typeof r.messageId!=="string"||!r.explanation||(!r.shoppingPlan&&r.explanation.kind!=="CONVERSATION"&&r.explanation.kind!=="REVIEW_SUMMARY"))
     throw new Error("invalid canonical Brain receipt");
   return r;
 }
@@ -78,7 +84,7 @@ export class FencedTurns {
   /** Atomic guarded promotion: stale/failed attempts can never change the public pointer. */
   async publish(action:Action,claim:Extract<FencedClaim,{kind:"run"}>,result:ResearchResult):Promise<void>{
     if(result.conversationId!==action.conversationId||result.clientActionId!==action.clientActionId||
-       !result.explanation||(!result.shoppingPlan&&result.explanation.kind!=="CONVERSATION"))throw Error("invalid graph result");
+       !result.explanation||(!result.shoppingPlan&&result.explanation.kind!=="CONVERSATION"&&result.explanation.kind!=="REVIEW_SUMMARY"))throw Error("invalid graph result");
     await this.db.transaction(async tx=>{
       const owner=await tx.query<{id:string}>(
         "SELECT id FROM shopping_brain.conversations WHERE id=$1 AND actor_user_id=$2 AND closed_at IS NULL FOR SHARE",

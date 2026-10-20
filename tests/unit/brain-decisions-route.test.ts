@@ -18,7 +18,7 @@ test("Decisions mode sends a real /v1/decisions choice request, using bounded pr
     assert.equal(body.model,"gpt-6-luna");
     assert.equal(body.questions[0].type,"choice");
     assert.equal(body.questions[0].name,"intent");
-    assert.equal(body.questions[0].choices.length,8);
+    assert.equal(body.questions[0].choices.length,9);
     const input=JSON.parse(body.input);
     assert.equal(input.latest_user_message,"그럼 더 저렴한 걸로");
     assert.equal(input.previous_shopping_plan.query,"수분크림");

@@ -180,11 +180,11 @@ test("a title match outside the requested category keeps semantic fallback insid
  },baseChunks,products,async()=>vector(1,.05));
 });
 
-test("unsupported filters, preferences, profile switches, and top_k above five are rejected",async()=>{
+test("unsupported filters, preferences, profile switches, and top_k above ten are rejected",async()=>{
  await withSearch(async({search})=>{
    await assert.rejects(()=>search(request({filters:{brand:"example"}})),/unsupported.*filter/i);
    await assert.rejects(()=>search(request({preferences:["quiet"]})),/unsupported.*preference/i);
-   await assert.rejects(()=>search(request({top_k:6})),/top_k/i);
+   await assert.rejects(()=>search(request({top_k:11})),/top_k/i);
    await assert.rejects(()=>search({...request(),profile:"other_profile"}),/unsupported.*field/i);
  });
 });
@@ -198,6 +198,19 @@ test("retrieval output is bounded by top_k and five unique source IDs per produc
    assert.equal(result.items[0].evidence.length,5);
    assert.equal(new Set(result.items[0].evidence.map((e:any)=>e.source_id)).size,5);
  },chunks,[baseProducts[0]]);
+});
+
+test("local retrieval supports ten bounded products while keeping evidence IDs unique",async()=>{
+ const products:FixtureProduct[]=Array.from({length:12},(_,i)=>({product_id:`p-${i}`,category:"beauty",
+   dataset_version:VERSION,product_payload:{title:`무선 헤드폰 ${i}`}}));
+ const chunks=products.map((row,i)=>chunk({id:`ten-${i}`,productId:row.product_id,type:"review",
+   text:"무선 헤드폰 착용감이 좋아요",embedding:vector(1,.05),sourceId:`review-${i}`}));
+ await withSearch(async({search})=>{
+   const result=await search(request({top_k:10}));
+   assert.equal(result.items.length,10);
+   assert.equal(new Set(result.items.map((item:any)=>item.product_id)).size,10);
+   assert.equal(result.search_trace.fusedProductCount,12);
+ },chunks,products);
 });
 
 test("mixed dataset versions and incomplete product mappings fail closed during load",async()=>{

@@ -33,6 +33,16 @@ function validateContext(extracted:PlanExtraction):void{
   if(c.category!==undefined&&!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(c.category))throw Error("invalid shopping category");
   if(c.attributePreferences!==undefined&&(!c.category||!Array.isArray(c.attributePreferences)||c.attributePreferences.length>12||
     c.attributePreferences.some(k=>typeof k!=="string"||!/^(?!cost$)[a-z][a-z0-9_]{0,79}$/.test(k))))throw Error("invalid shopping attributes");
+  if(c.reviewSort!==undefined){
+    const sort=c.reviewSort as unknown;
+    if(!sort||typeof sort!=="object"||Array.isArray(sort)||
+       Object.keys(sort).sort().join(",")!=="aspect,direction")throw Error("invalid review sort");
+    const value=sort as Record<string,unknown>;
+    if(typeof value.aspect!=="string"||!value.aspect.trim()||value.aspect!==value.aspect.trim()||
+       !/^[\p{Script=Hangul}A-Za-z0-9][\p{Script=Hangul}A-Za-z0-9 _-]{0,39}$/u.test(value.aspect)||
+       /[\u0000-\u001f]/.test(value.aspect)||value.direction!=="MOST_POSITIVE")
+      throw Error("invalid review sort");
+  }
 }
 /**
  * Only explicit mode CLEAR clears a saved constraint. Older single-turn
@@ -46,8 +56,9 @@ export function resolveShoppingPlan(previous:ShoppingPlan|null|undefined,extract
     if(extracted.budgetMode==="SET"&&now.maxTotalWon===null)throw new Error("SET budget missing");
     return {query:extracted.query.trim(),maxTotalWon:extracted.budgetMode==="CLEAR"?null:now.maxTotalWon,
       requiredConditions:extracted.requirementsMode==="CLEAR"?[]:[...new Set(now.requiredConditions)],
-      ...(now.minTotalWon!==undefined?{minTotalWon:now.minTotalWon}:{}),
+      ...(extracted.budgetMode!=="CLEAR"&&now.minTotalWon!==undefined?{minTotalWon:now.minTotalWon}:{}),
       currentPreferences:extracted.preferencesMode==="CLEAR"?{}:{...now.currentPreferences},revision:1,
+      ...(now.reviewSort?{reviewSort:{...now.reviewSort}}:{}),
       ...(now.category?{category:now.category,attributePreferences:extracted.preferencesMode==="CLEAR"?[]:[...new Set(now.attributePreferences??[])]}:{})};
   }
   if(extracted.queryMode==="SET"&&extracted.budgetMode===undefined)
@@ -56,6 +67,8 @@ export function resolveShoppingPlan(previous:ShoppingPlan|null|undefined,extract
   const newTask=extracted.queryMode==="SET"||categoryChanged;
   const query=extracted.queryMode==="KEEP"||(!extracted.queryMode&&previous.query===extracted.query)
     ? previous.query : extracted.query.trim();
+  const sameTaskForReviewSort=query===previous.query&&!categoryChanged&&
+    (now.category===undefined||now.category===previous.category);
   const budget=extracted.budgetMode==="CLEAR"?null
     :extracted.budgetMode==="SET"||(!extracted.budgetMode&&now.maxTotalWon!==null)
       ? now.maxTotalWon
@@ -76,7 +89,9 @@ export function resolveShoppingPlan(previous:ShoppingPlan|null|undefined,extract
   const minTotalWon=extracted.budgetMode==="CLEAR"?undefined
     :extracted.budgetMode==="SET"?now.minTotalWon
     :newTask?now.minTotalWon:now.minTotalWon??previous.minTotalWon;
+  const reviewSort=now.reviewSort??(sameTaskForReviewSort?previous.reviewSort:undefined);
   return {query,maxTotalWon:budget,...(minTotalWon!==undefined?{minTotalWon}:{}),
+    ...(reviewSort?{reviewSort:{...reviewSort}}:{}),
     ...(!newTask?{interview:previous.interview,excludedProductIds:previous.excludedProductIds,lastDisplayedProductIds:previous.lastDisplayedProductIds}:{}),requiredConditions:[...new Set(requirements)].slice(0,12),
     currentPreferences:prefs,revision:previous.revision+1,
     ...(category?{category,attributePreferences:[...new Set(attributes)]}:{})};

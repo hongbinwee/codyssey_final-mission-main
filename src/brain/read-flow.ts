@@ -1,12 +1,13 @@
 import {interviewAnswer} from './interview.ts';
 import type {ConversationResponder} from "./conversation-response.ts";
-import type {BrainTrace,EvidenceRecord,MemoryRepository,Preference,RankingResult,RetrieverPort} from "./contracts.ts";
+import type {BrainTrace,EvidenceRecord,MemoryRepository,Preference,RankingResult,RetrieverPort,ReviewSummaryRequest} from "./contracts.ts";
 import type {PersistentConversations} from "./persistent-store.ts";
 import {rankProducts} from "./personalization.ts";
 import {curateRecommendations,type CommerceActivity} from "./recommendation-strategies.ts";
 import type {PlanExtraction,ShoppingPlan} from "./shopping-plan.ts";
 import {resolveShoppingPlan} from "./shopping-plan.ts";
 import {parseKrwTenThousandBand} from "./price-band.ts";
+import {parseExplicitReviewSort,reviewSortAspectLabel,normalizeReviewSortAspect} from "./review-sort.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {BrainRoute,BrainIntentKind} from "./routing.ts";
 
@@ -23,6 +24,7 @@ export interface ResearchResult {
  trace:{memoryMs:number;intentMs:number;retrievalMs:number;rankMs:number;totalMs:number;[key:string]:number}
 }
 export interface ResearchDeps {
+ reviewSummary?:(input:{request:ReviewSummaryRequest;previous?:ResearchResult})=>Promise<GroundedExplanation>;
  clarifyBeforeSearch?:boolean;
  datasetVersion?:string;
  conversations:Pick<PersistentConversations,"assertOwned"|"appendUserMessage">;
@@ -92,7 +94,15 @@ export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous
  let plan=resolveShoppingPlan(previous,intent);
  const explicitBand=parseKrwTenThousandBand(req.userMessage);
  if(explicitBand)plan={...plan,...explicitBand};
- else if(intent.budgetMode==="SET")plan={...plan,minTotalWon:undefined};
+ else if(intent.budgetMode==="SET"&&intent.context.minTotalWon===undefined)plan={...plan,minTotalWon:undefined};
+ const explicitSort=parseExplicitReviewSort(req.userMessage);
+ const clearSort=/(?:정렬|순서)\s*(?:취소|초기화|상관없)|(?:가격|저렴한|낮은\s*가격|높은\s*가격|평점|별점)\s*(?:이\s*)?(?:낮은|높은)?\s*순|리뷰\s*(?:적은|부정.*많은)\s*순/.test(trimmed);
+ const sameTask=previous?.query===plan.query&&previous?.category===plan.category;
+ // Only this turn's explicit instruction sets the review order. A model or
+ // remembered price preference cannot silently replace that ordering.
+ const reviewSort=explicitSort??(!clearSort?intent.context.reviewSort??(sameTask?previous?.reviewSort:undefined):undefined);
+ plan={...plan,reviewSort:clearSort||!reviewSort?undefined:
+   {...reviewSort,aspect:normalizeReviewSortAspect(reviewSort.aspect)??reviewSort.aspect}};
  if(!plan.query||plan.query.length>200)throw new Error("invalid shopping plan");
  return plan;
 }
@@ -107,9 +117,11 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
  const labels:Record<string,Record<string,string>>={price_priority:{value:'가성비 중심',balanced:'가격과 성능 균형',performance:'성능 중심'},
    eye_comfort:{important:'눈의 편안함 중요'},noise_sensitivity:{important:'소음 적음 선호'}};
  const searchPreferences=[...new Set([...Object.entries(preferences).flatMap(([key,value])=>labels[key]?.[value]?[labels[key][value]]:[]),
-   ...(plan.attributePreferences??[]),...(plan.interview?.purpose?[plan.interview.purpose]:[])])].slice(0,20);
+   ...(plan.attributePreferences??[]),...(plan.interview?.purpose?[plan.interview.purpose]:[]),
+   ...(plan.reviewSort?[`${reviewSortAspectLabel(plan.reviewSort.aspect)} 긍정 리뷰`]:[])])].slice(0,20);
  let fetched:Awaited<ReturnType<RetrieverPort['search']>>;
  try{fetched=await deps.retriever.search({query:[plan.query,plan.interview?.purpose].filter(Boolean).join(" ").slice(0,250),maxTotalWon:plan.maxTotalWon,
+   ...(plan.minTotalWon!==undefined?{minTotalWon:plan.minTotalWon}:{}),...(plan.reviewSort?{reviewSort:plan.reviewSort}:{}),
    requiredConditions:plan.requiredConditions,preferences:searchPreferences,requestId:req.requestId,originalQuestion:req.userMessage,
    ...(plan.category?{category:plan.category}:{})});}catch{throw new RetrievalUnavailableError();}
  if(!fetched||!Array.isArray(fetched.candidates)||!Array.isArray(fetched.evidence)||
@@ -124,8 +136,8 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
   baseRanking.referenceOnly=baseRanking.referenceOnly.filter(x=>!excluded.has(x.candidate.productId));
   baseRanking.rejected.push(...removed.map(x=>({candidate:x.candidate,reasons:["user_excluded"]})));
  }
- const activity=deps.activity?await deps.activity(req.actorUserId):undefined;
- const ranking=deps.activity?curateRecommendations(baseRanking,activity):baseRanking;
+ const activity=deps.activity&&!plan.reviewSort?await deps.activity(req.actorUserId):undefined;
+ const ranking=deps.activity&&!plan.reviewSort?curateRecommendations(baseRanking,activity):baseRanking;
  const conditionOnlyReferences=ranking.rejected.filter(item=>
    isConditionOnlySyntheticReference(item,plan.requiredConditions,fetched.evidence));
  if(conditionOnlyReferences.length){

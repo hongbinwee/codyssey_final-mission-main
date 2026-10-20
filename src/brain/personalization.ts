@@ -1,5 +1,6 @@
 import type {Aspect,BrainTrace,EvidenceRecord,MemoryRepository,Preference,PreferenceKey,PreferenceValue,ProductCandidate,RankedCandidate,RankingResult,ShoppingContext} from "./contracts.ts";
 import {assertPreference} from "./memory.ts";
+import {reviewAspectPolarity} from "./review-sort.ts";
 const defaults:Record<PreferenceKey,PreferenceValue>={price_priority:"balanced",eye_comfort:"normal",noise_sensitivity:"normal"};
 const retrievedRatingFacet="retrieved_review_rating";
 type Dimension="cost"|Aspect;
@@ -61,6 +62,34 @@ function validRetrievedRatingFacet(f:NonNullable<ProductCandidate["facets"][stri
  const mean=rows.reduce((sum,row)=>sum+row.rating!/5,0)/rows.length;
  return Math.abs(mean-f.score)<1e-9;
 }
+function reviewSortEvidenceFor(p:ProductCandidate,evidence:EvidenceRecord[],aspect:string):NonNullable<RankedCandidate["reviewSortEvidence"]>{
+ const bySource=new Map<string,EvidenceRecord[]>();
+ for(const row of evidence){
+  if(row.kind!=="REVIEW"||typeof row.sourceId!=="string"||!row.sourceId.trim())continue;
+  const id=row.sourceId.trim(),group=bySource.get(id)??[];group.push(row);bySource.set(id,group);
+ }
+ let positiveCount=0,negativeCount=0;
+ const reviewIds:string[]=[],sourceKinds=new Set<"REAL"|"SYNTHETIC">();
+ for(const [sourceId,rows] of bySource){
+  const first=rows[0];
+  const consistent=rows.every(row=>row.kind===first.kind&&row.productId===first.productId&&
+   row.variantId===first.variantId&&row.sourceKind===first.sourceKind&&
+   row.datasetVersion===first.datasetVersion&&row.verified===first.verified);
+  if(!consistent||first.productId!==p.productId||
+    first.variantId!==null&&first.variantId!==p.variantId||first.verified!==true||
+    first.datasetVersion!==p.datasetVersion||
+    (first.sourceKind!=="REAL"&&first.sourceKind!=="SYNTHETIC")||
+    (p.sourceKind==="REAL"&&first.sourceKind!=="REAL")||
+    (first.sourceKind==="SYNTHETIC"&&(p.sourceKind!=="SYNTHETIC"||p.isSimulated!==true||!p.datasetVersion)))continue;
+  const text=rows.map(row=>row.text?.trim()).filter((value):value is string=>!!value).join(" ");
+  if(!text)continue;
+  const polarity=reviewAspectPolarity(text,aspect);
+  if(polarity==="NEUTRAL")continue;
+  if(polarity==="POSITIVE")positiveCount++;else negativeCount++;
+  reviewIds.push(sourceId);sourceKinds.add(first.sourceKind);
+ }
+ return {aspect,positiveCount,negativeCount,reviewIds:reviewIds.sort(),sourceKinds:[...sourceKinds].sort()};
+}
 /** Fixed global denominator; missing evidence cannot improve a candidate's score. */
 export function rankProducts(candidates:ProductCandidate[],evidence:EvidenceRecord[],ctx:ShoppingContext,memories:Preference[]):RankingResult{
  if(ctx.maxTotalWon!==null&&(!Number.isSafeInteger(ctx.maxTotalWon)||ctx.maxTotalWon<0))throw new Error("invalid budget");
@@ -115,7 +144,21 @@ export function rankProducts(candidates:ProductCandidate[],evidence:EvidenceReco
       ...(p.facets[retrievedRatingFacet]?["retrieved_synthetic_review_rating_sample_only"]:[])]});
  }
  ranked.sort((a,b)=>b.score-a.score);
- return {ranked,referenceOnly,rejected,evaluatedCount:candidates.length};
+ let explicitReviewSort:RankingResult["explicitReviewSort"];
+ if(ctx.reviewSort){
+  for(const row of ranked)row.reviewSortEvidence=reviewSortEvidenceFor(row.candidate,evidence,ctx.reviewSort.aspect);
+  const observed=ranked.filter(row=>row.reviewSortEvidence!.reviewIds.length>0);
+  const enoughEvidence=new Set(observed.map(row=>row.candidate.productId)).size>=2;
+  explicitReviewSort={aspect:ctx.reviewSort.aspect,status:enoughEvidence?"APPLIED":"INSUFFICIENT",scope:"RETRIEVED_REVIEWS"};
+  if(enoughEvidence){
+   const originalOrder=new Map(ranked.map((row,index)=>[row,index]));
+   ranked.sort((a,b)=>Number(b.reviewSortEvidence!.reviewIds.length>0)-Number(a.reviewSortEvidence!.reviewIds.length>0)||
+    b.reviewSortEvidence!.positiveCount-a.reviewSortEvidence!.positiveCount||
+    a.reviewSortEvidence!.negativeCount-b.reviewSortEvidence!.negativeCount||b.score-a.score||
+    originalOrder.get(a)!-originalOrder.get(b)!);
+  }
+ }
+ return {ranked,referenceOnly,rejected,evaluatedCount:candidates.length,...(explicitReviewSort?{explicitReviewSort}:{})};
 }
 export async function evaluatePersonalizedCandidates(trace:BrainTrace,ctx:ShoppingContext,candidates:ProductCandidate[],evidence:EvidenceRecord[],memory:MemoryRepository):Promise<RankingResult>{
  if(!trace.actorUserId||!trace.conversationId||!trace.requestId)throw new Error("trusted trace required");

@@ -1866,5 +1866,36 @@ button.cart-thumb { border: 0; padding: 0; cursor: pointer; }
 .brain-panel .brain-answer p+p{margin-top:12px}
 .brain-panel .brain-answer strong{font-weight:700;color:var(--text)}
 .brain-panel .brain-product-reason .brain-answer p+p{margin-top:6px}
+.brain-panel .brain-product-prices{display:grid;gap:2px;padding-top:5px;font-size:11px;line-height:1.45;color:var(--text-2)}
+.brain-panel .brain-product-prices p{display:flex;justify-content:space-between;gap:8px;margin:0}
+.brain-panel .brain-product-prices b{color:var(--text);font-weight:550;text-align:right}
+.brain-panel .brain-product-prices .brain-product-total{border-top:1px solid var(--line);margin-top:3px;padding-top:4px;font-size:12px;font-weight:650}
+.brain-panel .brain-product-prices .brain-product-total b{font-weight:700}
+.brain-panel .brain-review-sort-note{padding:9px 11px;border-radius:10px;background:var(--bg-elev);color:var(--text-2)}
+.brain-panel .brain-product-reason{overflow-wrap:anywhere}
+@media(max-width:380px){.brain-panel .brain-product-prices{font-size:10.5px;gap:1px}.brain-panel .brain-product-prices .brain-product-total{font-size:11px}.brain-panel .brain-rank{font-size:9px;padding:3px 5px}}
 .brain-panel .brain-recovery-actions{display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap;margin:8px 0 12px}
 .brain-panel .brain-recovery-actions .link{min-height:36px;padding:6px 2px;font-weight:600}
+.brain-panel .brain-preference-prompt{display:grid;gap:11px;padding:16px;background:var(--bg-elev)}
+.brain-panel .brain-preference-prompt h3{margin:0;font-size:15px;line-height:1.5;font-weight:650}
+.brain-panel .brain-preference-prompt p{margin:0;line-height:1.6}
+.brain-panel .brain-preference-select{display:grid;gap:6px;font-size:12px;font-weight:600}
+.brain-panel .brain-preference-select select{width:100%;max-width:100%;min-width:0;min-height:44px;margin:0;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--field);color:var(--text);font:inherit}
+.brain-panel .brain-preference-prompt>.btn{width:100%;min-width:0;min-height:44px;white-space:normal;line-height:1.4}
+.brain-panel .brain-preference-prompt>.brain-preference-later{border:1px solid var(--line);background:transparent;color:var(--text-2);font-weight:500}
+.brain-panel .brain-preference-prompt .brain-preference-error{color:var(--danger,#b42318);font-size:12px}
+.brain-panel .brain-review-summary{display:grid;gap:12px;min-width:0}
+.brain-panel .brain-review-summary-product{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;min-width:0;padding:13px;border:1px solid var(--line);border-radius:14px;background:var(--bg-elev)}
+.brain-panel .brain-review-summary-product.has-image{grid-template-columns:76px minmax(0,1fr);align-items:center}
+.brain-panel .brain-review-summary-product img{display:block;width:76px;height:84px;object-fit:cover;border-radius:10px;background:var(--field)}
+.brain-panel .brain-review-summary-product b{display:block;overflow-wrap:anywhere;font-size:14px;line-height:1.5}
+.brain-panel .brain-review-summary-product .brain-review-product-open{display:inline-flex;min-height:38px;align-items:center;padding:7px 0 0;font-weight:600}
+.brain-panel .brain-review-choices,.brain-panel .brain-review-evidence{display:grid;gap:9px;min-width:0}
+.brain-panel .brain-review-choices h3,.brain-panel .brain-review-evidence h3{margin:0;font-size:13px;line-height:1.5}
+.brain-panel .brain-review-choice{width:100%;min-width:0;min-height:44px;white-space:normal;line-height:1.45}
+.brain-panel .brain-review-evidence-scope{display:grid;gap:7px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg-elev)}
+.brain-panel .brain-review-evidence-scope h4{margin:0;font-size:12px;font-weight:650}
+.brain-panel .brain-review-evidence-scope ul{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.brain-panel .brain-review-evidence-scope li{min-width:0}
+.brain-panel .brain-review-evidence-scope blockquote{margin:0 0 5px;padding-left:10px;border-left:2px solid var(--accent);white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7;color:var(--text)}
+@media(max-width:380px){.brain-panel .brain-review-summary-product.has-image{grid-template-columns:60px minmax(0,1fr)}.brain-panel .brain-review-summary-product img{width:60px;height:70px}.brain-panel .brain-preference-prompt{padding:14px}}

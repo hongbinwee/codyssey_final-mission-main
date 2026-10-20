@@ -5,7 +5,8 @@ import type {ShoppingPlan} from "./shopping-plan.ts";
 function simpleIntent(message:string,previous?:ShoppingPlan):ShoppingIntent|null{
  const text=message.trim().replace(/^(?:안녕(?:하세요)?|하이)[,!?.\s]*/,"");
  const budgets=[...text.matchAll(/(\d+(?:,\d{3})*)\s*(만\s*원|원)\s*(이하|까지)/g)];
- if(budgets.length>1||/미만|초과|이상|부터|최소|배송비|제외|말고|아닌|반드시|필수/.test(text))return null;
+ const range=/\d+\s*(?:만\s*)?[~〜～]\s*\d+\s*만\s*원대/;
+ if(budgets.length>1||range.test(text)||/미만|초과|이상|부터|최소|배송비|제외|말고|아닌|반드시|필수/.test(text))return null;
  const budget=budgets[0]?Number(budgets[0][1].replaceAll(",",""))*(budgets[0][2].replace(/\s/g,"")==="만원"?10000:1):null;
  if(budget!==null&&!Number.isSafeInteger(budget))return null;
  let rest=text.replace(budgets[0]?.[0]??/a^/,"").trim();

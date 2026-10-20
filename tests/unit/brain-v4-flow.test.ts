@@ -273,7 +273,7 @@ test("LangGraph ranks server-approved QA v4 candidates and preserves plan while 
   assert.equal(second.shoppingPlan?.maxTotalWon, 50000);
   assert.deepEqual(second.shoppingPlan?.requiredConditions, ["민감성 피부"]);
   assert.deepEqual(ragRequests.map(r => r.required_conditions), [["민감성 피부"], ["민감성 피부"]]);
-  assert.deepEqual(ragRequests.map(r => [r.preferences, r.top_k]), [[[ ], 5], [[ ], 5]]);
+  assert.deepEqual(ragRequests.map(r => [r.preferences, r.top_k]), [[[ ], 10], [[ ], 10]]);
   assert.ok(ragRequests.every(r => !Object.hasOwn(r, "isSimulated")));
   assert.deepEqual([providerCalls, ragCalls, commerceCalls, reviewCalls, messageCount], [4, 2, 2, 2, 2]);
 });

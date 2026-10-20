@@ -6,6 +6,7 @@ import { createElement, isValidElement } from "react";
 import type { MouseEvent, MouseEventHandler, ReactElement, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { transpileModule, JsxEmit, ModuleKind } from "typescript";
+import type { EvidenceRecord, ReviewSummaryData } from "../../src/brain/contracts.ts";
 
 // Keep server import DB-free and prevent config.ts from reading a local .env.
 const moduleHook = registerHooks({
@@ -35,7 +36,7 @@ const moduleHook = registerHooks({
 const { brainRagConnectionFromEnv, start } = await import("../../src/server.ts");
 const { signSession } = await import("../../src/session.ts");
 const brainPreview = await import("../../src/web/components/BrainPreview.tsx");
-const { BrainRanking, createRetrievalRetryEntry, canExploreBrainReply } = brainPreview;
+const { BrainRanking, BrainReviewSummary, BrainPreferencePrompt, createRetrievalRetryEntry, canExploreBrainReply } = brainPreview;
 const { BrainAnswer } = await import("../../src/web/components/BrainAnswer.tsx");
 const commerceState = await import("../../src/web/components/CommerceState.tsx");
 const detailResume = await import("../../src/web/detail-resume.ts");
@@ -81,10 +82,13 @@ test("BrainAnswer renders safe bold text, preserves paragraphs and line breaks, 
 });
 
 test("retrieval retry creates a fresh action while generic follow-ups are available only for safe result states",()=>{
- const retry=createRetrievalRetryEntry({text:"상품 찾아줘",clientActionId:"failed-action",conversationId:"conversation-one"},"other-conversation");
+ const pageContext={screen:"reviews",product_id:"page-product-one"};
+ const retry=createRetrievalRetryEntry({text:"상품 찾아줘",clientActionId:"failed-action",conversationId:"conversation-one",pageContext},"other-conversation");
+ pageContext.product_id="page-product-two";
  assert.notEqual(retry.clientActionId,"failed-action");
  assert.equal(retry.text,"상품 찾아줘");
  assert.equal(retry.conversationId,"conversation-one");
+ assert.deepEqual(retry.pageContext,{screen:"reviews",product_id:"page-product-one"});
  assert.equal(retry.status,"sending");
  const base={conversation_id:"c",message_id:"m",read_only:true as const,ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},trace:{totalMs:0}};
  assert.equal(canExploreBrainReply({...base,explanation:{kind:"NO_MATCH",text:"없음",items:[],limitations:[]}}),true);
@@ -97,6 +101,171 @@ test('model failure keeps verified fallback reasons on recommendation cards',()=
  const html=renderToStaticMarkup(createElement(BrainRanking,{ranking:{ranked:[{candidate,score:.5,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1},
    explanation:{kind:'VERIFIED_CANDIDATES',text:'확인한 상품을 추천해요.',items:[{productId:'p-fallback',variantId:'v-fallback',evidenceIds:[],reason:'배송비 포함 13,000원으로 예산 안이에요.'}],limitations:[],failure:{code:'MODEL_HTTP_ERROR',httpStatus:504}},onOpenProduct:()=>{}}));
  assert.match(html,/배송비 포함 13,000원으로 예산 안이에요/);assert.doesNotMatch(html,/MODEL_HTTP_ERROR|504/);
+});
+
+test('verified Commerce cards separate item, shipping and total prices; unknown and unverified values stay unknown',()=>{
+ const candidate={productId:'priced',variantId:'v-priced',productName:'가격 확인 상품',
+   unitPriceWon:28_000,shippingFeeWon:3_000,commerceVerified:true};
+ const html=renderRanking({ranked:[{candidate,score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1});
+ assert.match(html,/상품가/);assert.match(html,/28,000원/);
+ assert.match(html,/배송비/);assert.match(html,/3,000원/);
+ assert.match(html,/합계/);assert.match(html,/31,000원/);
+ const unknown=renderRanking({ranked:[{candidate:{...candidate,shippingFeeWon:null},score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1});
+ assert.match(unknown,/배송비/);assert.match(unknown,/합계/);assert.match(unknown,/확인 전/);
+ assert.doesNotMatch(unknown,/28,000원.*0원|0원.*28,000원/);
+ const unverified=renderRanking({ranked:[{candidate:{...candidate,unitPriceWon:10_000,shippingFeeWon:0,commerceVerified:false},score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1});
+ assert.doesNotMatch(unverified,/10,000원|0원/);
+});
+
+test('applied review sort uses count evidence, shares tied ranks, and labels synthetic evidence',()=>{
+ const candidate=(id:string,sourceKind:'REAL'|'SYNTHETIC'='REAL')=>({
+  productId:id,variantId:`v-${id}`,productName:id,unitPriceWon:10_000,shippingFeeWon:0,
+  commerceVerified:true,sourceKind,isSimulated:sourceKind==='SYNTHETIC',
+ });
+ const ranking={ranked:[
+  {candidate:candidate('a'),score:1,evidenceCoverage:1,reviewSortEvidence:{aspect:'moisturizing',positiveCount:2,negativeCount:1,reviewIds:['ra1','ra2','ra3'],sourceKinds:['REAL']}},
+  {candidate:candidate('b','SYNTHETIC'),score:.9,evidenceCoverage:1,reviewSortEvidence:{aspect:'moisturizing',positiveCount:2,negativeCount:0,reviewIds:['rb1','rb2'],sourceKinds:['SYNTHETIC']}},
+ ],referenceOnly:[],rejected:[],evaluatedCount:2,explicitReviewSort:{aspect:'moisturizing',status:'APPLIED',scope:'RETRIEVED_REVIEWS'}} as never;
+ const html=renderToStaticMarkup(createElement(BrainRanking,{ranking,onOpenProduct:()=>{},explanation:{kind:'LLM_GROUNDED',text:'',items:[
+  {productId:'a',variantId:'v-a',evidenceIds:[],reason:'촉촉함 검색 후기에서 긍정 의견 2건, 아쉬움 1건을 확인했어요.'},
+  {productId:'b',variantId:'v-b',evidenceIds:[],reason:'촉촉함 검색 합성 리뷰에서 긍정 의견 2건, 아쉬움 0건을 확인했어요.'},
+ ],limitations:[]}}));
+ assert.equal((html.match(/공동 1순위/g)??[]).length,2);
+ assert.match(html,/검색된 일부 후기/);
+ assert.match(html,/합성 리뷰/);
+ assert.match(html,/긍정 의견 2건, 아쉬움 1건/);
+});
+
+test('applied sort does not assign a badge to a candidate with no review sample',()=>{
+ const candidate=(id:string)=>({productId:id,variantId:`v-${id}`,productName:id,unitPriceWon:10_000,shippingFeeWon:0,commerceVerified:true});
+ const ranking={ranked:[
+  {candidate:candidate('sampled'),score:1,evidenceCoverage:1,reviewSortEvidence:{aspect:'moisturizing',positiveCount:0,negativeCount:1,reviewIds:['r-negative'],sourceKinds:['REAL']}},
+  {candidate:candidate('unsampled'),score:.5,evidenceCoverage:1,reviewSortEvidence:{aspect:'moisturizing',positiveCount:0,negativeCount:0,reviewIds:[],sourceKinds:[]}},
+ ],referenceOnly:[],rejected:[],evaluatedCount:2,explicitReviewSort:{aspect:'moisturizing',status:'APPLIED',scope:'RETRIEVED_REVIEWS'}} as never;
+ const html=renderToStaticMarkup(createElement(BrainRanking,{ranking,onOpenProduct:()=>{},explanation:{kind:'LLM_GROUNDED',text:'',items:[
+  {productId:'sampled',variantId:'v-sampled',evidenceIds:[],reason:'보습력 검색 후기에서 긍정 의견 0건, 아쉬운 의견 1건을 확인했어요.'},
+  {productId:'unsampled',variantId:'v-unsampled',evidenceIds:[]},
+ ],limitations:[]}}));
+ assert.match(html,/sampled/);assert.match(html,/긍정 의견 0건, 아쉬운 의견 1건/);
+ assert.doesNotMatch(html,/unsampled[^]*?<span class="brain-rank">/);
+});
+
+test('insufficient review sort hides rank badges and explains the sample limit',()=>{
+ const candidate={productId:'insufficient',variantId:'v-insufficient',productName:'후기 부족 상품',unitPriceWon:10_000,shippingFeeWon:0,commerceVerified:true};
+ const ranking={ranked:[{candidate,score:1,evidenceCoverage:1,reviewSortEvidence:{aspect:'moisturizing',positiveCount:0,negativeCount:0,reviewIds:[],sourceKinds:[]}}],
+  referenceOnly:[],rejected:[],evaluatedCount:1,explicitReviewSort:{aspect:'moisturizing',status:'INSUFFICIENT',scope:'RETRIEVED_REVIEWS'}} as never;
+ const html=renderToStaticMarkup(createElement(BrainRanking,{ranking,onOpenProduct:()=>{},explanation:{kind:'LLM_GROUNDED',text:'',items:[{productId:'insufficient',variantId:'v-insufficient',evidenceIds:[]}],limitations:[]}}));
+ assert.doesNotMatch(html,/\d순위/);
+ assert.match(html,/후기 수가 충분하지 않아/);
+ assert.match(html,/전체가 아닌 일부 표본/);
+});
+
+test('review summary keeps original citations within the selected product and variant scopes',()=>{
+ assert.equal(typeof BrainReviewSummary,'function');if(typeof BrainReviewSummary!=='function')return;
+ const summary:ReviewSummaryData={status:'READY',focus:'ALL',datasetVersion:'dataset-v1',
+  product:{id:'product-1',name:'상품 하나',variantId:'variant-1',image:'https://example.test/item.jpg'},
+  evidence:[
+   {id:'whole-review',productId:'product-1',variantId:null,kind:'REVIEW',sourceKind:'REAL',sourceRef:'private-ref-whole',sourceId:'private-id-whole',verified:true,datasetVersion:'dataset-v1',text:'상품 전체 후기 원문'},
+   {id:'variant-review',productId:'product-1',variantId:'variant-1',kind:'REVIEW',sourceKind:'REAL',sourceRef:'private-ref-variant',sourceId:'private-id-variant',verified:true,datasetVersion:'dataset-v1',text:'선택 옵션 후기 원문'},
+   {id:'other-product',productId:'product-2',variantId:null,kind:'REVIEW',sourceKind:'REAL',verified:true,datasetVersion:'dataset-v1',text:'다른 상품 후기'},
+   {id:'other-variant',productId:'product-1',variantId:'variant-2',kind:'REVIEW',sourceKind:'REAL',verified:true,datasetVersion:'dataset-v1',text:'다른 옵션 후기'},
+   {id:'unverified',productId:'product-1',variantId:null,kind:'REVIEW',sourceKind:'REAL',verified:false,datasetVersion:'dataset-v1',text:'미검증 후기'},
+   {id:'spec',productId:'product-1',variantId:null,kind:'SPEC',sourceKind:'REAL',verified:true,datasetVersion:'dataset-v1',text:'상품 스펙'},
+  ]};
+ let opened:string[]=[];
+ const element=BrainReviewSummary({summary,onOpenProduct:(id:string,variantId?:string)=>{opened=[id,variantId??''];},onChooseProduct:()=>{}});
+ assert.ok(element);
+ const html=renderToStaticMarkup(element);
+ assert.match(html,/상품 하나/);assert.match(html,/상품 상세 보기/);assert.match(html,/https:\/\/example\.test\/item\.jpg/);
+ assert.match(html,/상품 전체 후기 원문/);assert.match(html,/선택 옵션 후기 원문/);
+ assert.match(html,/상품 단위 후기/);assert.match(html,/선택 옵션 후기/);
+ assert.doesNotMatch(html,/다른 상품 후기|다른 옵션 후기|미검증 후기|상품 스펙/);
+ assert.doesNotMatch(html,/private-ref|private-id/);
+ const detail=findButton((element.props as {children:ReactNode}).children);assert.ok(detail);
+ detail!.props.onClick?.({} as MouseEvent<HTMLButtonElement>);
+ assert.deepEqual(opened,['product-1','variant-1']);
+});
+
+test('REAL review citations describe collected author opinions without claiming verified purchase',()=>{
+ assert.equal(typeof BrainReviewSummary,'function');if(typeof BrainReviewSummary!=='function')return;
+ const summary:ReviewSummaryData={status:'READY',focus:'ALL',product:{id:'product-1',name:'상품'},evidence:[
+  {id:'real-review',productId:'product-1',variantId:null,kind:'REVIEW',sourceKind:'REAL',verified:true,text:'작성자가 남긴 원문'},
+ ]};
+ const html=renderToStaticMarkup(createElement(BrainReviewSummary,{summary,onOpenProduct:()=>{},onChooseProduct:()=>{}}));
+ assert.match(html,/수집 리뷰 · 작성자의 의견이에요/);assert.match(html,/상품 단위 후기/);
+ assert.doesNotMatch(html,/검증된 실제 구매 후기|실제 구매가 확인된 후기/);
+});
+
+test('review summary limits displayed source excerpts to twenty verified originals of at most 1200 characters',()=>{
+ assert.equal(typeof BrainReviewSummary,'function');if(typeof BrainReviewSummary!=='function')return;
+ const evidence:EvidenceRecord[]=Array.from({length:20},(_,index)=>({id:`review-${index}`,productId:'product-1',variantId:null,kind:'REVIEW' as const,sourceKind:'REAL' as const,verified:true,text:`원문 ${index}`}));
+ evidence.push({id:'review-over-limit',productId:'product-1',variantId:null,kind:'REVIEW',sourceKind:'REAL',verified:true,text:'20번째 이후 후기'});
+ evidence.push({id:'review-too-long',productId:'product-1',variantId:null,kind:'REVIEW',sourceKind:'REAL',verified:true,text:'긴 원문 시작 '+ '가'.repeat(1200)});
+ const html=renderToStaticMarkup(createElement(BrainReviewSummary,{summary:{status:'READY',focus:'ALL',product:{id:'product-1',name:'상품'},evidence},onOpenProduct:()=>{},onChooseProduct:()=>{}}));
+ assert.equal((html.match(/<blockquote/g)??[]).length,20);
+ assert.match(html,/원문 19/);assert.doesNotMatch(html,/20번째 이후 후기|긴 원문 시작/);
+});
+
+test('ambiguous review-summary choices show product names and send the internal selection token without rendering the ID',()=>{
+ assert.equal(typeof BrainReviewSummary,'function');if(typeof BrainReviewSummary!=='function')return;
+ const summary:ReviewSummaryData={status:'AMBIGUOUS',focus:'ALL',choices:[{productId:'internal-product-7',name:'선택할 상품'}],evidence:[]};
+ const findChoice=(node:ReactNode):ReactElement|null=>{
+  if(Array.isArray(node)){for(const child of node){const found=findChoice(child);if(found)return found;}return null;}
+  if(!isValidElement(node))return null;
+  const props=node.props as {children?:ReactNode;className?:string;onClick?:()=>void};
+  if(props.className?.split(/\s+/).includes('brain-review-choice'))return node as ReactElement;
+  return findChoice(props.children??null);
+ };
+ let sent='';const wired=BrainReviewSummary({summary,onOpenProduct:()=>{},onChooseProduct:(message:string)=>{sent=message;}});
+ assert.ok(wired);
+ const html=renderToStaticMarkup(wired);
+ assert.match(html,/선택할 상품/);assert.doesNotMatch(html,/internal-product-7/);
+ const wiredChoice=findChoice((wired.props as {children:ReactNode}).children);assert.ok(wiredChoice);
+ ((wiredChoice!.props as {onClick:()=>void}).onClick)();
+ assert.equal(sent,'리뷰 요약 상품 선택: internal-product-7');
+});
+
+test('review-summary replies are not eligible for recommendation exploration',()=>{
+ const reply:Parameters<typeof canExploreBrainReply>[0]={conversation_id:'c',message_id:'m',read_only:true as const,
+  explanation:{kind:'REVIEW_SUMMARY',text:'후기 요약',items:[],limitations:[],reviewSummary:{status:'NO_REVIEWS',focus:'ALL',evidence:[]}},
+  ranking:{ranked:[{candidate:{productId:'ranked',variantId:'v',commerceVerified:true},score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1},trace:{totalMs:0}};
+ assert.equal(canExploreBrainReply(reply),false);
+});
+
+test('price preference prompt uses the requested labels and separates request, confirmation, saving, completion, and failure',()=>{
+ assert.equal(typeof BrainPreferencePrompt,'function');if(typeof BrainPreferencePrompt!=='function')return;
+ const base={selected:'value' as const,storedValue:null,pending:false,busy:false,error:'',onSelect:()=>{},onRequest:()=>{},onConfirm:()=>{},onDefer:()=>{}};
+ const renderPrompt=(status:'idle'|'requesting'|'confirming'|'saving'|'saved'|'failed',extra:Partial<Parameters<typeof BrainPreferencePrompt>[0]>={})=>
+  renderToStaticMarkup(createElement(BrainPreferencePrompt,{...base,status,...extra}));
+ const idle=renderPrompt('idle');
+ assert.match(idle,/이 가격 기준을 기억해둘까요\?/);
+ assert.match(idle,/다음 상품 추천에도 선택한 기준을 반영할 수 있어요\./);
+ assert.match(idle,/가성비를 우선해요/);assert.match(idle,/가격과 품질을 균형 있게 봐요/);assert.match(idle,/품질을 더 중요하게 생각해요/);
+ assert.match(idle,/저장하기/);assert.match(idle,/원할 때 저장하고, 나중에 바꿀 수 있어요\./);
+ assert.match(renderPrompt('requesting'),/저장 요청 중/);
+ assert.match(renderPrompt('confirming',{pending:true}),/최종 확인/);
+ assert.match(renderPrompt('saving',{pending:true}),/저장 중/);
+ assert.match(renderPrompt('saved'),/저장 완료/);
+ const failed=renderPrompt('failed',{pending:true,error:'저장 확인에 실패했어요. 기존에 저장한 기준은 유지돼요.'});
+ assert.match(failed,/role="alert"/);assert.match(failed,/기존에 저장한 기준은 유지돼요/);assert.match(failed,/다시 확인/);
+});
+
+test('price preference prompt prevents requesting an already saved identical value',()=>{
+ assert.equal(typeof BrainPreferencePrompt,'function');if(typeof BrainPreferencePrompt!=='function')return;
+ const html=renderToStaticMarkup(createElement(BrainPreferencePrompt,{selected:'balanced',storedValue:'balanced',status:'idle',pending:false,busy:false,error:'',onSelect:()=>{},onRequest:()=>{},onConfirm:()=>{},onDefer:()=>{}}));
+ assert.match(html,/이미 저장된 기준/);assert.doesNotMatch(html,/저장하기/);
+});
+
+test('preference confirmation accepts only the exact key and proposed value with a timestamp',()=>{
+ const matches=brainPreview.isPricePreferenceConfirmation as ((value:unknown,expected:'value'|'balanced'|'performance')=>boolean)|undefined;
+ assert.equal(typeof matches,'function');if(!matches)return;
+ const valid={key:'price_priority',value:'performance',updatedAt:'2026-10-20T00:00:00.000Z'};
+ assert.equal(matches(valid,'performance'),true);
+ assert.equal(matches({...valid,key:'eye_comfort'},'performance'),false);
+ assert.equal(matches({...valid,value:'balanced'},'performance'),false);
+ assert.equal(matches({key:'price_priority',value:'performance'},'performance'),false);
+ assert.equal(matches({...valid,updatedAt:''},'performance'),false);
+ assert.equal(matches({...valid,updatedAt:123},'performance'),false);
 });
 
 test("test catalog notice identifies simulated prices and explicitly excludes purchase",()=>{

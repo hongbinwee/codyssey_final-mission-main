@@ -158,7 +158,7 @@ export function AgentPanel({
   }
 
   if(useBrainPreview&&brain==="shopping")
-    return <BrainPreview onOpenProduct={onOpenProduct} onClose={onClose}/>;
+    return <BrainPreview onOpenProduct={onOpenProduct} onClose={onClose} pageContext={pageContext}/>;
 
   return (
     <aside className="agent-panel">

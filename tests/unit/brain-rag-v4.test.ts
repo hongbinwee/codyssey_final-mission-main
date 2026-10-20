@@ -72,11 +72,20 @@ test('remote profile is explicit, response profile is checked and low relevance 
  assert.equal(sent.profile,'test_items2');
  const global=rag.verifiedRagRetriever({...connection,category:'',categories:['beauty','fashion','food','living']},async()=>productDetail(),fetcher(raw),async()=>[review()]);
  await global.search(request);assert.equal(Object.hasOwn(sent,'category'),false,'unknown category must be omitted, never sent as empty string');
-  await global.search({...request,maxTotalWon:20000,preferences:['가성비 중심','선물용'],requiredConditions:['무향']});
-  assert.deepEqual(sent.preferences,['가성비 중심','선물용']);
+  await global.search({...request,maxTotalWon:20000,minTotalWon:10000,
+    reviewSort:{aspect:'comfort',direction:'MOST_POSITIVE'},
+    preferences:['가성비 중심','선물용'],requiredConditions:['무향']});
+  assert.deepEqual(sent.preferences,['사용감 긍정 리뷰','가성비 중심','선물용']);
   assert.deepEqual(sent.filters,{in_stock:true,price_max:20000,currency:'KRW'});
+  assert.equal(Object.hasOwn(sent.filters,'price_min'),false,'shipping-inclusive minimum is enforced by server ranking');
   assert.deepEqual(sent.required_conditions,['무향']);
   await assert.rejects(()=>global.search({...request,preferences:['x'.repeat(129)]}),/context/);
+  await assert.rejects(()=>global.search({...request,maxTotalWon:20000,minTotalWon:30000}),/context/);
+  await global.search({...request,reviewSort:{aspect:'진정력',direction:'MOST_POSITIVE'},preferences:['진정력 긍정 리뷰']});
+  assert.deepEqual(sent.preferences,['진정력 긍정 리뷰'],'unknown bounded Korean aspects remain hints and are not duplicated');
+  const invalidSortSearch=global.search as unknown as (value:Record<string,unknown>)=>Promise<unknown>;
+  await assert.rejects(()=>invalidSortSearch({...request,reviewSort:null}),/sort/i);
+  await assert.rejects(()=>invalidSortSearch({...request,reviewSort:{aspect:'x'.repeat(41),direction:'MOST_POSITIVE'}}),/sort/i);
  await assert.rejects(()=>build({...raw,profile_name:'all_products'}).search(request),/profile/);
  assert.deepEqual(await build({...raw,status:'low_relevance'}).search(request),{candidates:[],evidence:[]});
  await assert.rejects(()=>build({...raw,status:'error',error_code:'database_unavailable'}).search(request),/failed/);
@@ -96,8 +105,8 @@ test("source-only v4 parser preserves configured dataset and synthetic evidence 
     parseV4Response?: (raw: unknown, expectedVersion: string) => {
       datasetVersion: string;
       items: Array<{ productId: string; rrfScore: number; evidence: Array<{
-        sourceId: string; evidenceText: string; variantId: string;
-        sourceKind: string; synthetic: boolean;
+      sourceId: string; evidenceTexts: string[]; variantId: string;
+        sourceKind: string; synthetic: boolean; sourceVersion:string|null;
       }> }>;
     };
   }).parseV4Response;
@@ -110,11 +119,33 @@ test("source-only v4 parser preserves configured dataset and synthetic evidence 
   assert.equal(parsed.items[0].rrfScore, 0.987);
   assert.deepEqual(parsed.items[0].evidence[0], {
     sourceId: "r-v4-1",
-    evidenceText: EVIDENCE_TEXT,
+    evidenceTexts: [EVIDENCE_TEXT],
     variantId: "v-v4-1",
     sourceKind: "SYNTHETIC",
     synthetic: true,
+    sourceVersion:null,
   });
+});
+
+test("v4 result contract accepts ten bounded products and rejects an eleventh",()=>{
+ const items=Array.from({length:10},(_,index)=>({product_id:`p-${index}`,rrf_score:1-index/20,evidence:[]}));
+ assert.equal(rag.parseV4Response({dataset_version:DATASET_VERSION,items},DATASET_VERSION).items.length,10);
+ assert.throws(()=>rag.parseV4Response({dataset_version:DATASET_VERSION,
+   items:[...items,{product_id:'p-10',rrf_score:.1,evidence:[]}]},DATASET_VERSION),/shape mismatch/);
+});
+
+test("v4 retriever returns ten mapped Commerce products without a five-product clamp",async()=>{
+ const items=Array.from({length:10},(_,index)=>({product_id:`p-${index}`,rrf_score:1-index/20,
+   commerce:{variant_id:`v-p-${index}`},evidence:[{source_type:"product",source_id:`p-${index}`,
+     evidence_text:"상품 설명 청크"}]}));
+ const payload={dataset_version:DATASET_VERSION,items};
+ let sentTopK=0;
+ const result=await makeV4Retriever({payload,
+   getProduct:async({product_id})=>productDetail(product_id,`v-${product_id}`,{simulatedCatalog:true}),
+   fetcher:(async(_url,init)=>{sentTopK=JSON.parse(String(init?.body)).top_k;return new Response(JSON.stringify(payload));}) as typeof fetch
+ }).search(searchInput);
+ assert.equal(sentTopK,10);assert.equal(result.candidates.length,10);
+ assert.equal(new Set(result.candidates.map(candidate=>candidate.productId)).size,10);
 });
 
 test("versioned RAG preserves REAL evidence and rejects inconsistent provenance", () => {
@@ -300,7 +331,7 @@ test("v4 request follows the fixed contract and only verified Commerce data beco
     filters: {},
     required_conditions: [],
     preferences: [],
-    top_k: 5,
+    top_k: 10,
   });
   assert.equal(Object.hasOwn(requestBody!, "profile"), false);
   assert.equal(Object.hasOwn(requestBody!, "catalogSource"), false);
@@ -321,7 +352,7 @@ test("v4 request follows the fixed contract and only verified Commerce data beco
   assert.equal(result.evidence.length, 1);
   assert.equal(result.evidence[0].id, "r-v4-1");
   assert.equal(result.evidence[0].sourceId, "r-v4-1");
-  assert.equal(result.evidence[0].text, EVIDENCE_TEXT);
+  assert.equal(result.evidence[0].text, REVIEW_BODY);
   assert.equal(result.evidence[0].verified, true);
   assert.equal(result.evidence[0].sourceKind, "SYNTHETIC");
   assert.equal(result.evidence[0].datasetVersion, DATASET_VERSION);
@@ -379,7 +410,7 @@ test("QA v4 maps only verified Commerce conditions and uses exact retrieved rati
   assert.equal(candidate.rating, null);
   assert.equal(candidate.wholeReviewCountVerified, false);
   assert.deepEqual(requestBody?.preferences, []);
-  assert.equal(requestBody?.top_k, 5);
+  assert.equal(requestBody?.top_k, 10);
   assert.equal(Object.hasOwn(requestBody ?? {}, "isSimulated"), false);
 });
 
@@ -479,30 +510,72 @@ test("local trace counts reviews separately from Commerce spec evidence",async()
   assert.equal(result.trace?.verifiedReviewCount,1);
 });
 
+test("v4 transport deduplicates chunks from one review and returns one exact original review",async()=>{
+ const payload={dataset_version:DATASET_VERSION,items:[{product_id:"p-v4-1",rrf_score:.9,evidence:[
+   {source_id:"r-v4-1",evidence_text:"피부가 편안하고",source_metadata:{variant_id:null,source_kind:"SYNTHETIC",synthetic:true}},
+   {source_id:"r-v4-1",evidence_text:"보습이 오래 유지됩니다.",source_metadata:{variant_id:null,source_kind:"SYNTHETIC",synthetic:true}},
+ ]}]};
+ let lookupCalls=0;
+ const retriever=makeV4Retriever({payload,
+   getProduct:async()=>productDetail("p-v4-1","v-v4-1",{simulatedCatalog:true}),
+   reviewLookup:async input=>{lookupCalls++;assert.deepEqual(input.review_ids,["r-v4-1"]);return [review({variant_id:null})];}
+ });
+ const result=await retriever.search(searchInput);
+ assert.equal(lookupCalls,1);assert.equal(result.candidates.length,1);
+ const sourceRows=result.evidence.filter(row=>row.kind==="REVIEW");
+ assert.equal(sourceRows.length,1);
+ assert.deepEqual([sourceRows[0].sourceId,sourceRows[0].variantId,sourceRows[0].text],
+   ["r-v4-1",null,REVIEW_BODY]);
+ const ratingFacet=(result.candidates[0].facets as Record<string,{evidenceIds:string[];score:number}>).retrieved_review_rating;
+ assert.deepEqual(ratingFacet?.evidenceIds,["r-v4-1"]);
+ assert.equal(ratingFacet?.score,1);
+});
+
+type MutableV4Evidence={source_id:string;evidence_text:string;source_version?:string|null;product_id?:string;
+ source_metadata:{variant_id:string|null;source_kind:string;synthetic:boolean;[key:string]:unknown};[key:string]:unknown};
+type MutableV4Item={product_id:string;rrf_score:number;evidence:MutableV4Evidence[];[key:string]:unknown};
+type MutableV4Response={dataset_version:string;items:MutableV4Item[]};
+
 test("v4 parser rejects another version and duplicate product or source IDs but accepts zero items", () => {
   const parse = (rag as unknown as {
-    parseV4Response?: (raw: unknown, expectedVersion: string) => { items: unknown[] };
+    parseV4Response?: (raw: unknown, expectedVersion: string) => { items: Array<{productId:string;evidence:unknown[]}> };
   }).parseV4Response;
   assert.equal(typeof parse, "function");
   if (!parse) return;
 
   assert.throws(() => parse({ ...v4Response(), dataset_version: "other-version" }, DATASET_VERSION), /version/i);
 
-  const duplicateProduct = v4Response();
+  const duplicateProduct:MutableV4Response = v4Response();
   duplicateProduct.items.push(structuredClone(duplicateProduct.items[0]));
   assert.throws(() => parse(duplicateProduct, DATASET_VERSION), /duplicate/i);
 
-  const duplicateSource = v4Response();
+  const duplicateSource:MutableV4Response = v4Response();
   duplicateSource.items[0].evidence.push(structuredClone(duplicateSource.items[0].evidence[0]));
-  assert.throws(() => parse(duplicateSource, DATASET_VERSION), /duplicate/i);
+  assert.equal(parse(duplicateSource, DATASET_VERSION).items[0].evidence.length,1);
+  const mismatchedVariant=structuredClone(duplicateSource);
+  mismatchedVariant.items[0].evidence[1].source_metadata.variant_id="v-other";
+  assert.throws(()=>parse(mismatchedVariant,DATASET_VERSION),/scope|inconsistent/i);
+  const mismatchedSourceKind=structuredClone(duplicateSource);
+  mismatchedSourceKind.items[0].evidence[1].source_metadata.source_kind="REAL";
+  mismatchedSourceKind.items[0].evidence[1].source_metadata.synthetic=false;
+  assert.throws(()=>parse(mismatchedSourceKind,DATASET_VERSION),/scope|inconsistent/i);
+  const mismatchedVersion=structuredClone(duplicateSource);
+  mismatchedVersion.items[0].evidence[1].source_version=DATASET_VERSION;
+  assert.throws(()=>parse(mismatchedVersion,DATASET_VERSION),/scope|inconsistent/i);
+  const base=v4Response();
+  const crossProduct:MutableV4Response={...base,items:[
+    {...base.items[0],product_id:"p-v4-1"},
+    {...base.items[0],product_id:"p-v4-2",evidence:[{...base.items[0].evidence[0],product_id:"p-v4-2"}]},
+  ]};
+  assert.throws(()=>parse(crossProduct,DATASET_VERSION),/scope|inconsistent/i);
 
   assert.deepEqual(parse({ dataset_version: DATASET_VERSION, items: [] }, DATASET_VERSION).items, []);
-  const fiveItems={dataset_version:DATASET_VERSION,items:Array.from({length:5},(_,index)=>({
+  const tenItems={dataset_version:DATASET_VERSION,items:Array.from({length:10},(_,index)=>({
     product_id:`p-${index}`,rrf_score:.5,evidence:[],
   }))};
-  assert.equal(parse(fiveItems,DATASET_VERSION).items.length,5);
-  const sixItems={...fiveItems,items:[...fiveItems.items,{product_id:"p-5",rrf_score:.5,evidence:[]}]};
-  assert.throws(()=>parse(sixItems,DATASET_VERSION),/shape|limit/i);
+  assert.equal(parse(tenItems,DATASET_VERSION).items.length,10);
+  const elevenItems={...tenItems,items:[...tenItems.items,{product_id:"p-10",rrf_score:.5,evidence:[]}]};
+  assert.throws(()=>parse(elevenItems,DATASET_VERSION),/shape|limit/i);
 });
 
 test("v4 requires an exact configured version and ReviewLookup", () => {

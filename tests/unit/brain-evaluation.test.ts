@@ -90,13 +90,14 @@ test("synthetic REVIEW evidence must fail even when matching product identity",(
 });
 test("ranking explanations never exceed the approved top three candidates",()=>{
  const ids=["a","b","c","d"];
- const candidates=ids.map(id=>mockCandidate(id)),ev=ids.flatMap(evidence);
+ const candidates=ids.map(id=>({...mockCandidate(id),commerceVerified:true})),ev=ids.flatMap(evidence);
  const r=rankProducts(candidates,ev,ctx,[]);
  const result=buildGroundedExplanation(r,ev,ctx);
  assert.ok(result.items.length<=3);
  for(const item of result.items){
   assert.equal(item.evidenceIds.length,new Set(item.evidenceIds).size);
-  assert.ok(item.totalPriceWon>=0);
+  assert.equal(typeof item.totalPriceWon,'number');
+  assert.ok(item.totalPriceWon!==null&&item.totalPriceWon>=0);
  }
 });
 test("grounded explanation deduplicates product cards and hides internal evidence IDs",()=>{

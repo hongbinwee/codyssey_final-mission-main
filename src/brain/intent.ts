@@ -9,6 +9,11 @@ export interface IntentModel { complete(system:string,user:string):Promise<strin
 const keys=new Set<PreferenceKey>(['price_priority','eye_comfort','noise_sensitivity']);
 const SYSTEM=`You extract the CURRENT user's shopping intent into one JSON object only.
 Required keys: {"query":string,"maxTotalWon":number|null,"requiredConditions":string[],"currentPreferences":object}.
+Optional explicit price range: {"minTotalWon":number}. Preserve exact inclusive KRW endpoints.
+Optional review order: {"reviewSort":{"aspect":string,"direction":"MOST_POSITIVE"}}.
+Use reviewSort only when the latest message contains the exact aspect phrase and explicitly asks for
+positive reviews (리뷰/후기) in 긍정순 or 긍정 후기가 많은 순. Do not infer positivity from ratings or
+review count alone, and omit reviewSort when its current-message evidence is absent.
 Optional mode keys: {"queryMode":"KEEP"|"SET","budgetMode":"KEEP"|"SET"|"CLEAR",
 "requirementsMode":"KEEP"|"ADD"|"REPLACE"|"CLEAR","preferencesMode":"MERGE"|"CLEAR"}.
 Optional task-local fields: category (a lowercase category identifier), attributePreferences
@@ -52,7 +57,7 @@ const enums={
 export class BrainModelOutputError extends Error {
  constructor(message:string){super(message);this.name="BrainModelOutputError";}
 }
-function parseShoppingIntentInner(raw:string):ShoppingIntent {
+function parseShoppingIntentInner(raw:string,latestUserMessage?:string):ShoppingIntent {
  if(typeof raw!=='string'||raw.length>6000)throw new Error('invalid intent response');
  // Some providers wrap JSON despite the prompt. Unwrap only a whole JSON fence;
  // never extract a JSON fragment from prose or bypass the field checks below.
@@ -62,11 +67,13 @@ function parseShoppingIntentInner(raw:string):ShoppingIntent {
  try{data=JSON.parse(raw);}catch{throw new Error('invalid intent JSON');}
  if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('invalid intent object');
  const x=data as Record<string,unknown>;
- if(Object.keys(x).some(k=>!['query','maxTotalWon','requiredConditions','currentPreferences','category','attributePreferences','attributeSources',...Object.keys(enums)].includes(k)))
+ if(Object.keys(x).some(k=>!['query','maxTotalWon','minTotalWon','requiredConditions','currentPreferences','category','attributePreferences','attributeSources','reviewSort',...Object.keys(enums)].includes(k)))
    throw new Error('unexpected intent keys');
  if(typeof x.query!=='string'||!x.query.trim()||x.query.length>200)throw new Error('invalid intent query');
  if(x.maxTotalWon!==null&&(!Number.isSafeInteger(x.maxTotalWon)||Number(x.maxTotalWon)<0))
    throw new Error('invalid budget');
+ if(x.minTotalWon!==undefined&&(!Number.isSafeInteger(x.minTotalWon)||Number(x.minTotalWon)<0||
+   x.maxTotalWon===null||Number(x.minTotalWon)>Number(x.maxTotalWon)))throw new Error('invalid budget range');
  if(!Array.isArray(x.requiredConditions)||x.requiredConditions.length>12||
    x.requiredConditions.some(v=>typeof v!=='string'||!v.trim()||v.length>80))throw new Error('invalid requirements');
  if(!x.currentPreferences||typeof x.currentPreferences!=='object'||Array.isArray(x.currentPreferences))
@@ -85,6 +92,21 @@ function parseShoppingIntentInner(raw:string):ShoppingIntent {
    throw Error("invalid intent category");
  if(x.attributePreferences!==undefined&&(!x.category||!Array.isArray(x.attributePreferences)||x.attributePreferences.length>12||
    x.attributePreferences.some(k=>typeof k!=="string"||!/^(?!cost$)[a-z][a-z0-9_]{0,79}$/.test(k))))throw Error("invalid intent attributes");
+ let reviewSort:ShoppingContext['reviewSort'];
+ if(x.reviewSort!==undefined){
+  if(!x.reviewSort||typeof x.reviewSort!=="object"||Array.isArray(x.reviewSort)||
+     Object.keys(x.reviewSort).sort().join(",")!=="aspect,direction")throw Error("invalid review sort");
+  const sort=x.reviewSort as Record<string,unknown>;
+  if(typeof sort.aspect!=="string"||!sort.aspect.trim()||sort.aspect!==sort.aspect.trim()||
+     !/^[\p{Script=Hangul}A-Za-z0-9][\p{Script=Hangul}A-Za-z0-9 _-]{0,39}$/u.test(sort.aspect)||
+     /[\u0000-\u001f]/.test(sort.aspect)||sort.direction!=="MOST_POSITIVE")throw Error("invalid review sort");
+  const source=typeof latestUserMessage==="string"?latestUserMessage:"";
+  const reviewMention=/(?:리뷰|후기|reviews?)/i.test(source);
+  const positiveOrder=/(?:긍정(?:적(?:인)?)?|좋은|positive)\s*(?:(?:리뷰|후기|reviews?)\s*)?(?:가\s*)?(?:많은\s*순|순(?:으로)?|먼저|우선|first)|(?:리뷰|후기|reviews?)\s*(?:가\s*)?(?:긍정(?:적(?:인)?)?|좋은|positive)\s*(?:많은\s*순|순(?:으로)?|먼저|우선|first)/i.test(source);
+  const negated=/아니|말고|제외|빼고|취소/.test(source);
+  if(reviewMention&&positiveOrder&&!negated&&source.includes(sort.aspect))
+    reviewSort={aspect:sort.aspect,direction:"MOST_POSITIVE"};
+ }
  for(const [k,allowed] of Object.entries(enums)){
   if(x[k]!==undefined){
    if(typeof x[k]!=='string'||!(allowed as readonly string[]).includes(x[k] as string))
@@ -94,13 +116,15 @@ function parseShoppingIntentInner(raw:string):ShoppingIntent {
  }
  return {query:x.query.trim(),context:{maxTotalWon:x.maxTotalWon as number|null,
    requiredConditions:(x.requiredConditions as string[]).map(s=>s.trim()),currentPreferences:preferences,
+    ...(x.minTotalWon!==undefined?{minTotalWon:x.minTotalWon as number}:{}),
+    ...(reviewSort?{reviewSort}:{}),
    ...(typeof x.category==="string"?{category:x.category,
      ...(Array.isArray(x.attributePreferences)?{attributePreferences:[...new Set(x.attributePreferences as string[])]}:{})}:{})},...modes,
    ...(x.attributeSources?{attributeSources:x.attributeSources as Record<string,string>}:{})};
 }
 /** Invalid model-generated fields are upstream output failures, never HTTP 400 user errors. */
-export function parseShoppingIntent(raw:string):ShoppingIntent {
- try {return parseShoppingIntentInner(raw);}
+export function parseShoppingIntent(raw:string,latestUserMessage?:string):ShoppingIntent {
+ try {return parseShoppingIntentInner(raw,latestUserMessage);}
  catch(e) {
   throw new BrainModelOutputError(e instanceof Error ? e.message : "invalid intent output");
  }
@@ -112,7 +136,7 @@ export function createIntentPort(model:IntentModel,catalogCategory?:string|strin
    // A selected Skill is a fixed, trusted procedure; user data remains user-level.
     const system=SHOPPING_POLICY+"\n"+SYSTEM+"\nBuilt-in shopping procedure: "+context.trustedSkillInstruction
       +(catalogCategory?"\nCurrent catalog category identifiers: "+JSON.stringify(catalogCategory)+". Choose an exact identifier only when the user's requested product belongs to it. Preserve unsupported product intent; never replace it with a catalog product.":"")
-      +"\nIntent extraction output boundary: This is an internal machine-readable step; user-facing follow-up questions are handled by the application. Return exactly one JSON object matching the schema above. Do not greet the user, ask follow-up questions, explain the result, use Markdown, or include any text before or after the JSON object. Numeric price and budget limits belong only in maxTotalWon with the appropriate budgetMode; never repeat them in requiredConditions. Use requiredConditions only for explicit non-price product constraints from the current user.";
-   return parseShoppingIntent(await model.complete(system,context.untrustedUserContent));
+      +"\nIntent extraction output boundary: This is an internal machine-readable step; user-facing follow-up questions are handled by the application. Return exactly one JSON object matching the schema above. Do not greet the user, ask follow-up questions, explain the result, use Markdown, or include any text before or after the JSON object. Numeric price and budget limits belong only in minTotalWon/maxTotalWon with the appropriate budgetMode and exact inclusive KRW bounds; never repeat them in requiredConditions. Use requiredConditions only for explicit non-price product constraints from the current user.";
+   return parseShoppingIntent(await model.complete(system,context.untrustedUserContent),userMessage);
  }};
 }

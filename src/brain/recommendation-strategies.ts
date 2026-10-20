@@ -35,10 +35,11 @@ export function curateRecommendations(ranking:RankingResult,activity:CommerceAct
   const affinity=(signals.includes("CART")?.28:0)+(signals.includes("WISHLIST")?.24:0)+
    (signals.includes("PURCHASE")?.14:0);
   return {...row,personalizationSignals:signals,personalizedScore:row.score+affinity,originalIndex:index};
- }).sort((a,b)=>b.personalizedScore-a.personalizedScore||a.originalIndex-b.originalIndex);
+ }).sort((a,b)=>ranking.explicitReviewSort?.status==="APPLIED"?a.originalIndex-b.originalIndex:b.personalizedScore-a.personalizedScore||a.originalIndex-b.originalIndex);
  const unique:typeof scored=[];
  const seen=new Set<string>();
  for(const row of scored)if(!seen.has(row.candidate.productId)){seen.add(row.candidate.productId);unique.push(row);}
+ if(ranking.explicitReviewSort?.status==="APPLIED")return {...ranking,ranked:unique.map(row=>{const {personalizedScore,originalIndex,...candidate}=row;return candidate;})};
  const result:LabeledCandidate[]=[];
  const taken=new Set<string>();
  const add=(row:typeof unique[number]|undefined,role:RecommendationRole)=>{

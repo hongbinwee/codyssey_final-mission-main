@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {rankProducts} from '../../src/brain/personalization.ts';
-import {createLlmGroundedResponder} from '../../src/brain/grounded-response.ts';
+import {buildGroundedExplanation,createLlmGroundedResponder} from '../../src/brain/grounded-response.ts';
 import {retrieveTurn} from '../../src/brain/read-flow.ts';
-import type {ProductCandidate,EvidenceRecord,Preference} from '../../src/brain/contracts.ts';
+import type {ProductCandidate,EvidenceRecord,Preference,RankingResult} from '../../src/brain/contracts.ts';
 import type {ShoppingPlan} from '../../src/brain/shopping-plan.ts';
 import {createPersistentResearchGraph} from '../../src/brain/graph.ts';
 import {interviewAnswer} from '../../src/brain/interview.ts';
@@ -14,12 +14,94 @@ const product:ProductCandidate={productId:'p-mask',variantId:'v-mask',productNam
  conditions:{},facets:{},sourceKind:'SYNTHETIC',commerceVerified:true,isSimulated:true,qaRankingEligible:true,datasetVersion:'fixture-quality'};
 const plan:ShoppingPlan={query:'마스크팩',maxTotalWon:20000,requiredConditions:[],currentPreferences:{},revision:1,category:'beauty'};
 const ranking=()=>rankProducts([product],[],plan,[]);
+const review=(sourceId:string,productId:string,variantId:string,text:string):EvidenceRecord=>({
+ id:`chunk-${sourceId}`,sourceId,productId,variantId,kind:'REVIEW',sourceKind:'REAL',verified:true,
+ datasetVersion:'fixture-quality',text,
+});
 
 test('verified demo catalog facts qualify without any review; missing hard evidence still rejects',()=>{
  assert.equal(ranking().ranked.length,1);
  assert.equal(rankProducts([product],[],{...plan,requiredConditions:['무향']},[]).ranked.length,0);
  assert.equal(rankProducts([{...product,commerceVerified:false}],[],plan,[]).ranked.length,0);
  assert.equal(rankProducts([{...product,qaRankingEligible:false}],[],plan,[]).ranked.length,0);
+});
+
+test('budget ranges keep exact endpoints and calculate only verified item plus shipping totals',()=>{
+ const band={...plan,minTotalWon:20_000,maxTotalWon:39_999};
+ const inBand={...product,unitPriceWon:28_000,shippingFeeWon:3_000};
+ const accepted=rankProducts([inBand],[],band,[]);
+ assert.equal(accepted.ranked.length,1);
+ const explanation=buildGroundedExplanation(accepted,[],band);
+ assert.match(explanation.text,/20,000원.*39,999원/);
+ assert.equal(explanation.items[0]?.totalPriceWon,31_000);
+ const over={...product,unitPriceWon:39_000,shippingFeeWon:3_000};
+ const rejected=rankProducts([over],[],band,[]);
+ assert.equal(rejected.ranked.length,0);
+ assert.ok(rejected.rejected[0]?.reasons.includes('over_total_budget'));
+ const missingShipping={...product,unitPriceWon:28_000,shippingFeeWon:null};
+ const unverified=buildGroundedExplanation({ranked:[{candidate:missingShipping,score:1,evidenceCoverage:1,missingAspects:[],effectivePreferences:{price_priority:'balanced',eye_comfort:'normal',noise_sensitivity:'normal'}}],referenceOnly:[],rejected:[],evaluatedCount:1} as RankingResult,[],band);
+ assert.equal(unverified.items[0]?.totalPriceWon,null);
+ assert.doesNotMatch(unverified.items[0]?.reason??'',/0원|예산 안/);
+});
+
+test('explicit review sort keeps ranked order and uses de-duplicated sentiment counts as fixed card reasons',async()=>{
+ const realBase={...product,sourceKind:'REAL' as const,isSimulated:false,qaRankingEligible:undefined};
+ const cheaper={...realBase,productId:'p-cheap',variantId:'v-cheap',unitPriceWon:10_000,shippingFeeWon:3_000};
+ const higher={...realBase,productId:'p-moist',variantId:'v-moist',unitPriceWon:28_000,shippingFeeWon:3_000};
+ const a=review('review-cheap','p-cheap','v-cheap','가격이 저렴해서 좋아요.');
+ const bPositive=review('review-moist-positive','p-moist','v-moist','사용 후 촉촉해서 좋았어요.');
+ const bPositive2=review('review-moist-positive-2','p-moist','v-moist','당김이 적고 촉촉했어요.');
+ const bNegative=review('review-moist-negative','p-moist','v-moist','촉촉하지 않아요.');
+ const evidence=[a,bPositive,{...bPositive,id:'chunk-copy-1'},{...bPositive,id:'chunk-copy-2'},bPositive2,bNegative] as EvidenceRecord[];
+ const base=rankProducts([cheaper,higher],evidence,{...plan,maxTotalWon:null},[]);
+ const cheapRow=base.ranked.find(row=>row.candidate.productId==='p-cheap')!;
+ const moistRow=base.ranked.find(row=>row.candidate.productId==='p-moist')!;
+ const ranking={...base,explicitReviewSort:{aspect:'moisturizing',status:'APPLIED' as const,scope:'RETRIEVED_REVIEWS' as const},ranked:[
+  {...moistRow,reviewSortEvidence:{aspect:'moisturizing',positiveCount:2,negativeCount:1,reviewIds:['review-moist-positive','review-moist-positive-2','review-moist-negative'],sourceKinds:['REAL'] as ('REAL'|'SYNTHETIC')[]}},
+  {...cheapRow,reviewSortEvidence:{aspect:'moisturizing',positiveCount:1,negativeCount:0,reviewIds:['review-cheap'],sourceKinds:['REAL'] as ('REAL'|'SYNTHETIC')[]}},
+ ]} as RankingResult;
+ let calls=0;
+ const result=await createLlmGroundedResponder({async chat(){
+  calls++;
+  return {content:JSON.stringify({recommendations:[
+   {productId:'p-cheap',variantId:'v-cheap',factIds:['price'],reviewClaims:[]},
+   {productId:'p-moist',variantId:'v-moist',factIds:['price'],reviewClaims:[]},
+  ]})};
+ }} )({originalQuestion:'저렴한 상품보다 촉촉하다는 후기가 많은 상품',ranking,evidence,plan:{...plan,maxTotalWon:null},mode:'RECOMMEND'});
+ assert.equal(calls,1);
+ assert.deepEqual(result.items.map(item=>item.productId),['p-moist','p-cheap']);
+ assert.match(result.items[0]?.reason??'',/보습력.*긍정 의견 2건.*아쉬운 의견 1건/);
+ assert.match(result.items[1]?.reason??'',/보습력.*긍정 의견 1건.*아쉬운 의견 0건/);
+ assert.match(result.text,/검색된 일부 후기/);
+});
+
+test('insufficient review sample creates no ranking reason and keeps negative wording out of positive counts',()=>{
+ const candidate={...product,unitPriceWon:10_000,shippingFeeWon:3_000};
+ const negative=review('review-negative','p-mask','v-mask','촉촉하지 않아요.');
+ const ranking={...rankProducts([candidate],[negative],{...plan,maxTotalWon:null},[]),explicitReviewSort:{
+  aspect:'moisturizing',status:'INSUFFICIENT' as const,scope:'RETRIEVED_REVIEWS' as const,
+ }} as RankingResult;
+ const result=buildGroundedExplanation(ranking,[negative],{...plan,maxTotalWon:null});
+ assert.equal(result.items[0]?.reason,undefined);
+ assert.match(result.text,/후기가 충분하지 않아/);
+ assert.doesNotMatch(result.text,/긍정 의견/);
+});
+
+test('applied sort gives a sampled zero-positive review a reason but no-sample candidates no rank reason',()=>{
+ const sampled={...product,productId:'p-sampled',variantId:'v-sampled',unitPriceWon:10_000,shippingFeeWon:3_000};
+ const noSample={...product,productId:'p-no-sample',variantId:'v-no-sample',unitPriceWon:12_000,shippingFeeWon:3_000};
+ const negative=review('review-negative','p-sampled','v-sampled','촉촉하지 않아요.');
+ const base=rankProducts([sampled,noSample],[negative],{...plan,maxTotalWon:null},[]);
+ const sampledRow=base.ranked.find(row=>row.candidate.productId==='p-sampled')!;
+ const noSampleRow=base.ranked.find(row=>row.candidate.productId==='p-no-sample')!;
+ const ranking={...base,explicitReviewSort:{aspect:'moisturizing',status:'APPLIED' as const,scope:'RETRIEVED_REVIEWS' as const},ranked:[
+  {...sampledRow,reviewSortEvidence:{aspect:'moisturizing',positiveCount:0,negativeCount:1,reviewIds:['review-negative'],sourceKinds:['REAL'] as ('REAL'|'SYNTHETIC')[]}},
+  {...noSampleRow,reviewSortEvidence:{aspect:'moisturizing',positiveCount:0,negativeCount:0,reviewIds:[],sourceKinds:[] as ('REAL'|'SYNTHETIC')[]}},
+ ]} as RankingResult;
+ const result=buildGroundedExplanation(ranking,[negative],{...plan,maxTotalWon:null});
+ assert.match(result.items[0]?.reason??'',/긍정 의견 0건.*아쉬운 의견 1건/);
+ assert.equal(result.items[1]?.reason,undefined);
+ assert.match(result.text,/일부 상품은 후기 수 근거를 확인하지 못했어요/);
 });
 
 test('normal recommendations use one LLM call, stay ranked and cannot fabricate catalog reasons',async()=>{

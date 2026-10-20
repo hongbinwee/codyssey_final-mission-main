@@ -1,5 +1,6 @@
 import type {ProductDetail,ReviewItem,ToolResult} from "../contracts.ts";
 import type {Aspect,EvidenceRecord,GroundedFacet,ProductCandidate,RetrieverPort} from "./contracts.ts";
+import {reviewSortAspectLabel} from "./review-sort.ts";
 
 /**
  * Read-only RAG integration boundary. RAG supplies candidate/evidence references,
@@ -54,10 +55,11 @@ export type ReviewLookup=(input:{product_id:string;review_ids:string[]})=>Promis
 
 interface ParsedV4Evidence {
   sourceId:string;
-  evidenceText:string;
+  evidenceTexts:string[];
   variantId:string|null;
   sourceKind:"REAL"|"SYNTHETIC";
   synthetic:boolean;
+  sourceVersion:string|null;
 }
 interface ParsedV4Item {productId:string;rrfScore:number;evidence:ParsedV4Evidence[];productEvidence?:true;commerceVariantId?:string}
 interface ParsedV4Response {datasetVersion:string;items:ParsedV4Item[]}
@@ -71,7 +73,7 @@ function text(v:unknown,max=160):v is string {
 function score(v:unknown):v is number{return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1;}
 function whole(v:unknown):v is number {return typeof v==="number"&&Number.isSafeInteger(v)&&v>=0;}
 const maxResponseBytes=400_000;
-const maxRagProducts=5;
+const maxRagProducts=10;
 const pickRecord=(v:unknown):GroundedFacet|undefined=>{
   const x=obj(v);
   if(!x||!score(x.score)||!Array.isArray(x.evidenceIds)||x.evidenceIds.length===0||
@@ -85,7 +87,7 @@ export function parseV4Response(raw:unknown,expectedVersion:string):ParsedV4Resp
   if(!text(expectedVersion,128)||!r||r.dataset_version!==expectedVersion||
      !Array.isArray(r.items)||r.items.length>maxRagProducts)
     throw new Error("RAG v4 dataset version or response shape mismatch");
-  const seenProducts=new Set<string>(),seenSources=new Set<string>();
+  const seenProducts=new Set<string>(),seenSources=new Map<string,string>();
   let evidenceCount=0;
   const items:ParsedV4Item[]=r.items.map(value=>{
     const item=obj(value);
@@ -99,7 +101,8 @@ export function parseV4Response(raw:unknown,expectedVersion:string):ParsedV4Resp
     let productEvidence=false;
     const commerce=obj(item.commerce);
     if(commerce?.variant_id!==undefined&&!text(commerce.variant_id,128))throw Error('invalid RAG Commerce variant');
-    const evidence:ParsedV4Evidence[]=item.evidence.flatMap(rawEvidence=>{
+    const uniqueEvidence=new Map<string,ParsedV4Evidence>();
+    item.evidence.forEach(rawEvidence=>{
       const entry=obj(rawEvidence),metadata=obj(entry?.source_metadata);
       if(!entry||(entry.product_id!==undefined&&entry.product_id!==item.product_id)||
          (entry.source_version!==undefined&&entry.source_version!==null&&entry.source_version!==expectedVersion))
@@ -112,15 +115,22 @@ export function parseV4Response(raw:unknown,expectedVersion:string):ParsedV4Resp
       const sourceKind=metadata?.source_kind;
       const synthetic=metadata?.synthetic;
       const excerpt=entry?.evidence_text;
-      if(!entry||!text(entry.source_id,128)||seenSources.has(entry.source_id)||
+      if(!entry||!text(entry.source_id,128)||
          typeof excerpt!=="string"||excerpt.length===0||excerpt.length>5000||excerpt.includes("\u0000")||
          !metadata||!(metadata.variant_id===null||text(metadata.variant_id,128))||
          !(sourceKind==="SYNTHETIC"&&synthetic===true||sourceKind==="REAL"&&synthetic===false))
         throw new Error("invalid, duplicate, or inconsistent RAG review evidence");
-      seenSources.add(entry.source_id);
-      return [{sourceId:entry.source_id,evidenceText:excerpt,variantId:metadata.variant_id,
-        sourceKind,synthetic}];
+      const sourceVersion=entry.source_version===undefined||entry.source_version===null?null:entry.source_version as string;
+      const signature=JSON.stringify([item.product_id,metadata.variant_id,sourceKind,synthetic,sourceVersion]);
+      const prior=seenSources.get(entry.source_id);
+      if(prior!==undefined&&prior!==signature)throw new Error("RAG v4 source ID scope or provenance mismatch");
+      seenSources.set(entry.source_id,signature);
+      const parsed=uniqueEvidence.get(entry.source_id);
+      if(parsed){if(!parsed.evidenceTexts.includes(excerpt))parsed.evidenceTexts.push(excerpt);return;}
+      uniqueEvidence.set(entry.source_id,{sourceId:entry.source_id,evidenceTexts:[excerpt],variantId:metadata.variant_id,
+        sourceKind,synthetic,sourceVersion});
     });
+    const evidence=[...uniqueEvidence.values()];
     return {productId:item.product_id,rrfScore:item.rrf_score,evidence,...(productEvidence?{productEvidence:true as const}:{}),...(commerce?.variant_id?{commerceVariantId:commerce.variant_id as string}:{})};
   });
   return {datasetVersion:expectedVersion,items};
@@ -136,9 +146,10 @@ function validV4ReviewRows(
   const found=new Map<string,ReviewItem>();
   for(const raw of rows){
     const row=obj(raw);
+    const sourceBody=row?.body;
     if(!row||!text(row.id,128)||!text(row.product_id,128)||
        (row.variant_id!==null&&!text(row.variant_id,128))||
-       typeof row.body!=="string"||
+       typeof sourceBody!=="string"||
        (row.source_kind!=="REAL"&&row.source_kind!=="SYNTHETIC")||
        typeof row.rating!=="number"||!Number.isFinite(row.rating)||row.rating<1||row.rating>5||
        typeof row.source_ref!=="string"||typeof row.written_at!=="string")
@@ -147,7 +158,7 @@ function validV4ReviewRows(
     if(!expectedEvidence||found.has(row.id)||row.product_id!==productId||
        row.variant_id!==expectedEvidence.variantId||row.source_kind!==expectedEvidence.sourceKind||
        expectedEvidence.synthetic!==(row.source_kind==="SYNTHETIC")||
-       !row.body.includes(expectedEvidence.evidenceText))
+       !expectedEvidence.evidenceTexts.every(excerpt=>sourceBody.includes(excerpt)))
       throw new Error("RAG review source or excerpt mismatch");
     found.set(row.id,row as unknown as ReviewItem);
   }
@@ -197,7 +208,20 @@ async function retrieveV4(
     throw new Error("invalid RAG v4 request");
   const preferences=input.preferences??[];
   if(!Array.isArray(preferences)||preferences.length>20||!preferences.every(p=>text(p,128))||
-    input.maxTotalWon!==null&&(!Number.isSafeInteger(input.maxTotalWon)||input.maxTotalWon<0))throw Error('invalid RAG search context');
+    input.maxTotalWon!==null&&(!Number.isSafeInteger(input.maxTotalWon)||input.maxTotalWon<0)||
+    input.minTotalWon!==undefined&&(!Number.isSafeInteger(input.minTotalWon)||input.minTotalWon<0||
+      input.maxTotalWon!==null&&input.minTotalWon>input.maxTotalWon))throw Error('invalid RAG search context');
+  const reviewSort=input.reviewSort===undefined?undefined:obj(input.reviewSort);
+  const sortAspect=reviewSort&&Object.keys(reviewSort).every(key=>key==='aspect'||key==='direction')&&
+    typeof reviewSort.aspect==='string'?reviewSort.aspect.normalize('NFKC').trim():undefined;
+  const validSortAspect=!!sortAspect&&sortAspect.length<=40&&
+    /^[A-Za-z가-힣][A-Za-z가-힣0-9 _-]*$/.test(sortAspect);
+  if(input.reviewSort!==undefined&&(!reviewSort||!validSortAspect||reviewSort.direction!=='MOST_POSITIVE'))
+    throw Error('invalid RAG review sort');
+  const sortHint=validSortAspect?`${reviewSortAspectLabel(sortAspect!)} 긍정 리뷰`:undefined;
+  // Keep the supported RAG request contract: explicit sort is a search hint,
+  // not a new remote API field. RAG still returns exact source IDs for ranking.
+  const searchPreferences=[...new Set([...(sortHint?[sortHint]:[]),...preferences])].slice(0,20);
   const categories=connection.categories;
   if(categories&&(!categories.length||categories.length>100||!categories.every(c=>text(c,80))))throw Error("invalid RAG categories");
   const category=categories?(input.category??connection.category??""):(connection.category??"beauty");
@@ -208,11 +232,13 @@ async function retrieveV4(
     headers:{"content-type":"application/json",...(connection.token?{authorization:"Bearer "+connection.token}:{})},
     body:JSON.stringify({request_id:input.requestId,original_question:input.originalQuestion,...(connection.profile?{profile:connection.profile}:{}),
       // Remote preferences are hints, not verified conditions. Commerce and
-      // Ranking enforce the original hard requirements and shipping-inclusive budget.
-      query:connection.mode==='local'?[input.query,...preferences].join(' ').slice(0,250):input.query,
+      // Ranking enforce hard requirements and shipping-inclusive budget bounds.
+      query:connection.mode==='local'?[input.query,...searchPreferences].join(' ').slice(0,250):input.query,
       ...(category||connection.mode==='local'?{category}:{}),
+      // price_max is a safe recall hint for a total-price ceiling. A product-price
+      // price_min could discard items whose price plus shipping meets the floor.
       filters:connection.mode==='remote'?{in_stock:true,...(input.maxTotalWon!==null?{price_max:input.maxTotalWon,currency:'KRW'}:{})}:{},
-      required_conditions:input.requiredConditions,preferences:connection.mode==='local'?[]:preferences,top_k:5})
+      required_conditions:input.requiredConditions,preferences:connection.mode==='local'?[]:searchPreferences,top_k:10})
   });
   const rawResponse=await boundedJson(response);
   const envelope=obj(rawResponse);
@@ -244,7 +270,7 @@ async function retrieveV4(
       const source=reviews.get(entry.sourceId);
       if(source)evidence.push({id:source.id,productId:source.product_id,variantId:source.variant_id,rating:source.rating,
         kind:"REVIEW",sourceKind:source.source_kind,sourceRef:source.source_ref,
-        text:entry.evidenceText,sourceId:entry.sourceId,verified:true,datasetVersion:parsed.datasetVersion});
+        text:source.body,sourceId:entry.sourceId,verified:true,datasetVersion:parsed.datasetVersion});
     }
     for(const [variantId,entries] of byVariant){
       const variant=got.data.variants.find(v=>v.variant_id===variantId);

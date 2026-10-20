@@ -6,8 +6,8 @@ import {createPersistentResearchGraph} from '../../src/brain/graph.ts';
 import {MemorySaver} from '@langchain/langgraph';
 import {routeBrainMessage} from '../../src/brain/routing.ts';
 const plan={query:'단백질 쉐이크',maxTotalWon:null,requiredConditions:[],currentPreferences:{},revision:1};
-test('named product searches need no generic budget or daily/gift interview',()=>{
- for(const query of ['단백질 쉐이크','마스크팩','식기세척기 세제'])assert.deepEqual(needsInterview({...plan,query},query+' 추천해줘',[]),[]);
+test('bare product requests ask one optional budget; a stated purpose avoids generic daily/gift questions',()=>{
+ for(const query of ['단백질 쉐이크','마스크팩','식기세척기 세제'])assert.deepEqual(needsInterview({...plan,query},query+' 추천해줘',[]).map(question=>question.key),['budget']);
  assert.deepEqual(needsInterview(plan,'선물할 쉐이크 추천해줘',[]),[]);
 });
 test('ambiguous product type asks exactly one scoped question; answer keeps budget and hard constraints',()=>{

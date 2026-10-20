@@ -27,6 +27,8 @@ export function assembleIntentContext(userMessage:string,memories:Preference[],p
  const remembered=[...latest].map(([key,record])=>({key,value:record.value})).slice(0,3);
  const context=previous?{
    query:previous.query,maxTotalWon:previous.maxTotalWon,
+   ...(previous.minTotalWon!==undefined?{minTotalWon:previous.minTotalWon}:{}),
+   ...(previous.reviewSort?{reviewSort:previous.reviewSort}:{}),
    requiredConditions:previous.requiredConditions,currentPreferences:previous.currentPreferences,
    ...(previous.interview?.purpose?{userStatedPurpose:previous.interview.purpose}:{}),
    ...(previous.category?{category:previous.category,attributePreferences:previous.attributePreferences??[]}:{})

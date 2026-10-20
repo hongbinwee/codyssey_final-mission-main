@@ -109,7 +109,7 @@ function requestOf(value:unknown):SearchRequest{
    !(value.category===""||text(value.category,80))||!object(value.filters)||!Array.isArray(value.required_conditions)||
    value.required_conditions.length>25||!value.required_conditions.every(x=>text(x,128))||
    !Array.isArray(value.preferences)||!Number.isSafeInteger(value.top_k)||
-   (value.top_k as number)<1||(value.top_k as number)>5)
+   (value.top_k as number)<1||(value.top_k as number)>10)
    throw new Error("invalid local RAG request shape or top_k");
  if(Object.keys(value.filters).length)throw new Error("unsupported local RAG filter");
  if(value.preferences.length)throw new Error("unsupported local RAG preference");
