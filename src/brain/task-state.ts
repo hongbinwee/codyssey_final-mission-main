@@ -2,7 +2,7 @@
  * H2: server-issued task identity/state. A task is context, never authority to
  * fetch another actor's records or perform a Commerce mutation.
  */
-export type AgentTaskKind="WISHLIST"|"DISCOVERY"|"REVIEW_COMPARE"|"ORDER";
+export type AgentTaskKind="WISHLIST"|"CART"|"DISCOVERY"|"REVIEW_COMPARE"|"ORDER";
 export type AgentTaskPhase="ACTIVE"|"AWAITING_INPUT"|"UNAVAILABLE";
 export type PendingTaskQuestion="budget"|"purpose"|"product_type";
 export interface TaskScope {actorUserId:string;conversationId:string;datasetVersion?:string}
@@ -11,7 +11,7 @@ export interface AgentTaskState extends TaskScope {
  displayedProductIds:string[];selectedProductId?:string;
  pendingQuestion?:PendingTaskQuestion;
 }
-const kinds=new Set<AgentTaskKind>(["WISHLIST","DISCOVERY","REVIEW_COMPARE","ORDER"]);
+const kinds=new Set<AgentTaskKind>(["WISHLIST","CART","DISCOVERY","REVIEW_COMPARE","ORDER"]);
 const phases=new Set<AgentTaskPhase>(["ACTIVE","AWAITING_INPUT","UNAVAILABLE"]);
 const questions=new Set<PendingTaskQuestion>(["budget","purpose","product_type"]);
 const identifier=(x:unknown):x is string=>typeof x==="string"&&x.length>0&&x.length<=256&&!/[\u0000-\u001f]/.test(x);
