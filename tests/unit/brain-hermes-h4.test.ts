@@ -103,7 +103,8 @@ test("H4 model unavailable on order read does not trigger RAG or fake order",asy
 test("tool-policy router distinguishes reads from sensitive writes",()=>{
  for(const m of ["장바구니에 뭐 있어?","내 주문 조회","배송 어디쯤이야","택배 상황 알려줘"])
   assert.equal(readAgentRoute(m),true,m);
- for(const m of ["주문 취소해 줘","결제 내역 확인","장바구니에 넣어 줘","반품 진행해"])
+ for(const m of ["주문 취소해 줘","결제 내역 확인","장바구니에 넣어 줘","반품 진행해",
+   "무료배송 상품 추천해줘","배송 빠른 이어폰 추천해줘","내 주문 제품 중 다른 상품 추천해줘"])
   assert.equal(readAgentRoute(m),false,m);
 });
 test("model cannot use guessed product ID or execute a write",async()=>{
@@ -114,4 +115,20 @@ test("model cannot use guessed product ID or execute a write",async()=>{
 });
 test("server responses never invent order details when no Tool ran",()=>{
  assert.match(summarizeAgentObservations([]),/확인된 조회 결과가 없어요/);
+});
+
+test("H4 explicit product discovery recovers with verified retrieval when model stops prematurely",async()=>{
+ const {deps,getCounts}=baseDeps({chat:async()=>({content:"완료"})});
+ const result=await createPersistentResearchGraph(deps,new MemorySaver() as never)
+  .invoke(request("무선 이어폰 추천해줘"));
+ assert.equal(getCounts().retrievals,1);
+ assert.equal(result.ranking.ranked[0]?.candidate.productId,"p1");
+ assert.equal(result.trace.hermesRecovered,1);
+});
+test("H4 missing shopping requirement can ask a question without an unnecessary RAG call",async()=>{
+ const {deps,getCounts}=baseDeps({chat:async()=>({content:"어느 용도의 이어폰을 찾으세요?"})});
+ const result=await createPersistentResearchGraph(deps,new MemorySaver() as never)
+  .invoke(request("무선 이어폰 추천해줘"));
+ assert.equal(getCounts().retrievals,0);
+ assert.match(result.explanation?.text??"",/용도의 이어폰/);
 });
