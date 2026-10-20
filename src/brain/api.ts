@@ -100,7 +100,7 @@ export function createBrainApi(deps:BrainApiDeps) {
         return success({conversation_id:result.conversationId,message_id:result.messageId,
           ranking:result.ranking,trace:{...result.trace,graphWallMs},read_only:true,intent_kind:result.intentKind,
           shopping_plan:result.shoppingPlan??null,agent_ui:result.agentUi??null,
-          shopping_handoffs:result.shoppingHandoffs??[],explanation:result.explanation??null});
+          shopping_handoffs:result.shoppingHandoffs??[],review_summary:result.reviewSummary??null,explanation:result.explanation??null});
       }
       const state=path.match(/^\/api\/brain\/conversations\/([a-fA-F0-9-]+)\/state$/);
       if(method==="GET"&&state){
