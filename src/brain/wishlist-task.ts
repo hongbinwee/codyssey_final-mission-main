@@ -2,7 +2,9 @@
 export interface WishlistItem {productId:string;name:string;active:boolean;minPriceWon:number|null}
 export interface WishlistView {kind:"WISHLIST";items:WishlistItem[];selectedProductId?:string}
 export type WishlistIntent={kind:"LIST"}|{kind:"SELECT";index:number};
-export function wishlistIntent(message:string,previous?:WishlistView):WishlistIntent|null{
+/** Minimum previous reference: H2 reads item IDs from an owned task snapshot. */
+export type WishlistReference={kind:"WISHLIST";items:readonly {productId:string}[]};
+export function wishlistIntent(message:string,previous?:WishlistReference):WishlistIntent|null{
  const text=message.trim().replace(/[.!?~]+$/,"").trim();
  if(!text||text.length>160||/찜.{0,12}(?:해제|취소|삭제|지워|빼)|(?:해제|취소|삭제).{0,12}찜/.test(text))return null;
  if(previous){
@@ -18,7 +20,7 @@ export function wishlistIntent(message:string,previous?:WishlistView):WishlistIn
  if(/비교|리뷰|후기|평점|저렴|싼|비싼|가성비|추천|배송|가장|제일|예산|정렬|단점|장점|순서|대신|비슷/.test(text))return null;
  return /찜|위시리스트|하트\s*(?:눌|찍|표시)|저장해\s*둔\s*상품|저장한\s*상품/.test(text)?{kind:"LIST"}:null;
 }
-export function wishlistReply(intent:WishlistIntent,owned:WishlistItem[],previous?:WishlistView):{text:string;view:WishlistView}{
+export function wishlistReply(intent:WishlistIntent,owned:WishlistItem[],previous?:WishlistReference):{text:string;view:WishlistView}{
  const view:WishlistView={kind:"WISHLIST",items:owned.slice(0,20).map(x=>({...x}))};
  if(intent.kind==="LIST")return {view,text:!owned.length?"아직 찜한 상품이 없어요.":"찜한 상품을 확인했어요. 원하는 상품을 선택하면 상세 화면에서 구매 옵션을 확인할 수 있어요."};
  const prior=previous?.items[intent.index],current=prior&&owned.find(x=>x.productId===prior.productId);
