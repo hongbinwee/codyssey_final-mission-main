@@ -33,7 +33,8 @@ const State=Annotation.Root({
  activeTask:Annotation<AgentTaskState|null>(),
  agentRead:Annotation<boolean>(),agentAction:Annotation<AgentAction|null>(),
  agentObservations:Annotation<AgentObservation[]>(),agentStart:Annotation<number>(),
- agentSearched:Annotation<boolean>(),agentStop:Annotation<string|null>(),agentQuestion:Annotation<string|null>()
+ agentSearched:Annotation<boolean>(),agentStop:Annotation<string|null>(),agentQuestion:Annotation<string|null>(),
+ agentDecisionMs:Annotation<number>(),agentToolMs:Annotation<number>(),agentDecisionCount:Annotation<number>()
 });
 /**
  * Four explicit phases, each with a persisted checkpoint. Only a server-owned
@@ -71,7 +72,8 @@ export function createPersistentResearchGraph(
      const prepared=await prepareTurn(state.request,deps);
      await verify();
      return {prepared,agentRead:false,agentAction:null,agentObservations:[],agentStart:0,
-       agentSearched:false,agentStop:null,agentQuestion:null};
+       agentSearched:false,agentStop:null,agentQuestion:null,
+       agentDecisionMs:0,agentToolMs:0,agentDecisionCount:0};
    })
    .addNode("route",async state=>{
      const started=performance.now();
@@ -153,6 +155,7 @@ export function createPersistentResearchGraph(
      if(!deps.hermes)throw Error("Hermes provider unavailable");
      // LLM reads only bounded, server-produced observations. Never a model-owned user ID.
      const startAt=state.agentStart>0?state.agentStart:Date.now();
+     const decisionStarted=performance.now();
      const decision=await decideHermesAction({
        provider:deps.hermes.provider,message:state.request.userMessage,
        plan:state.intentRoute.search?state.shoppingPlan:undefined,
@@ -160,14 +163,17 @@ export function createPersistentResearchGraph(
        observations:state.agentObservations??[],tools:agentPorts(state),
        offerSearch:state.intentRoute.search,startedAt:startAt,
      });
+     const metrics={agentDecisionMs:(state.agentDecisionMs??0)+performance.now()-decisionStarted,
+       agentDecisionCount:(state.agentDecisionCount??0)+1};
      await verify();
-     return decision.kind==="CALL"?{agentStart:startAt,agentAction:decision.action,agentStop:null,agentQuestion:null}:
-       {agentStart:startAt,agentAction:null,agentStop:decision.reason,agentQuestion:decision.question??null};
+     return decision.kind==="CALL"?{...metrics,agentStart:startAt,agentAction:decision.action,agentStop:null,agentQuestion:null}:
+       {...metrics,agentStart:startAt,agentAction:null,agentStop:decision.reason,agentQuestion:decision.question??null};
    })
    .addNode("agent_execute",async state=>{
      const action=state.agentAction;
      if(!action)throw Error("missing agent action");
      const observations=state.agentObservations??[];
+     const toolStarted=performance.now();
      if(action.name==="search_products"){
        if(!state.intentRoute.search||!state.shoppingPlan)throw Error("unplanned search denied");
        let plan=state.shoppingPlan;
@@ -205,16 +211,19 @@ export function createPersistentResearchGraph(
            }))
          }};
          return {shoppingPlan:plan,researchResult:{...fetched.result,intentKind:state.intentRoute.kind},
-           evidence:fetched.evidence,agentSearched:true,agentObservations:[...observations,observation],agentAction:null};
+           evidence:fetched.evidence,agentSearched:true,agentObservations:[...observations,observation],agentAction:null,
+           agentToolMs:(state.agentToolMs??0)+performance.now()-toolStarted};
        }catch(error){
          if(!(error instanceof RetrievalUnavailableError))throw error;
          await verify();return {...unavailable(state.request,state.prepared,plan,state.intentRoute,state.activeTask),
            agentSearched:false,agentStop:"RETRIEVAL_UNAVAILABLE",agentAction:null,
-           agentObservations:[...observations,{tool:"search_products",ok:false,data:{unavailable:true}}]};
+           agentObservations:[...observations,{tool:"search_products",ok:false,data:{unavailable:true}}],
+           agentToolMs:(state.agentToolMs??0)+performance.now()-toolStarted};
        }
      }
      const observation=await performHermesRead(action,agentPorts(state));
-     await verify();return {agentObservations:[...observations,observation],agentAction:null};
+     await verify();return {agentObservations:[...observations,observation],agentAction:null,
+       agentToolMs:(state.agentToolMs??0)+performance.now()-toolStarted};
    })
    .addNode("agent_recover",async state=>{
      // Degraded-mode recovery only: an explicit product-discovery request was
@@ -282,7 +291,10 @@ export function createPersistentResearchGraph(
        }),
        explanation:{kind:"CONVERSATION",items:[],limitations:[],text},
        trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,
-         hermesToolCalls:observations.length,responseMs:performance.now()-start,
+         hermesToolCalls:observations.length,hermesDecisions:state.agentDecisionCount??0,
+         hermesDecisionMs:Math.round(state.agentDecisionMs??0),hermesToolMs:Math.round(state.agentToolMs??0),
+         hermesFailedTools:observations.filter(o=>!o.ok).length,
+         responseMs:performance.now()-start,
          totalMs:performance.now()-state.prepared.startedAt}
      };
      await verify();return {researchResult:result,evidence:[]};
@@ -352,7 +364,10 @@ export function createPersistentResearchGraph(
        displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
      researchResult.taskState=nextTask(taskScope(state.request),state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY",state.activeTask,
        {displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
-     researchResult.trace={...researchResult.trace,hermesToolCalls:(state.agentObservations??[]).length,routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
+     researchResult.trace={...researchResult.trace,hermesToolCalls:(state.agentObservations??[]).length,
+       hermesDecisions:state.agentDecisionCount??0,hermesDecisionMs:Math.round(state.agentDecisionMs??0),
+       hermesToolMs:Math.round(state.agentToolMs??0),hermesFailedTools:(state.agentObservations??[]).filter(o=>!o.ok).length,
+       routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
        totalMs:performance.now()-state.prepared.startedAt};
      await verify();
      return {researchResult};
