@@ -71,7 +71,6 @@ function text(v:unknown,max=160):v is string {
 function score(v:unknown):v is number{return typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1;}
 function whole(v:unknown):v is number {return typeof v==="number"&&Number.isSafeInteger(v)&&v>=0;}
 const maxResponseBytes=400_000;
-const maxRagProducts=5;
 const pickRecord=(v:unknown):GroundedFacet|undefined=>{
   const x=obj(v);
   if(!x||!score(x.score)||!Array.isArray(x.evidenceIds)||x.evidenceIds.length===0||
@@ -80,12 +79,13 @@ const pickRecord=(v:unknown):GroundedFacet|undefined=>{
 };
 
 /** Parse only the versioned RAG payload; all product and review facts are checked separately. */
-export function parseV4Response(raw:unknown,expectedVersion:string):ParsedV4Response {
+export function parseV4Response(raw:unknown,expectedVersion:string,maxItems:5|10=5):ParsedV4Response {
   const r=obj(raw);
   if(!text(expectedVersion,128)||!r||r.dataset_version!==expectedVersion||
-     !Array.isArray(r.items)||r.items.length>maxRagProducts)
+     !Array.isArray(r.items)||r.items.length>maxItems)
     throw new Error("RAG v4 dataset version or response shape mismatch");
-  const seenProducts=new Set<string>(),seenSources=new Set<string>();
+  const seenProducts=new Set<string>();
+ const seenSources=new Map<string,{productId:string;variantId:string|null;sourceKind:string;synthetic:boolean}>();
   let evidenceCount=0;
   const items:ParsedV4Item[]=r.items.map(value=>{
     const item=obj(value);
@@ -112,12 +112,22 @@ export function parseV4Response(raw:unknown,expectedVersion:string):ParsedV4Resp
       const sourceKind=metadata?.source_kind;
       const synthetic=metadata?.synthetic;
       const excerpt=entry?.evidence_text;
-      if(!entry||!text(entry.source_id,128)||seenSources.has(entry.source_id)||
+      if(!entry||!text(entry.source_id,128)||
          typeof excerpt!=="string"||excerpt.length===0||excerpt.length>5000||excerpt.includes("\u0000")||
          !metadata||!(metadata.variant_id===null||text(metadata.variant_id,128))||
          !(sourceKind==="SYNTHETIC"&&synthetic===true||sourceKind==="REAL"&&synthetic===false))
         throw new Error("invalid, duplicate, or inconsistent RAG review evidence");
-      seenSources.add(entry.source_id);
+      const prior=seenSources.get(entry.source_id);
+      if(prior){
+        if(prior.productId!==item.product_id||prior.variantId!==metadata.variant_id||
+           prior.sourceKind!==sourceKind||prior.synthetic!==synthetic)
+          throw new Error("cross-product or variant RAG review ID collision");
+        // Identical Commerce review IDs may occur as multiple semantic chunks.
+        // First excerpt is still verified against the Commerce original before use.
+        return [];
+      }
+      seenSources.set(entry.source_id,{productId:item.product_id as string,variantId:metadata.variant_id,
+        sourceKind,synthetic});
       return [{sourceId:entry.source_id,evidenceText:excerpt,variantId:metadata.variant_id,
         sourceKind,synthetic}];
     });
@@ -218,7 +228,7 @@ async function retrieveV4(
   const envelope=obj(rawResponse);
   if(connection.profile&&envelope?.profile_name!==connection.profile)throw Error('RAG profile mismatch');
   if(envelope?.status==='error'||envelope?.error_code)throw Error('RAG search failed');
-  const parsed=parseV4Response(rawResponse,connection.datasetVersion!);
+  const parsed=parseV4Response(rawResponse,connection.datasetVersion!,input.reviewSortAspect?10:5);
   if(envelope?.status==='low_relevance'||envelope?.status==='no_results')return {candidates:[],evidence:[]};
   const candidates:ProductCandidate[]=[],evidence:EvidenceRecord[]=[];
   for(const item of parsed.items){
