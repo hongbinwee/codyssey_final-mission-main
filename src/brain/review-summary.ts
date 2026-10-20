@@ -13,7 +13,7 @@ export function reviewSummaryIntent(message:string):{target:string|null;ordinal:
  const ordinal=m.match(/(?:^|\s|지난\s*추천(?:의)?\s*)([1-3])\s*번\s*(?:상품|제품|거|것)/);
  const negativeOnly=/(?:단점|아쉬운|부정|안\s*좋은)/.test(m)&&!/(?:장점|좋은\s*점)/.test(m);
  // Remove only the request suffix; the remaining name can contain spaces, numbers and capacity.
- const target=m.replace(/(?:의|에\s*대한)?\s*(?:리뷰|후기|장단점)(?:에서|만|를|은|의)?\s*(?:단점|장점|평가|내용)?\s*(?:만)?\s*(?:자세히)?\s*(?:정리|요약|분석|알려\s*줘|알려\s*주세요|알려줘|보여\s*줘|설명해\s*줘|설명해\s*주세요|궁금해|어때|자세히\s*알려줘)?[.!?\s]*$/,"")
+ const target=m.replace(/(?:의|에\s*대한)?\s*(?:리뷰|후기|장단점)(?:에서|만|를|은|의)?\s*(?:단점|장점|평가|내용)?\s*(?:만)?\s*(?:자세히)?\s*(?:정리(?:해\\s*줘|해주세요)?|요약(?:해\\s*줘|해주세요)?|분석(?:해\\s*줘|해주세요)?|알려\s*줘|알려\s*주세요|알려줘|보여\s*줘|설명해\s*줘|설명해\s*주세요|궁금해|어때|자세히\s*알려줘)?[.!?\s]*$/,"")
   .replace(/^(?:그럼|그러면|아까|이전에|지난번에|제가\s*봤던)\s*/,"")
   .replace(/^(?:이|그|저)\s*(?:상품|제품|거|것)(?:은|의)?$/,"").trim();
  const contextual=!!ordinal||/(?:이|그|저)\s*(?:상품|제품|거|것)(?:의|에|은|가)?\s*(?:리뷰|후기|장단점)/.test(m);
