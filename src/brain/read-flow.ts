@@ -129,6 +129,7 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
    ...(plan.attributePreferences??[]),...(plan.interview?.purpose?[plan.interview.purpose]:[])])].slice(0,20);
  let fetched:Awaited<ReturnType<RetrieverPort['search']>>;
  try{fetched=await deps.retriever.search({query:[plan.query,plan.interview?.purpose].filter(Boolean).join(" ").slice(0,250),maxTotalWon:plan.maxTotalWon,
+   ...(plan.minTotalWon!==undefined?{minTotalWon:plan.minTotalWon}:{}),
    requiredConditions:plan.requiredConditions,preferences:searchPreferences,requestId:req.requestId,originalQuestion:req.userMessage,
    ...(plan.category?{category:plan.category}:{}),
    ...(plan.reviewSortAspect?{reviewSortAspect:plan.reviewSortAspect}:{})});}catch{throw new RetrievalUnavailableError();}
