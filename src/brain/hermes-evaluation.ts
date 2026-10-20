@@ -67,6 +67,8 @@ export function evaluateHermesGate(summary:ReturnType<typeof summarizeHermesEval
  if(options.requireLiveModel&&!summary.liveModelValidated)reasons.push("LIVE_MODEL_NOT_MEASURED");
  if(options.requireConnectedE2e&&!summary.connectedE2eValidated)reasons.push("CONNECTED_E2E_NOT_MEASURED");
  if(summary.grounding.evaluated===0)reasons.push("GROUNDING_NOT_MEASURED");
+ else if(summary.grounding.verified!==summary.grounding.evaluated)reasons.push("GROUNDING_VIOLATION");
  if(summary.tenantIsolation.evaluated===0)reasons.push("TENANT_ISOLATION_NOT_MEASURED");
+ else if(summary.tenantIsolation.passed!==summary.tenantIsolation.evaluated)reasons.push("TENANT_ISOLATION_VIOLATION");
  return {passed:reasons.length===0,reasons};
 }
