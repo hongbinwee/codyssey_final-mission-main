@@ -56,37 +56,46 @@ export function sortByVerifiedPositiveReviews(
   list.push(row);byProduct.set(row.candidate.productId,list);
  }
  const unique=new Set<string>();
+ const selected:RankedCandidate[]=[];
+ const unverifiable=ranking.ranked.filter(row=>row.candidate.commerceVerified!==true);
  for(const [productId,rows] of byProduct){
-  const productEvidence=evidence.filter(e=>e.kind==="REVIEW"&&e.verified===true&&
-   e.productId===productId&&typeof e.sourceId==="string"&&e.sourceId.length>0&&
-   typeof e.sourceRef==="string"&&e.sourceRef.length>0&&typeof e.text==="string"&&
-   rows.some(row=>e.variantId===null||e.variantId===row.candidate.variantId)&&
-   rows.some(row=>e.datasetVersion===row.candidate.datasetVersion&&
-    (e.sourceKind==="REAL"||e.sourceKind==="SYNTHETIC"&&row.candidate.isSimulated===true&&row.candidate.qaRankingEligible===true)));
-  const reviewGroups=new Map<string,EvidenceRecord[]>();
-  for(const e of productEvidence){
-   const list=reviewGroups.get(e.sourceId!)??[];
-   list.push(e);reviewGroups.set(e.sourceId!,list);
+  let bestRow:RankedCandidate|null=null,bestCount=-1;
+  // An option-specific review cannot raise the score for another option.
+  // Product-wide reviews (variantId=null) can be considered with either option,
+  // but only one selected variant per product is ultimately ranked.
+  for(const row of rows){
+   const p=row.candidate;
+   if(p.commerceVerified!==true)continue;
+   const scoped=evidence.filter(e=>e.kind==="REVIEW"&&e.verified===true&&
+    e.productId===productId&&(e.variantId===null||e.variantId===p.variantId)&&
+    e.datasetVersion===p.datasetVersion&&typeof e.sourceId==="string"&&e.sourceId.length>0&&
+    typeof e.sourceRef==="string"&&e.sourceRef.length>0&&typeof e.text==="string"&&
+    (e.sourceKind==="REAL"||e.sourceKind==="SYNTHETIC"&&p.isSimulated===true&&p.qaRankingEligible===true));
+   const reviews=new Map<string,EvidenceRecord[]>();
+   for(const e of scoped){const group=reviews.get(e.sourceId!)??[];group.push(e);reviews.set(e.sourceId!,group);}
+   let count=0;
+   for(const [reviewId,group] of reviews){
+    unique.add(productId+":"+reviewId);
+    const positives=group.filter(e=>positiveForAspect(e.text!,aspect));
+    const negative=group.some(e=>/(?:하지\\s*않|지\\s*않|안\\s*|별로|아쉽|불만|실망|부족)/.test(e.text!));
+    if(positives.length&&(!negative||group.every(e=>positiveForAspect(e.text!,aspect))))count++;
+   }
+   if(count>bestCount){bestRow=row;bestCount=count;}
   }
-  let count=0;
-  for(const [reviewId,group] of reviewGroups){
-   unique.add(productId+":"+reviewId);
-   // Contradictory or duplicate excerpts must not create multiple votes.
-   const positives=group.filter(e=>positiveForAspect(e.text!,aspect));
-   const negative=group.some(e=>/(?:하지\s*않|지\s*않|안\s*|별로|아쉽|불만|실망|부족)/.test(e.text!));
-   if(positives.length&&(!negative||group.every(e=>positiveForAspect(e.text!,aspect))))count++;
-  }
-  counts.set(productId,count);
+  if(bestRow){selected.push(bestRow);counts.set(productId,bestCount);}
  }
+ const referenceOnly=[...ranking.referenceOnly,...unverifiable.map(row=>({
+  candidate:row.candidate,reasons:["commerce_identity_unverified"]
+ }))];
  const positiveProducts=[...counts.values()].filter(n=>n>0).length;
  if(positiveProducts<2){
   return {status:"INSUFFICIENT",counts,sampledReviewIds:unique.size,
    ranking:{...ranking,ranked:[],referenceOnly:[
-    ...ranking.ranked.map(row=>({candidate:row.candidate,reasons:["review_sort_evidence_insufficient"]})),
-    ...ranking.referenceOnly
+    ...selected.map(row=>({candidate:row.candidate,reasons:["review_sort_evidence_insufficient"]})),
+    ...referenceOnly
    ]}};
  }
- // Tie-break using existing grounded relevance only, not price or activity as a new sort criterion.
- const sorted=[...ranking.ranked].sort((a,b)=>(counts.get(b.candidate.productId)??0)-(counts.get(a.candidate.productId)??0));
- return {status:"VERIFIED_SAMPLE_ORDER",ranking:{...ranking,ranked:sorted},counts,sampledReviewIds:unique.size};
+ // Stable existing relevance ordering breaks equal observed-count ties only.
+ const sorted=selected.sort((a,b)=>(counts.get(b.candidate.productId)??0)-(counts.get(a.candidate.productId)??0));
+ return {status:"VERIFIED_SAMPLE_ORDER",ranking:{...ranking,ranked:sorted,referenceOnly},counts,sampledReviewIds:unique.size};
 }
