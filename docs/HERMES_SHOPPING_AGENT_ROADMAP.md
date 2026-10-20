@@ -123,3 +123,7 @@ H3 **exposes the reusable read tools to the existing deep Hermes loop**. It does
 ## H4 implementation checkpoint
 
 The H4 checkpointed LangGraph decide→execute→observe→replan code, deterministic non-search read response, owned-order/cart routing and degraded verified-recommendation fallback are implemented in `feature/hermes-agent`. Whole-repo Typecheck/Build and H1-H4 scoped regression **80/80 PASS** at CI run [39352356535](https://github.com/hongbinwee/codyssey_final-mission-main/actions/runs/39352356535). See [HERMES_H4_AUTONOMOUS_LOOP.md](./HERMES_H4_AUTONOMOUS_LOOP.md) for exact design, security boundaries, full-unit diagnostic failures and H5/H6 live QA blockers. **Do not interpret CI success as full-unit success or live-model success.**
+
+## H5 implementation checkpoint
+
+Implemented typed, server-derived Product/Cart/Checkout-quote/Orders/OrderDetail navigation-only handoffs, UI routing through the existing Commerce screens, explicit user-controlled cart/payment/cancel flows and H5 graph regression. **94/94 gated tests**, whole-repo Typecheck and Build passed in [GitHub Actions 39354074203](https://github.com/hongbinwee/codyssey_final-mission-main/actions/runs/39354074203). Full unit diagnostic **1,010 total / 965 passed / 44 failed / 1 skipped**; neither a complete regression PASS nor real browser/Commerce QA. Details: [HERMES_H5_SHOPPING_HANDOFF.md](./HERMES_H5_SHOPPING_HANDOFF.md). Next: H6 evaluation, real identity-isolation and final authorization UX QA.
