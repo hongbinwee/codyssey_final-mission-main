@@ -69,7 +69,7 @@ export function createPersistentResearchGraph(
    .addNode("prepare",async state=>{
      const prepared=await prepareTurn(state.request,deps);
      await verify();
-     return {prepared,agentRead:false,agentAction:null,agentObservations:[],agentStart:Date.now(),
+     return {prepared,agentRead:false,agentAction:null,agentObservations:[],agentStart:0,
        agentSearched:false,agentStop:null,agentQuestion:null};
    })
    .addNode("route",async state=>{
@@ -139,16 +139,17 @@ export function createPersistentResearchGraph(
    .addNode("agent_decide",async state=>{
      if(!deps.hermes)throw Error("Hermes provider unavailable");
      // LLM reads only bounded, server-produced observations. Never a model-owned user ID.
+     const startAt=state.agentStart>0?state.agentStart:Date.now();
      const decision=await decideHermesAction({
        provider:deps.hermes.provider,message:state.request.userMessage,
        plan:state.intentRoute.search?state.shoppingPlan:undefined,
        memories:state.prepared.memories,task:state.activeTask,
        observations:state.agentObservations??[],tools:agentPorts(state),
-       offerSearch:state.intentRoute.search,startedAt:state.agentStart,
+       offerSearch:state.intentRoute.search,startedAt:startAt,
      });
      await verify();
-     return decision.kind==="CALL"?{agentAction:decision.action,agentStop:null,agentQuestion:null}:
-       {agentAction:null,agentStop:decision.reason,agentQuestion:decision.question??null};
+     return decision.kind==="CALL"?{agentStart:startAt,agentAction:decision.action,agentStop:null,agentQuestion:null}:
+       {agentStart:startAt,agentAction:null,agentStop:decision.reason,agentQuestion:decision.question??null};
    })
    .addNode("agent_execute",async state=>{
      const action=state.agentAction;
