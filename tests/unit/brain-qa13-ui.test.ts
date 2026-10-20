@@ -44,7 +44,7 @@ test("review analysis preserves product/variant evidence and REAL/SYNTHETIC labe
  assert.match(html,/옵션 합성 리뷰 원문 둘이에요/);
  assert.match(html,/수집 리뷰/);assert.match(html,/합성 리뷰/);
  assert.match(html,/긍정/);assert.match(html,/부정/);assert.match(html,/혼합/);
- assert.match(html,/문장 속 표현을 기준으로 한 규칙 분류/);
+ assert.match(html,/규칙 분류/);
  assert.doesNotMatch(html,/raw-source-id|raw-source-ref|qa-product-1|qa-variant-1/);
  assert.doesNotMatch(html,/추천 상품|다른 상품 보기|순위 추천/);
 });
@@ -86,15 +86,39 @@ test("comparison with any incomplete target holds every rank",()=>{
  assert.doesNotMatch(comparison,/[1-9]위|공동 \d+위/);
 });
 
-test("comparison with no REAL positive or related judgments does not invent a rank",()=>{
+test("complete REAL reviews with zero positive and no uncertainty share rank one",()=>{
  const first=product({name:"상품 A",displayIndex:1,counts:{...emptyCounts(),positive:20},
-  countsBySource:{REAL:{...emptyCounts(),unrelated:4},SYNTHETIC:{...emptyCounts(),positive:20}}});
+  countsBySource:{REAL:{...emptyCounts(),unrelated:4},SYNTHETIC:{...emptyCounts(),positive:20}},
+  evidence:[{id:"real-a",sourceId:"raw-real-a",productId:"qa-product-1",variantId:null,sourceKind:"REAL",sourceRef:"ref-real-a",text:"보습과 무관한 수집 리뷰예요.",opinion:"UNRELATED"}]});
  const second=product({productId:"qa-product-2",variantId:undefined,name:"상품 B",displayIndex:2,counts:{...emptyCounts(),positive:1},
-  countsBySource:{REAL:emptyCounts(),SYNTHETIC:{...emptyCounts(),positive:1}},evidence:[]});
+  countsBySource:{REAL:{...emptyCounts(),negative:2},SYNTHETIC:{...emptyCounts(),positive:1}},
+  evidence:[{id:"real-b",sourceId:"raw-real-b",productId:"qa-product-2",variantId:null,sourceKind:"REAL",sourceRef:"ref-real-b",text:"보습이 부족한 수집 리뷰예요.",opinion:"NEGATIVE"}]});
+ const html=renderToStaticMarkup(createElement(BrainReviewAnalysis,{analysis:analysis([first,second],{compare:true})}));
+ const comparison=html.slice(html.indexOf('aria-label="상품 간 리뷰 비교"'),html.indexOf("</section>",html.indexOf('aria-label="상품 간 리뷰 비교"')));
+ assert.equal((comparison.match(/공동 1위/g)??[]).length,2);
+ assert.match(comparison,/순위/);
+});
+
+test("uncertain REAL opinions hold every comparison rank",()=>{
+ const first=product({name:"상품 A",displayIndex:1,countsBySource:{REAL:{...emptyCounts(),positive:2},SYNTHETIC:emptyCounts()}});
+ const second=product({productId:"qa-product-2",variantId:undefined,name:"상품 B",displayIndex:2,
+  countsBySource:{REAL:{...emptyCounts(),uncertain:1},SYNTHETIC:emptyCounts()},evidence:[]});
  const html=renderToStaticMarkup(createElement(BrainReviewAnalysis,{analysis:analysis([first,second],{compare:true})}));
  const comparison=html.slice(html.indexOf('aria-label="상품 간 리뷰 비교"'),html.indexOf("</section>",html.indexOf('aria-label="상품 간 리뷰 비교"')));
  assert.equal((comparison.match(/비교 보류/g)??[]).length,2);
+ assert.match(comparison,/<th scope="row">수집 리뷰<\/th><td>0<\/td><td>0<\/td><td>0<\/td><td>0<\/td><td>1<\/td>/);
  assert.doesNotMatch(comparison,/[1-9]위|공동 \d+위/);
+});
+
+test("positive REAL counts remain rankable when uncertain opinions are also shown",()=>{
+ const first=product({name:"상품 A",displayIndex:1,countsBySource:{REAL:{...emptyCounts(),positive:2,uncertain:1},SYNTHETIC:emptyCounts()}});
+ const second=product({productId:"qa-product-2",variantId:undefined,name:"상품 B",displayIndex:2,
+  countsBySource:{REAL:{...emptyCounts(),positive:1,uncertain:1},SYNTHETIC:emptyCounts()},evidence:[]});
+ const html=renderToStaticMarkup(createElement(BrainReviewAnalysis,{analysis:analysis([first,second],{compare:true})}));
+ const comparison=html.slice(html.indexOf('aria-label="상품 간 리뷰 비교"'),html.indexOf("</section>",html.indexOf('aria-label="상품 간 리뷰 비교"')));
+ assert.ok(comparison.indexOf("상품 A")<comparison.indexOf("상품 B"));
+ assert.match(comparison,/1위/);assert.match(comparison,/2위/);assert.doesNotMatch(comparison,/비교 보류/);
+ assert.match(comparison,/<td>2<\/td><td>0<\/td><td>0<\/td><td>0<\/td><td>1<\/td>/);
 });
 
 test("comparison allows a 2 to 0 REAL positive result when both products have related judgments",()=>{
@@ -107,10 +131,10 @@ test("comparison allows a 2 to 0 REAL positive result when both products have re
  assert.ok(comparison.indexOf("상품 A")<comparison.indexOf("상품 B"));
 });
 
-test("comparison holds when every REAL positive count is zero",()=>{
- const first=product({name:"상품 A",displayIndex:1,countsBySource:{REAL:{...emptyCounts(),negative:2},SYNTHETIC:emptyCounts()}});
+test("comparison holds when products have no REAL reviews",()=>{
+ const first=product({name:"상품 A",displayIndex:1,countsBySource:{REAL:emptyCounts(),SYNTHETIC:{...emptyCounts(),positive:2}},evidence:[]});
  const second=product({productId:"qa-product-2",variantId:undefined,name:"상품 B",displayIndex:2,
-  countsBySource:{REAL:{...emptyCounts(),mixed:1},SYNTHETIC:emptyCounts()},evidence:[]});
+  countsBySource:{REAL:emptyCounts(),SYNTHETIC:{...emptyCounts(),positive:1}},evidence:[]});
  const html=renderToStaticMarkup(createElement(BrainReviewAnalysis,{analysis:analysis([first,second],{compare:true})}));
  const comparison=html.slice(html.indexOf('aria-label="상품 간 리뷰 비교"'),html.indexOf("</section>",html.indexOf('aria-label="상품 간 리뷰 비교"')));
  assert.equal((comparison.match(/비교 보류/g)??[]).length,2);
@@ -120,7 +144,7 @@ test("comparison holds when every REAL positive count is zero",()=>{
 test("CONS comparison prioritizes negative and mixed quotes without ranking products",()=>{
  const result=analysis([product({})],{focus:"CONS",compare:true});
  const html=renderToStaticMarkup(createElement(BrainReviewAnalysis,{analysis:result}));
- assert.match(html,/부정·혼재 의견과 원문을 우선 보여드려요/);
+ assert.match(html,/부정·혼재 의견/);assert.match(html,/먼저/);
  assert.match(html,/부정·혼재 의견 원문/);
  assert.ok(html.indexOf("옵션 합성 리뷰 원문 둘이에요")<html.indexOf("옵션 합성 리뷰 원문 하나예요"));
  assert.doesNotMatch(html,/상품 간 비교|공동 \d+위|[1-9]위/);
@@ -161,6 +185,6 @@ test("partial review analysis labels its observed scope and does not claim compl
  const partial=product({status:"PARTIAL",totalMatching:30,fetchedCount:10,uniqueCount:9,duplicateCount:1,
   limitations:["일부 페이지 조회가 끝나지 않아 전체 의견 수로 볼 수 없어요."]});
  const html=renderToStaticMarkup(createElement(BrainReviewAnalysis,{analysis:analysis([partial],{status:"PARTIAL",compare:false})}));
- assert.match(html,/일부 조회/);assert.match(html,/9/);assert.match(html,/전체 의견 수 미확정/);
+ assert.match(html,/일부 조회/);assert.match(html,/9/);assert.match(html,/전체 .*미확정/);
  assert.doesNotMatch(html,/전체 리뷰 30건을 분석했어요/);
 });

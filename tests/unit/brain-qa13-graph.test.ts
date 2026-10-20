@@ -71,12 +71,12 @@ test('REAL comparison permits positive 2 vs 0 when both products have related RE
  assert.deepEqual(result.citations?.map(row=>row.sourceKind),['REAL','REAL','REAL']);
 });
 
-test('all-zero REAL positive counts are shown without assigning a positive rank',()=>{
+test('complete all-zero REAL positive counts share first place without claiming a positive opinion',()=>{
  const first=analyzed('p1',1,[evidence('real-n1','p1','NEGATIVE')]);
  const second=analyzed('p2',2,[evidence('real-m2','p2','MIXED')]);
  const result=buildReviewAnalysisExplanation(analysis([first,second]));
- assert.match(result.text,/긍정 의견.*없|긍정.*찾지 못/);
- assert.doesNotMatch(result.text,/(?:공동\s*)?\d+위/);
+ assert.match(result.text,/긍정 0건/);
+ assert.equal((result.text.match(/공동 1위/g)??[]).length,2);
 });
 
 test('SYNTHETIC-only counts are labeled separately and never become a review rank',()=>{

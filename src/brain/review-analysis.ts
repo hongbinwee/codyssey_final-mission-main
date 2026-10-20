@@ -30,6 +30,25 @@ export interface ReviewAnalysisData {
  status:"READY"|"PARTIAL"|"UNAVAILABLE"|"NEEDS_TARGET";aspect:string;aspectLabel:string;focus:"ALL"|"CONS";compare:boolean;
  datasetVersion?:string;method:"CONSERVATIVE_RULES";products:AnalyzedReviewProduct[];
 }
+export type ReviewComparisonEligibility="COMPARABLE"|"INCOMPLETE"|"NO_REAL_REVIEWS"|"UNCERTAIN";
+function validComparisonCounts(value:unknown):value is ReviewAnalysisCounts{
+ if(!value||typeof value!=="object")return false;
+ const counts=value as ReviewAnalysisCounts;
+ return [counts.positive,counts.negative,counts.mixed,counts.unrelated,counts.uncertain]
+  .every(count=>Number.isSafeInteger(count)&&count>=0);
+}
+/** Checks observed aggregates and coverage only; COMPARABLE does not prove semantic absence of a polarity. */
+export function getReviewComparisonEligibility(data:ReviewAnalysisData):ReviewComparisonEligibility{
+ if(data.focus!=="ALL"||!data.compare||data.status!=="READY"||data.products.length<2||
+  data.products.some(product=>product.status!=="COMPLETE"))return "INCOMPLETE";
+ const realCounts=data.products.map(product=>product.countsBySource?.REAL);
+ if(realCounts.some(counts=>!validComparisonCounts(counts)))return "INCOMPLETE";
+ const completeCounts=realCounts as ReviewAnalysisCounts[];
+ if(completeCounts.some(counts=>counts.positive+counts.negative+counts.mixed+counts.unrelated+counts.uncertain===0))
+  return "NO_REAL_REVIEWS";
+ if(completeCounts.some(counts=>counts.positive===0&&counts.uncertain>0))return "UNCERTAIN";
+ return "COMPARABLE";
+}
 
 type ReviewAnalysisCatalog=Pick<ReturnType<typeof import("../catalog.ts")["createCatalog"]>,"getProduct"|"getReviews">;
 type SourceKind="REAL"|"SYNTHETIC";

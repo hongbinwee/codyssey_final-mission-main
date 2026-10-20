@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {classifyReviewOpinion,createReviewAnalysisLookup} from "../../src/brain/review-analysis.ts";
+import {classifyReviewOpinion,createReviewAnalysisLookup,getReviewComparisonEligibility} from "../../src/brain/review-analysis.ts";
+import {buildReviewAnalysisExplanation} from "../../src/brain/review-analysis-response.ts";
+import type {AnalyzedReviewProduct,ReviewAnalysisCounts,ReviewAnalysisData} from "../../src/brain/review-analysis.ts";
 
 const ok=(data:unknown)=>({ok:true as const,data,observed_at:"2026-10-20T00:00:00.000Z",trace_id:"trace"});
 const notFound=()=>({ok:false as const,error:{code:"NOT_FOUND",message:"not found",recovery_action:"STOP" as const},trace_id:"trace"});
@@ -27,6 +29,19 @@ function catalogStub(options:{products?:Record<string,unknown>;pages?:Record<str
 }
 const request=(patch:Record<string,unknown>={})=>({focus:"ALL" as const,compare:false,aspect:"moisturizing",...patch});
 const target=(patch:Record<string,unknown>={})=>({productId:"p-1",name:"수분크림 A",displayIndex:1,...patch});
+const counts=(patch:Partial<ReviewAnalysisCounts>={}):ReviewAnalysisCounts=>({positive:0,negative:0,mixed:0,unrelated:0,uncertain:0,...patch});
+function comparisonProduct(id:string,displayIndex:number,real:Partial<ReviewAnalysisCounts>,synthetic:Partial<ReviewAnalysisCounts>={},status:AnalyzedReviewProduct["status"]="COMPLETE"):AnalyzedReviewProduct{
+ const countsBySource={REAL:counts(real),SYNTHETIC:counts(synthetic)};
+ const all=counts({positive:countsBySource.REAL.positive+countsBySource.SYNTHETIC.positive,
+  negative:countsBySource.REAL.negative+countsBySource.SYNTHETIC.negative,mixed:countsBySource.REAL.mixed+countsBySource.SYNTHETIC.mixed,
+  unrelated:countsBySource.REAL.unrelated+countsBySource.SYNTHETIC.unrelated,uncertain:countsBySource.REAL.uncertain+countsBySource.SYNTHETIC.uncertain});
+ const total=Object.values(all).reduce((sum,value)=>sum+value,0);
+ return {productId:id,name:`상품 ${id}`,displayIndex,status,totalMatching:total,fetchedCount:total,uniqueCount:total,duplicateCount:0,excludedCount:0,
+  counts:all,countsBySource,evidence:[],limitations:[]};
+}
+function comparisonData(products:AnalyzedReviewProduct[],status:ReviewAnalysisData["status"]="READY"):ReviewAnalysisData{
+ return {status,aspect:"moisturizing",aspectLabel:"보습력",focus:"ALL",compare:true,method:"CONSERVATIVE_RULES",datasetVersion:"qa13",products};
+}
 
 test("moisture and comfort classifications distinguish positive, negative, mixed, unrelated and uncertain reviews",()=>{
  const cases:[string,string,string][]=[
@@ -199,4 +214,45 @@ test("page safety cap keeps incomplete status and counts all fetched rows separa
  assert.equal(analyzed.uniqueCount,1000);
  assert.equal(analyzed.counts.positive,1000,"aggregate counts cover all fetched unique reviews");
  assert.equal(analyzed.evidence.length,6,"representative quotes are separately bounded");
+});
+
+test("shared positive-comparison eligibility permits verified zero-positive ties and holds uncertain, partial, or synthetic-only sets",async t=>{
+ await t.test("REAL unrelated, negative, and mixed rows remain comparable when every positive count is zero",()=>{
+  const data=comparisonData([comparisonProduct("unrelated",1,{unrelated:2}),comparisonProduct("negative",2,{negative:1}),comparisonProduct("mixed",3,{mixed:1})]);
+  assert.equal(getReviewComparisonEligibility(data),"COMPARABLE");
+  const explanation=buildReviewAnalysisExplanation(data);
+  assert.equal(explanation.text.match(/공동 1위/g)?.length,3);
+  const unrelatedLine=explanation.text.split("\n").find(line=>line.includes("상품 unrelated"))??"";
+  assert.match(unrelatedLine,/긍정 0건, 부정 0건, 혼재 0건/);
+  assert.match(unrelatedLine,/관련 긍정·부정·혼재 의견을 찾지 못했어요/);
+ });
+ await t.test("zero positive plus uncertain REAL reviews is held without claiming a verified zero",()=>{
+  const data=comparisonData([comparisonProduct("uncertain",1,{uncertain:1}),comparisonProduct("negative",2,{negative:1})]);
+  assert.equal(getReviewComparisonEligibility(data),"UNCERTAIN");
+  const explanation=buildReviewAnalysisExplanation(data);
+  assert.match(explanation.text,/긍정·부정을 판단하기 어려워 의견 수를 확정하지 않았어요/);
+  assert.doesNotMatch(explanation.text,/(?:공동\s*)?\d+위/);
+  assert.doesNotMatch(explanation.text.split("\n").find(line=>line.includes("상품 uncertain"))??"",/긍정 0건/);
+ });
+ await t.test("a partial target makes the set incomplete",()=>{
+  const data=comparisonData([comparisonProduct("partial",1,{positive:1}, {},"PARTIAL"),comparisonProduct("complete",2,{positive:1})],"PARTIAL");
+  assert.equal(getReviewComparisonEligibility(data),"INCOMPLETE");
+  assert.doesNotMatch(buildReviewAnalysisExplanation(data).text,/(?:공동\s*)?\d+위/);
+ });
+ await t.test("synthetic-only reviews never qualify for REAL ranking",()=>{
+  const data=comparisonData([comparisonProduct("synthetic-a",1,{}, {positive:2}),comparisonProduct("synthetic-b",2,{}, {positive:1})]);
+  assert.equal(getReviewComparisonEligibility(data),"NO_REAL_REVIEWS");
+  const explanation=buildReviewAnalysisExplanation(data);
+  assert.match(explanation.text,/합성 후기/);
+  assert.doesNotMatch(explanation.text,/(?:공동\s*)?\d+위/);
+ });
+});
+
+test("comparison eligibility refuses negative, NaN, and missing REAL aggregate counts",()=>{
+ const malformed:unknown[]=[{...counts({positive:1}),negative:-1},{...counts({positive:1}),negative:Number.NaN},undefined];
+ for(const realCounts of malformed){
+  const data=comparisonData([comparisonProduct("malformed",1,{positive:1}),comparisonProduct("valid",2,{positive:1})]);
+  (data.products[0]!.countsBySource as unknown as Record<string,unknown>).REAL=realCounts;
+  assert.equal(getReviewComparisonEligibility(data),"INCOMPLETE");
+ }
 });

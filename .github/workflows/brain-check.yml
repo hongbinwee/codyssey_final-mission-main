@@ -102,7 +102,7 @@ jobs:
       - name: Install isolated Chromium browser for Brain UI
         run: npx playwright install --with-deps chromium
       - name: Chat UX regression with isolated HTTP fixtures (no live LLM)
-        run: node --test tests/brain-browser/qa16-chat.test.mjs tests/brain-browser/qa16-catalog.test.mjs tests/brain-browser/brain-interview.test.mjs
+        run: node --test tests/brain-browser/qa16-chat.test.mjs tests/brain-browser/qa16-catalog.test.mjs tests/brain-browser/brain-interview.test.mjs tests/brain-browser/brain-review-analysis.test.mjs
       - name: Browser E2E for memory, personalized ranking and retry
         run: |
           set +e

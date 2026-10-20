@@ -1,8 +1,8 @@
-import type {ReviewAnalysisData,AnalyzedReviewProduct,AnalyzedReviewEvidence,ReviewAnalysisCounts} from './review-analysis.ts';
+import {getReviewComparisonEligibility,type ReviewAnalysisData,type AnalyzedReviewProduct,type AnalyzedReviewEvidence,type ReviewAnalysisCounts} from './review-analysis.ts';
 import type {GroundedExplanation} from './grounded-response.ts';
 
 type SourceKind='REAL'|'SYNTHETIC';
-type Comparison={sourceKind:'REAL';rankBy:'positive'|'negative';eligible:AnalyzedReviewProduct[]}|null;
+type Comparison={sourceKind:'REAL';rankBy:'positive';eligible:AnalyzedReviewProduct[]}|null;
 const opinionTotal=(counts:ReviewAnalysisCounts)=>counts.positive+counts.negative+counts.mixed;
 const validCount=(value:unknown):value is number=>Number.isSafeInteger(value)&&Number(value)>=0;
 const validCounts=(value:unknown):value is ReviewAnalysisCounts=>{
@@ -19,10 +19,6 @@ function productName(product:AnalyzedReviewProduct):string{
 function countsFor(product:AnalyzedReviewProduct,sourceKind:SourceKind):ReviewAnalysisCounts|undefined{
  const value=product.countsBySource?.[sourceKind];return validCounts(value)?value:undefined;
 }
-function related(product:AnalyzedReviewProduct,sourceKind:SourceKind,focus:'ALL'|'CONS'):number{
- const counts=countsFor(product,sourceKind);if(!counts)return 0;
- return focus==='CONS'?counts.negative+counts.mixed:opinionTotal(counts);
-}
 function hasSourceRows(product:AnalyzedReviewProduct,sourceKind:SourceKind):boolean{
  const counts=countsFor(product,sourceKind);
  return Boolean(counts&&counts.positive+counts.negative+counts.mixed+counts.unrelated+counts.uncertain>0);
@@ -34,11 +30,8 @@ function displaySource(product:AnalyzedReviewProduct):SourceKind|undefined{
 }
 function comparison(data:ReviewAnalysisData):Comparison{
  if(data.focus==='CONS')return null;
- if(!data.compare||data.status!=='READY'||data.products.length<2||data.products.some(row=>row.status!=='COMPLETE'))return null;
- if(data.products.some(row=>!hasSourceRows(row,'REAL')||related(row,'REAL',data.focus)===0))return null;
- const rankBy='positive';
- if(Math.max(...data.products.map(row=>countsFor(row,'REAL')?.[rankBy]??0))===0)return null;
- return {sourceKind:'REAL',rankBy,eligible:data.products};
+ if(getReviewComparisonEligibility(data)!=='COMPARABLE')return null;
+ return {sourceKind:'REAL',rankBy:'positive',eligible:data.products};
 }
 function evidenceFor(product:AnalyzedReviewProduct,sourceKind:SourceKind,focus:'ALL'|'CONS'):AnalyzedReviewEvidence[]{
  const rows:AnalyzedReviewEvidence[]=[],seen=new Set<string>();
@@ -83,8 +76,11 @@ function productSummary(product:AnalyzedReviewProduct,data:ReviewAnalysisData,co
  const completeness=product.status==='COMPLETE'?'조회 완료':'부분 조회';
  if(data.focus==='CONS'&&counts.negative+counts.mixed===0)
   return `${name}: ${data.aspectLabel}에 대한 부정·혼재 의견을 찾지 못했어요. (${sourceLabel}, ${scope}; ${completeness}).`;
- if(data.focus==='ALL'&&opinionTotal(counts)===0)
-  return `${name}: ${data.aspectLabel} 관련 긍정·부정·혼재 의견을 찾지 못했어요. (${sourceLabel}, ${scope}; ${completeness}).`;
+ if(data.focus==='ALL'&&opinionTotal(counts)===0){
+  const prefix=rank?`${rank} · `:'';
+  if(counts.uncertain>0)return `${prefix}${name}: ${data.aspectLabel} 관련 후기 ${counts.uncertain}건은 긍정·부정을 판단하기 어려워 의견 수를 확정하지 않았어요. (${sourceLabel}, ${scope}; ${completeness}).`;
+  return `${prefix}${name}: ${data.aspectLabel} 관련 긍정·부정·혼재 의견을 찾지 못했어요. 긍정 ${counts.positive}건, 부정 ${counts.negative}건, 혼재 ${counts.mixed}건 (${sourceLabel}, ${scope}; ${completeness}).`;
+ }
  const opinion=data.focus==='CONS'?`부정 ${counts.negative}건, 혼재 ${counts.mixed}건`
   :`긍정 ${counts.positive}건, 부정 ${counts.negative}건, 혼재 ${counts.mixed}건`;
  const prefix=rank?`${rank} · `:'';
@@ -92,15 +88,12 @@ function productSummary(product:AnalyzedReviewProduct,data:ReviewAnalysisData,co
 }
 function comparisonHoldReason(data:ReviewAnalysisData):string{
  if(data.focus==='CONS')return `${data.aspectLabel}에 대한 부정·혼재 의견을 상품별로 정리했어요.`;
- if(data.products.some(row=>row.status!=='COMPLETE'))return '일부 후기를 모두 조회하지 못해 순위는 보류했어요.';
- if(data.products.some(row=>!hasSourceRows(row,'REAL')))
-  return '모든 상품에 수집 후기 표본이 없어 순위는 보류했어요. 합성 후기 수는 따로 표시했어요.';
- if(data.products.some(row=>related(row,'REAL',data.focus)===0))
-  return `${data.aspectLabel} 관련 의견이 없는 상품이 있어 순위는 보류했어요.`;
- const rankBy='positive';
- if(Math.max(...data.products.map(row=>countsFor(row,'REAL')?.[rankBy]??0))===0)
-  return '긍정 의견이 없어 순위는 보류했어요.';
- return '같은 기준으로 비교할 수 없어 순위는 보류했어요.';
+ switch(getReviewComparisonEligibility(data)){
+  case 'INCOMPLETE':return '모든 비교 대상의 조회를 끝내지 못해 순위를 보류했어요.';
+  case 'NO_REAL_REVIEWS':return '모든 비교 대상에 수집 후기가 없어 순위를 보류했어요. 합성 후기 수는 따로 표시했어요.';
+  case 'UNCERTAIN':return '긍정 여부를 판단하기 어려운 후기가 있어 순위를 보류했어요.';
+  case 'COMPARABLE':return '같은 기준으로 비교할 수 없어 순위를 보류했어요.';
+ }
 }
 function overview(data:ReviewAnalysisData,comparisonResult:Comparison):string{
  if(data.status==='NEEDS_TARGET')return '이 대화에서 확인할 추천 상품이 없어요. 먼저 상품을 추천받거나 상품을 지정해 주세요.';
