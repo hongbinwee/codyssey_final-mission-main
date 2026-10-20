@@ -3,6 +3,7 @@ import {apiSafe,newActionKey,fmtWon} from "../api.ts";
 import {resolveBrainInterviewState} from "../brain-interview-state.ts";
 import {BrainAnswer} from './BrainAnswer.tsx';
 import type {WishlistView} from "../../brain/wishlist-task.ts";
+import type {ShoppingHandoff} from "../../brain/shopping-handoff.ts";
 
 type ProductCandidate={
  productId:string;productName?:string;variantId:string;productImage?:string;keywords?:string[];
@@ -17,6 +18,7 @@ type BrainReply={
  conversation_id:string;message_id:string;read_only:true;intent_kind?:string;
  shopping_plan?:{query:string;maxTotalWon:number|null;requiredConditions:string[];revision:number;attributePreferences?:string[]}|null;
  agent_ui?:WishlistView|null;
+ shopping_handoffs?:ShoppingHandoff[];
  explanation?:{text:string;kind:string;items:{productId:string;variantId?:string;evidenceIds:string[];reason?:string}[];clarification?:{questions:{key:string;text:string;choices:string[]}[]};limitations:string[];
    failure?:{code:string;httpStatus?:number}}|null;
  ranking:BrainRankingResult;trace:{totalMs:number;graphWallMs?:number};
@@ -81,7 +83,10 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
  </section>;
 }
 
-export function BrainPreview({onClose,onOpenProduct}:{onClose:()=>void;onOpenProduct:(id:string,variantId?:string)=>void}){
+export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,onOpenOrders,onOpenOrder,checkoutEnabled}:{
+ onClose:()=>void;onOpenProduct:(id:string,variantId?:string)=>void;onOpenCart:()=>void;
+ onOpenCheckout:()=>void;onOpenOrders:()=>void;onOpenOrder:(orderId:string)=>void;checkoutEnabled:boolean;
+}){
  const [input,setInput]=useState("");
  const [conversation,setConversation]=useState<string|null>(null);
  const [conversations,setConversations]=useState<Conversation[]>([]);
@@ -232,7 +237,23 @@ export function BrainPreview({onClose,onOpenProduct}:{onClose:()=>void;onOpenPro
            :e.reply.explanation.items.length>0?e.reply.explanation.text
              :friendlyFailure(e.reply.explanation.failure.code)+((e.reply.ranking.ranked.length+e.reply.ranking.referenceOnly.length)>0?" 아래 검색 결과는 확인할 수 있어요.":"")
          :e.reply.explanation?.text??"상품 정보를 확인했어요."}/></div></div>
-         {e.reply.agent_ui?.kind==="WISHLIST"&&<section className="brain-products" aria-label="내 찜 상품">{e.reply.agent_ui.items.map((item,index)=><article className="brain-product-card" key={item.productId}><div className="brain-product-info"><b>{index+1}. {item.name}</b><p className="muted sm">{!item.active?"판매 중단":money(item.minPriceWon)?`옵션 최저가 ${fmtWon(item.minPriceWon)} · 배송비·재고는 상세에서 확인`:"판매 가능한 옵션 확인 필요"}</p><button className="link" onClick={()=>onOpenProduct(item.productId)}>{e.reply?.agent_ui?.selectedProductId===item.productId?"선택한 상품 상세 보기":"상품 상세 보기"}</button></div></article>)}</section>}
+         {e.reply.agent_ui?.kind==="WISHLIST"&&<section className="brain-products" aria-label="내 찜 상품">{e.reply.agent_ui.items.map((item,index)=><article className="brain-product-card" key={item.productId}><div className="brain-product-info"><b>{index+1}. {item.name}</b><p className="muted sm">{!item.active?"판매 중단":money(item.minPriceWon)?`옵션 최저가 ${fmtWon(item.minPriceWon)} · 배송비·재고는 상세에서 확인`:"판매 가능한 옵션 확인 필요"}</p><button className="link" disabled={!item.active||!money(item.minPriceWon)} onClick={()=>onOpenProduct(item.productId)}>{e.reply?.agent_ui?.selectedProductId===item.productId?"선택한 상품 상세 보기":"상품 상세 보기"}</button></div></article>)}</section>}
+         {!!e.reply.shopping_handoffs?.length&&<section className="brain-recovery-actions" aria-label="쇼핑 화면으로 이동">
+           {e.reply.shopping_handoffs.filter(action=>
+             // Recommendation cards and wishlist already carry product detail buttons.
+             !(action.kind==="PRODUCT_DETAIL"&&
+               (e.reply!.ranking.ranked.some(row=>row.candidate.productId===action.productId)||
+                e.reply!.agent_ui?.kind==="WISHLIST"&&e.reply!.agent_ui.items.some(item=>item.productId===action.productId)))&&
+             !(action.kind==="CHECKOUT_REVIEW"&&!checkoutEnabled)
+           ).map((action,index)=><button className="btn" key={action.kind+index} disabled={busy||restoring}
+             onClick={()=>{switch(action.kind){
+               case "PRODUCT_DETAIL":onOpenProduct(action.productId,action.variantId);break;
+               case "CART_REVIEW":onOpenCart();break;
+               case "CHECKOUT_REVIEW":onOpenCheckout();break;
+               case "ORDER_LIST":onOpenOrders();break;
+               case "ORDER_DETAIL":onOpenOrder(action.orderId);break;
+             }}}>{action.label}</button>)}
+         </section>}
          {isRetrievalUnavailable(e)&&<div className="brain-recovery-actions">
            <button className="link" disabled={busy} onClick={()=>retry(e)}>다시 검색</button>
            <button className="link" disabled={busy} onClick={()=>editQuestion(e)}>조건 바꾸기</button>
