@@ -244,17 +244,17 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
        setPending(null);setPendingValue(null);
        await refresh();
        setError("저장된 기준이 선택한 값과 달라요. 현재 저장된 기준을 다시 확인해 주세요.");
-     }else if(r.error.code==="CONFIRMATION_REQUIRED"){
-       setPending(null);setPendingValue(null);
-       setError("확인 시간이 지났거나 이미 처리한 요청이에요. 저장하기를 다시 눌러 주세요.");
      }else{
-       // Confirmation can commit even when the HTTP reply is lost; reconcile
-       // before inviting a retry with a consumed confirmation token.
+       // A consumed confirmation or a lost HTTP reply may already be committed.
+       // Read the stored value before showing a retry for the same one-shot token.
        const synced=await apiSafe<MemoryItem[]>("/api/brain/preferences");
        if(synced.ok&&synced.data.some(m=>m.key==="price_priority"&&m.value===expected)){
          setMemories(synced.data);setPreferencesReady(true);
          setPending(null);setPendingValue(null);
          setNotice("가격 기준을 저장했어요. 다음 상품 추천부터 반영할게요.");
+       }else if(r.error.code==="CONFIRMATION_REQUIRED"){
+         setPending(null);setPendingValue(null);
+         setError("확인 시간이 지났거나 이미 처리한 요청이에요. 저장하기를 다시 눌러 주세요.");
        }else setError("가격 기준 저장 결과를 확인하지 못했어요. 다시 확인하거나 잠시 후 시도해 주세요.");
      }
    }finally{lock.current=false;setBusy(false);}
