@@ -45,6 +45,12 @@ export function validatedShoppingHandoffs(input:{
    const product=data.product as {productId?:unknown;active?:boolean}|undefined;
    if(product?.active&&validId(product.productId))add({kind:"PRODUCT_DETAIL",productId:product.productId,label:"상품 옵션 확인"});
   }
+  if(observation.tool==="get_wishlist"){
+   const list=data.saved_products as Array<{productId:unknown;active:boolean;minPriceWon:number|null}>|undefined;
+   for(const item of (list??[]).slice(0,3))
+    if(item.active&&item.minPriceWon!==null&&validId(item.productId))
+     add({kind:"PRODUCT_DETAIL",productId:item.productId,label:"찜 상품 옵션 확인"});
+  }
   if(observation.tool==="get_cart"){
    const cart=data.cart as {items?:unknown[];canCheckout?:boolean}|undefined;
    if(cart){add({kind:"CART_REVIEW",label:"장바구니 확인"});
