@@ -48,3 +48,11 @@ test("context-free answer only inherits the active task; restart is an explicit 
  assert.equal(resetTaskRequested("기존 추천 조건을 유지해"),false);
  assert.equal(resetTaskRequested("내 주문 기록 삭제해 줘"),false);
 });
+test("bounded wishlist handoff cannot select an item no longer displayed in the current top 20",()=>{
+ const earlier=[{productId:"old",name:"old",active:true,minPriceWon:1234}];
+ const prior=nextTask(scope,"WISHLIST",null,{displayedProductIds:["old"]});
+ const latest=[...Array.from({length:20},(_,i)=>({productId:"new-"+i,name:"new",active:true,minPriceWon:2000})),earlier[0]];
+ const answer=wishlistReply({kind:"SELECT",index:0},latest,taskForWishlistSelection(prior));
+ assert.equal(answer.view.selectedProductId,undefined);
+ assert.match(answer.text,/표시 범위를 벗어났어요/);
+});
