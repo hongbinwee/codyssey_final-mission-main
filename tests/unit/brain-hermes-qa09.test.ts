@@ -8,7 +8,7 @@ import {curateRecommendations} from "../../src/brain/recommendation-strategies.t
 import {positiveForAspect,requestedPositiveReviewSort,sortByVerifiedPositiveReviews} from "../../src/brain/review-sort.ts";
 import {resolveTurnPlan,retrieveTurn} from "../../src/brain/read-flow.ts";
 import {createPersistentResearchGraph} from "../../src/brain/graph.ts";
-import {parseV4Response} from "../../src/brain/rag-adapter.ts";
+import {parseV4Response,verifiedRagRetriever} from "../../src/brain/rag-adapter.ts";
 import type {EvidenceRecord,ProductCandidate} from "../../src/brain/contracts.ts";
 import type {ResearchDeps} from "../../src/brain/read-flow.ts";
 
@@ -197,4 +197,23 @@ test("QA09 actual checkpointed LangGraph responds with verified sample-order, ke
  assert.equal(last.shoppingPlan?.reviewSortAspect,undefined);
  assert.equal(last.ranking.ranked[0]?.candidate.productId,"cheap","normal personalized ranking resumed");
  assert.deepEqual(seen,["촉촉","촉촉","default"]);
+});
+
+test("QA09 bounded-price RAG query requests 10 candidates but still checks Commerce itself",async()=>{
+ let outbound:any;
+ const retriever=verifiedRagRetriever({
+  endpoint:"http://127.0.0.1:7888/rag",contract:"v4",datasetVersion:"qa09",category:"beauty"
+ },async()=>{throw new Error("no Commerce candidate without evidence");},
+ (async(_url:unknown,init:RequestInit)=>{outbound=JSON.parse(String(init.body));
+  return new Response(JSON.stringify({dataset_version:"qa09",items:[],status:"no_results"}));
+ }) as typeof fetch,async()=>[]);
+ await retriever.search({requestId:"qa09-range",originalQuestion:"1~3만원대 크림",
+  query:"크림",minTotalWon:10000,maxTotalWon:39999,requiredConditions:[]});
+ assert.equal(outbound.top_k,10);
+ assert.equal(outbound.filters.price_max,undefined,"local RAG price is not authorization");
+});
+test("QA09 a quoted claim or mere attribute mention is not counted as a firsthand positive review",()=>{
+ for(const note of ["촉촉하다는 리뷰가 많대요.","촉촉함.","촉촉하다는 후기에서 봤어요."]){
+  assert.equal(positiveForAspect(note,"촉촉"),false,note);
+ }
 });
