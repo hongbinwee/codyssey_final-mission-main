@@ -4,7 +4,7 @@ type ReviewPolarity="POSITIVE"|"NEGATIVE"|"NEUTRAL";
 
 /** Fixed review-aspect vocabulary; canonical IDs are stable while labels remain Korean. */
 const aspectDefinitions:Record<string,{label:string;terms:string[]} >={
- moisturizing:{label:"보습력",terms:["보습력","보습","촉촉함","촉촉한","촉촉"]},
+ moisturizing:{label:"보습력",terms:["보습력","보습","수분감","수분","촉촉함","촉촉한","촉촉"]},
  comfort:{label:"사용감",terms:["사용감","발림성","편안함","편안한","부드러운"]},
  fit:{label:"착용감",terms:["착용감","착용이 편한","착용 편한"]},
  battery_life:{label:"배터리",terms:["배터리","사용시간","사용 시간"]},

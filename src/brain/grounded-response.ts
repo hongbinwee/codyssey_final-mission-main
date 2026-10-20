@@ -6,6 +6,7 @@ import {reviewSortAspectLabel} from "./review-sort.ts";
 
 export interface GroundedExplanation {
  reviewSummary?:import('./contracts.ts').ReviewSummaryData;
+ reviewAnalysis?:import('./review-analysis.ts').ReviewAnalysisData;
  clarification?:{questions:import("./interview.ts").InterviewQuestion[]};
  text:string;
  items:{productId:string;variantId:string;name:string;totalPriceWon:number|null;
@@ -13,7 +14,7 @@ export interface GroundedExplanation {
  citations?:{productId:string;variantId:string;sourceVariantId?:string|null;sourceId:string;sourceKind:"REAL"|"SYNTHETIC";quote:string}[];
  limitations:string[];
  failure?:{code:"MODEL_TIMEOUT"|"MODEL_RATE_LIMIT"|"MODEL_HTTP_ERROR"|"MODEL_UNAVAILABLE"|"RETRIEVAL_UNAVAILABLE";httpStatus?:number};
- kind:"CLARIFICATION"|"VERIFIED_CANDIDATES"|"REFERENCE_ONLY"|"NO_MATCH"|"LLM_GROUNDED"|"EVIDENCE_INSUFFICIENT"|"CONVERSATION"|"REVIEW_SUMMARY";
+ kind:"CLARIFICATION"|"VERIFIED_CANDIDATES"|"REFERENCE_ONLY"|"NO_MATCH"|"LLM_GROUNDED"|"EVIDENCE_INSUFFICIENT"|"CONVERSATION"|"REVIEW_SUMMARY"|"REVIEW_ANALYSIS";
 }
 type DisplayRow={candidate:ProductCandidate;ranked:boolean;limitations?:string[];reviewSortEvidence?:RankingResult["ranked"][number]["reviewSortEvidence"]};
 function displayRows(ranking:RankingResult):DisplayRow[]{

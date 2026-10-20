@@ -1,9 +1,10 @@
 import {guardBrainMessage,parseReviewSummaryRequest} from './routing.ts';
+import {parseContextReviewRequest,resolveReviewTargets} from './review-reference.ts';
 import {interviewAnswer,needsInterview,rememberInterview} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
 import {AsyncLocalStorage} from "node:async_hooks";
 import type {PostgresSaver} from "@langchain/langgraph-checkpoint-postgres";
-import type {BrainTrace,EvidenceRecord,ReviewSummaryRequest} from "./contracts.ts";
+import type {BrainTrace,EvidenceRecord,ProductCandidate,ReviewSummaryRequest} from "./contracts.ts";
 import type {PreparedTurn,ResearchDeps,ResearchResult} from "./read-flow.ts";
 import {prepareTurn,resolveTurnPlan,retrieveTurn,RetrievalUnavailableError} from "./read-flow.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
@@ -14,11 +15,15 @@ import type {FencedTurns} from "./fenced-turns.ts";
 import type {BrainRoute} from "./routing.ts";
 import {currentDatasetResult} from "./dataset-state.ts";
 import type {SafePageContext} from "./page-context.ts";
+import type {DisplayedReviewProduct,ReviewAnalysisData,ReviewAnalysisRequest} from "./review-analysis.ts";
+import {reviewSortAspectLabel} from "./review-sort.ts";
+import {buildReviewAnalysisExplanation} from "./review-analysis-response.ts";
 
 export type GraphRequest=BrainTrace & {clientActionId:string;userMessage:string;pageContext?:SafePageContext};
 const unsupportedReviewOrderText="지금은 확인된 긍정 후기 수를 기준으로 비교할 수 있어요. 부정 후기 수나 적은 순으로 정렬하는 기능은 아직 제공하지 않아요. 기존 조건은 유지했어요.";
 const reviewSummaryPrompt="어떤 상품의 리뷰를 요약할까요? 상품명을 말씀하시거나, 직전 목록의 번호를 알려주세요.";
 const reviewSummaryUnavailable="리뷰 요약을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.";
+const reviewAnalysisAspectPrompt="어떤 리뷰 속성을 확인하거나 비교할까요? 예를 들어 보습력이나 사용감을 말씀해 주세요.";
 const State=Annotation.Root({
  request:Annotation<GraphRequest>(),
  prepared:Annotation<PreparedTurn>(),
@@ -37,6 +42,20 @@ function reviewClarification(focus:"ALL"|"CONS",previous?:ResearchResult):Ground
  const choices=previous?.explanation?.reviewSummary?.choices;
  return {kind:"REVIEW_SUMMARY",text:reviewSummaryPrompt,items:[],limitations:[],reviewSummary:{status:"AMBIGUOUS",focus,evidence:[],
   ...(choices?.length?{choices}:{}),...(previous?.datasetVersion?{datasetVersion:previous.datasetVersion}:{})}};
+}
+function reviewAnalysisData(request:ReviewAnalysisRequest,status:ReviewAnalysisData["status"],version?:string):ReviewAnalysisData{
+ const aspect=request.aspect??"overall";
+ return {status,aspect,aspectLabel:reviewSortAspectLabel(aspect),focus:request.focus,compare:request.compare,method:"CONSERVATIVE_RULES",
+   ...(version?{datasetVersion:version}:{}),products:[]};
+}
+function unavailableReviewAnalysis(request:ReviewAnalysisRequest,products:DisplayedReviewProduct[],version?:string):ReviewAnalysisData{
+ const data=reviewAnalysisData(request,"UNAVAILABLE",version);
+ data.products=products.map(product=>({productId:product.productId,...(product.variantId?{variantId:product.variantId}:{}),
+   name:product.name??"상품",displayIndex:product.displayIndex,status:"UNAVAILABLE",totalMatching:0,fetchedCount:0,uniqueCount:0,
+   duplicateCount:0,excludedCount:0,counts:{positive:0,negative:0,mixed:0,unrelated:0,uncertain:0},
+   countsBySource:{REAL:{positive:0,negative:0,mixed:0,unrelated:0,uncertain:0},SYNTHETIC:{positive:0,negative:0,mixed:0,unrelated:0,uncertain:0}},
+   evidence:[],limitations:["Commerce 리뷰 분석을 완료하지 못했습니다."]}));
+ return data;
 }
 function pageProductId(context?:SafePageContext):string|undefined{
  if((context?.screen!=="product"&&context?.screen!=="reviews")||
@@ -85,9 +104,25 @@ export function createPersistentResearchGraph(
      const answer=deps.clarifyBeforeSearch&&interviewAnswer(state.request.userMessage,previous);
      const follow=previous&&['다른 상품 보기','다른 제품 보기','조건 바꾸기'].includes(state.request.userMessage.trim());
      const guarded=guardBrainMessage(state.request.userMessage);
+     const contextualReview=parseContextReviewRequest(state.request.userMessage);
      const unsupportedReviewOrder=/(?:리뷰|후기).*(?:적은\s*순|부정.{0,12}많은\s*순)|부정.{0,16}(?:리뷰|후기).{0,8}많은\s*순/.test(state.request.userMessage);
      let route:BrainRoute;
      if(guarded)route=guarded;
+     else if(contextualReview){
+       const priorAnalysis=state.researchResult?.explanation?.reviewAnalysis;
+       const inheritAspect=!!deps.datasetVersion&&state.researchResult?.conversationId===state.request.conversationId&&
+         state.researchResult.datasetVersion===deps.datasetVersion&&typeof priorAnalysis?.aspect==="string"&&priorAnalysis.aspect.trim()
+         ?priorAnalysis.aspect:undefined;
+       const request:ReviewAnalysisRequest={...contextualReview,...(!contextualReview.aspect&&inheritAspect?{aspect:inheritAspect}:{})};
+       if(!request.aspect){
+         const indexes=request.displayIndexes??[];
+         if(request.compare||request.allDisplayed||indexes.length>1)
+           route={kind:"UNCERTAIN",search:false,text:reviewAnalysisAspectPrompt};
+         else route={kind:"REVIEW_SUMMARY",search:false,reviewSummary:{
+           ...(request.useCurrent?{useCurrent:true}:{}),...(indexes.length===1?{displayIndex:indexes[0]}:{}),focus:request.focus,
+         }};
+       }else route={kind:"REVIEW_ANALYSIS",search:false,reviewAnalysis:request};
+     }
      else if(unsupportedReviewOrder)route={kind:"UNCERTAIN",search:false,text:unsupportedReviewOrderText};
      else{
        const summaryCandidate=parseReviewSummaryRequest(state.request.userMessage);
@@ -103,7 +138,8 @@ export function createPersistentResearchGraph(
    .addNode("converse",async state=>{
      const previous=state.researchResult?.shoppingPlan;
      const started=performance.now();
-     const explanation=deps.converse&&state.intentRoute.text!==unsupportedReviewOrderText?await deps.converse({message:state.request.userMessage,route:state.intentRoute,previous}):
+     const fixedClarification=state.intentRoute.kind==="UNCERTAIN"&&state.intentRoute.text===reviewAnalysisAspectPrompt;
+     const explanation=deps.converse&&!fixedClarification&&state.intentRoute.text!==unsupportedReviewOrderText?await deps.converse({message:state.request.userMessage,route:state.intentRoute,previous}):
        {kind:"CONVERSATION" as const,text:state.intentRoute.text??"어떤 상품을 찾으시는지 알려주세요.",items:[],limitations:[]};
      await verify();
      const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,
@@ -172,6 +208,39 @@ export function createPersistentResearchGraph(
        return finish({kind:"REVIEW_SUMMARY",text:reviewSummaryUnavailable,items:[],limitations:["리뷰 조회에 실패했어요."]});
      }
    })
+   .addNode("review-analysis",async state=>{
+     const started=performance.now();
+     const previous=state.researchResult?.explanation?state.researchResult:undefined;
+     const shoppingPlan=previous?.shoppingPlan??state.shoppingPlan;
+     const request=state.intentRoute.reviewAnalysis??{focus:"ALL" as const,compare:false};
+     const resolved=resolveReviewTargets(request,previous,deps.datasetVersion);
+     const finish=async(data:ReviewAnalysisData)=>{
+       const explanation=buildReviewAnalysisExplanation(data);
+       const researchResult:ResearchResult={conversationId:state.request.conversationId,messageId:state.prepared.messageId,
+         clientActionId:state.request.clientActionId,intentKind:"REVIEW_ANALYSIS",...(shoppingPlan?{shoppingPlan}:{}),
+         datasetVersion:deps.datasetVersion,ranking:emptyRanking(),explanation,
+         trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,
+           responseMs:performance.now()-started,totalMs:performance.now()-state.prepared.startedAt}};
+       await verify();return {researchResult,evidence:[],...(shoppingPlan?{shoppingPlan}:{})};
+     };
+     if(resolved.needsTarget)return finish(reviewAnalysisData(request,"NEEDS_TARGET",deps.datasetVersion));
+     try{
+       if(!deps.reviewAnalysis)throw new Error("review analysis unavailable");
+       const data=await deps.reviewAnalysis({request,products:resolved.products});
+       await verify();
+       const validStatus=data?.status==="READY"||data?.status==="PARTIAL"||data?.status==="UNAVAILABLE";
+       const matchesTargets=Array.isArray(data?.products)&&data.products.length===resolved.products.length&&
+         data.products.every((row,index)=>row.productId===resolved.products[index]?.productId&&
+           row.variantId===resolved.products[index]?.variantId&&row.displayIndex===resolved.products[index]?.displayIndex);
+       if(!validStatus||!matchesTargets||data.method!=="CONSERVATIVE_RULES"||
+         data.focus!==request.focus||data.compare!==request.compare||
+         deps.datasetVersion&&data.datasetVersion!==deps.datasetVersion)
+         throw new Error("invalid review analysis result");
+       return finish(data);
+     }catch{
+       return finish(unavailableReviewAnalysis(request,resolved.products,deps.datasetVersion));
+     }
+   })
    .addNode("plan",async state=>{
      const shoppingPlan=await resolveTurnPlan(state.request,state.prepared,
        state.researchResult?.explanation ? state.researchResult.shoppingPlan : null,deps);
@@ -211,8 +280,21 @@ export function createPersistentResearchGraph(
          :buildGroundedExplanation(state.researchResult.ranking,state.evidence,state.shoppingPlan)
      };
      if(researchResult.shoppingPlan){
-       const selected=researchResult.ranking.ranked.filter(row=>row.candidate.commerceVerified===true&&(researchResult.explanation.failure||researchResult.explanation.items.some(item=>item.productId===row.candidate.productId&&item.variantId===row.candidate.variantId)));
-       researchResult.shoppingPlan={...researchResult.shoppingPlan,lastDisplayedProductIds:[...new Set([...selected,...researchResult.ranking.referenceOnly].map(row=>row.candidate.productId))].slice(0,3)};
+       const displayed:DisplayedReviewProduct[]=[],seen=new Set<string>();
+       const add=(candidate:ProductCandidate,name?:string)=>{
+         if(candidate.commerceVerified!==true)return;
+         const key=`${candidate.productId}\u0000${candidate.variantId}`;
+         if(seen.has(key)||displayed.length>=3)return;
+         seen.add(key);displayed.push({productId:candidate.productId,variantId:candidate.variantId,
+           ...(name||candidate.productName?{name:name??candidate.productName}:{}),displayIndex:displayed.length+1});
+       };
+       for(const item of researchResult.explanation.items){
+         const match=researchResult.ranking.ranked.find(row=>row.candidate.productId===item.productId&&row.candidate.variantId===item.variantId);
+         if(match)add(match.candidate,item.name);
+       }
+       for(const row of researchResult.ranking.referenceOnly)add(row.candidate,row.candidate.productName);
+       researchResult.shoppingPlan={...researchResult.shoppingPlan,
+         lastDisplayedProductIds:displayed.map(row=>row.productId),lastDisplayedProducts:displayed};
      }
      researchResult.trace={...researchResult.trace,routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
        totalMs:performance.now()-state.prepared.startedAt};
@@ -221,7 +303,8 @@ export function createPersistentResearchGraph(
    })
    .addEdge(START,"prepare")
    .addEdge("prepare","route")
-   .addConditionalEdges("route",state=>state.intentRoute.kind==="REVIEW_SUMMARY"?"review-summary":state.intentRoute.search?"plan":"converse",["review-summary","plan","converse"])
+   .addConditionalEdges("route",state=>state.intentRoute.kind==="REVIEW_ANALYSIS"?"review-analysis":state.intentRoute.kind==="REVIEW_SUMMARY"?"review-summary":state.intentRoute.search?"plan":"converse",["review-analysis","review-summary","plan","converse"])
+   .addEdge("review-analysis",END)
    .addEdge("review-summary",END)
    .addEdge("converse",END)
    .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":"retrieve",["clarify","retrieve"])

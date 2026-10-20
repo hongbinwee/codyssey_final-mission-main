@@ -33,6 +33,7 @@ import {currentDatasetResult} from "./dataset-state.ts";
 import type {ResearchResult} from "./read-flow.ts";
 import {createReviewSummaryLookup} from "./review-summary.ts";
 import {createReviewSummaryResponder} from "./review-summary-response.ts";
+import {createReviewAnalysisLookup} from "./review-analysis.ts";
 
 /** One offline CPU encoder per runtime. Only query vectors, never corpus re-embedding. */
 export async function createLocalQueryEncoder(
@@ -125,7 +126,7 @@ export async function readBrainHistory(db:SchemaProbe,actorUserId:string,convers
    if(!result||typeof result!=="object"||result.conversationId!==id||result.messageId!==row.message_id||
      result.clientActionId!==row.client_action_id||typeof row.content!=="string"||
      !result.ranking||!(["ranked","referenceOnly","rejected"] as const).every(key=>Array.isArray(result.ranking[key]))||
-     (result.shoppingPlan?typeof result.shoppingPlan.query!=="string":result.explanation?.kind!=="CONVERSATION"&&result.explanation?.kind!=="REVIEW_SUMMARY")||
+     (result.shoppingPlan?typeof result.shoppingPlan.query!=="string":result.explanation?.kind!=="CONVERSATION"&&result.explanation?.kind!=="REVIEW_SUMMARY"&&result.explanation?.kind!=="REVIEW_ANALYSIS")||
      !result.explanation||typeof result.explanation.text!=="string"||typeof result.explanation.kind!=="string")
      throw new Error("invalid canonical Brain receipt");
    result=currentDatasetResult(result,datasetVersion);
@@ -226,10 +227,12 @@ export async function createBrainRuntime(options:{
    const catalog=options.catalog??createCatalog(options.catalogSource??"public");
    const lookupReviewSummary=createReviewSummaryLookup(catalog,options.rag?.datasetVersion);
    const respondReviewSummary=createReviewSummaryResponder(options.provider);
+   const lookupReviewAnalysis=createReviewAnalysisLookup(catalog,options.rag?.datasetVersion);
    const ownQaCommerce=qaCommerceActivityAllowed({catalogSource:options.catalogSource,
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
      reviewSummary:async ({request,previous})=>respondReviewSummary(await lookupReviewSummary(request,previous)),
+     reviewAnalysis:lookupReviewAnalysis,
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:options.rag?.contract!=="v4",datasetVersion:options.rag?.datasetVersion,
      ...(ownQaCommerce?{activity:(actorUserId:string)=>readCommerceActivity(sql,actorUserId)}:{}),
      retriever:options.rag?verifiedRagRetriever({...options.rag,catalogSource:options.catalogSource??"public"},catalog.getProduct,

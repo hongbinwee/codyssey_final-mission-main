@@ -148,11 +148,12 @@ test("selection posts can look up only IDs in prior review choices or last displ
  assert.equal(rejected.explanation?.reviewSummary?.status,"AMBIGUOUS");
 });
 
-test("displayIndex follows the actual explanation item order before lastDisplayedProductIds",async()=>{
+test("displayIndex and stored targets follow the actual explanation item order",async()=>{
  const f=fixture(undefined,routeBrainMessage,["p1","p2"],["p2","p1"]);
  const first=await f.turn("수분크림 추천해줘","recommend");
  assert.deepEqual(first.explanation?.items.map(item=>item.productId),["p2","p1"]);
- assert.deepEqual(first.shoppingPlan?.lastDisplayedProductIds,["p1","p2"]);
+ assert.deepEqual(first.shoppingPlan?.lastDisplayedProductIds,["p2","p1"]);
+ assert.deepEqual(first.shoppingPlan?.lastDisplayedProducts?.map(row=>[row.productId,row.displayIndex]),[["p2",1],["p1",2]]);
  await f.turn("2번 상품 후기 요약해줘","second-item");
  assert.equal(f.calls.summaryInputs[0].request.productId,"p1");
 });

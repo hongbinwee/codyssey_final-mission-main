@@ -1,8 +1,10 @@
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import type {ReviewSummaryRequest} from "./contracts.ts";
+import type {ReviewAnalysisRequest} from "./review-analysis.ts";
+import {parseContextReviewRequest} from "./review-reference.ts";
 
-export type BrainIntentKind="GREETING"|"SOCIAL"|"CAPABILITY"|"SHOPPING_SEARCH"|"SHOPPING_FOLLOWUP"|"REVIEW_COMPARE"|"REVIEW_SUMMARY"|"CS_REQUEST"|"UNCERTAIN";
-export interface BrainRoute {kind:BrainIntentKind;search:boolean;text?:string;reviewSummary?:ReviewSummaryRequest}
+export type BrainIntentKind="GREETING"|"SOCIAL"|"CAPABILITY"|"SHOPPING_SEARCH"|"SHOPPING_FOLLOWUP"|"REVIEW_COMPARE"|"REVIEW_SUMMARY"|"REVIEW_ANALYSIS"|"CS_REQUEST"|"UNCERTAIN";
+export interface BrainRoute {kind:BrainIntentKind;search:boolean;text?:string;reviewSummary?:ReviewSummaryRequest;reviewAnalysis?:ReviewAnalysisRequest}
 export const BRAIN_GREETING='안녕하세요! 😊 토스쇼핑 AI Brain이에요.\n\n찾으시는 상품이 있으신가요?\n원하시는 조건과 예산에 맞춰 찾아드릴게요!';
 export const BRAIN_CAPABILITIES='토스쇼핑 AI Brain은 쇼핑 전담 AI 비서예요.\n\n원하는 상품을 찾고, 가격과 조건을 비교하며 확인된 리뷰의 장단점을 정리해 드려요.\n\n대화 중 조건을 바꿀 수 있고, 직접 저장한 선호를 다음 추천에도 활용해요.';
 /** The active catalog's policy does not expose order reads to Brain. Never
@@ -81,6 +83,8 @@ export function routeBrainMessage(message:string,previous?:ShoppingPlan):BrainRo
  const shopping=shoppingQuestion(text);
  const role=()=>({kind:"UNCERTAIN" as const,search:false,text:"저는 상품 찾기와 비교를 도와드려요. 찾으시는 상품이나 궁금한 점을 알려주세요."});
  const guarded=guardBrainMessage(text);if(guarded)return guarded;
+ const reviewAnalysis=parseContextReviewRequest(text);
+ if(reviewAnalysis)return {kind:"REVIEW_ANALYSIS",search:false,reviewAnalysis};
  if(/^(안녕(?:하세요|하십니까)?|하이|반가워(?:요)?|hello|hi)$/i.test(text))
   return {kind:"GREETING",search:false,text:BRAIN_GREETING};
  if(/^(고마워(?:요)?|감사(?:합니다|해요)?|고맙습니다|thanks?|잘 알겠어(?:요)?)$/i.test(text))

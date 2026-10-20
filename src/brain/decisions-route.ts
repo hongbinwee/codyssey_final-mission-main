@@ -1,8 +1,9 @@
-import {serviceRequestRoute} from "./routing.ts";
+import {guardBrainMessage} from "./routing.ts";
 import type {BrainIntentKind,BrainRoute} from "./routing.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import {BRAIN_GREETING,BRAIN_CAPABILITIES} from './routing.ts';
 import {parseReviewSummaryRequest} from './routing.ts';
+import {parseContextReviewRequest} from './review-reference.ts';
 
 /**
  * Experiment-only router. Decisions chooses a typed intent; it never grants
@@ -16,10 +17,10 @@ export interface DecisionsRouterOptions {
 }
 const KINDS:BrainIntentKind[]=[
   "GREETING","SOCIAL","CAPABILITY","SHOPPING_SEARCH",
-  "SHOPPING_FOLLOWUP","REVIEW_COMPARE","REVIEW_SUMMARY","CS_REQUEST","UNCERTAIN",
+  "SHOPPING_FOLLOWUP","REVIEW_COMPARE","REVIEW_SUMMARY","REVIEW_ANALYSIS","CS_REQUEST","UNCERTAIN",
 ];
 const SEARCH=new Set<BrainIntentKind>(["SHOPPING_SEARCH","SHOPPING_FOLLOWUP","REVIEW_COMPARE"]);
-const REPLIES:Record<Exclude<BrainIntentKind,"SHOPPING_SEARCH"|"SHOPPING_FOLLOWUP"|"REVIEW_COMPARE"|"REVIEW_SUMMARY">,string>={
+const REPLIES:Record<Exclude<BrainIntentKind,"SHOPPING_SEARCH"|"SHOPPING_FOLLOWUP"|"REVIEW_COMPARE"|"REVIEW_SUMMARY"|"REVIEW_ANALYSIS">,string>={
   GREETING:BRAIN_GREETING,
   SOCIAL:"반가워요. 더 궁금한 점이 있으면 편하게 말씀해 주세요.",
   CAPABILITY:BRAIN_CAPABILITIES,
@@ -40,6 +41,10 @@ const CHOICES=[
 ] as const;
 
 function routeFromKind(kind:BrainIntentKind,message:string):BrainRoute{
+  if(kind==="REVIEW_ANALYSIS"){
+    const reviewAnalysis=parseContextReviewRequest(message);
+    return reviewAnalysis?{kind,search:false,reviewAnalysis}:SAFE_UNCERTAIN;
+  }
   if(kind==="REVIEW_SUMMARY"){
     const reviewSummary=parseReviewSummaryRequest(message);
     return reviewSummary?{kind,search:false,reviewSummary}:SAFE_UNCERTAIN;
@@ -86,8 +91,10 @@ export function createDecisionsRouter(options:DecisionsRouterOptions){
     throw new Error("invalid BRAIN_DECISIONS_CONFIDENCE");
   return async (message:string,previous?:ShoppingPlan):Promise<BrainRoute>=>{
     if(!message.trim()||message.length>3000)return SAFE_UNCERTAIN;
-    const serviceRequest=serviceRequestRoute(message);
-    if(serviceRequest)return serviceRequest;
+    const guarded=guardBrainMessage(message);
+    if(guarded)return guarded;
+    const reviewAnalysis=parseContextReviewRequest(message);
+    if(reviewAnalysis)return {kind:"REVIEW_ANALYSIS",search:false,reviewAnalysis};
     // A previous plan is lower-trust context. Do not send user identity, secrets,
     // memory records, checkpoints, or the complete conversation to this API.
     const input=JSON.stringify({

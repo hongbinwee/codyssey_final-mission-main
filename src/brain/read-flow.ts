@@ -1,6 +1,7 @@
 import {interviewAnswer} from './interview.ts';
 import type {ConversationResponder} from "./conversation-response.ts";
 import type {BrainTrace,EvidenceRecord,MemoryRepository,Preference,RankingResult,RetrieverPort,ReviewSummaryRequest} from "./contracts.ts";
+import type {DisplayedReviewProduct,ReviewAnalysisData,ReviewAnalysisRequest} from "./review-analysis.ts";
 import type {PersistentConversations} from "./persistent-store.ts";
 import {rankProducts} from "./personalization.ts";
 import {curateRecommendations,type CommerceActivity} from "./recommendation-strategies.ts";
@@ -25,6 +26,7 @@ export interface ResearchResult {
 }
 export interface ResearchDeps {
  reviewSummary?:(input:{request:ReviewSummaryRequest;previous?:ResearchResult})=>Promise<GroundedExplanation>;
+ reviewAnalysis?:(input:{request:ReviewAnalysisRequest;products:DisplayedReviewProduct[]})=>Promise<ReviewAnalysisData>;
  clarifyBeforeSearch?:boolean;
  datasetVersion?:string;
  conversations:Pick<PersistentConversations,"assertOwned"|"appendUserMessage">;

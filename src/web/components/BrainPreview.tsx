@@ -4,7 +4,9 @@ import {resolveBrainInterviewState} from "../brain-interview-state.ts";
 import {BrainAnswer} from './BrainAnswer.tsx';
 import {reviewSortAspectLabel} from "../../brain/review-sort.ts";
 import type {ReviewSummaryData} from "../../brain/contracts.ts";
+import type {ReviewAnalysisData} from "../../brain/review-analysis.ts";
 import {sanitizePageContext,type SafePageContext} from "../../brain/page-context.ts";
+import {BrainReviewAnalysis} from "./BrainReviewAnalysis.tsx";
 
 type ProductCandidate={
  productId:string;productName?:string;variantId:string;productImage?:string;keywords?:string[];
@@ -19,7 +21,7 @@ type BrainRankingResult={ranked:RankedProduct[];referenceOnly:LimitedProduct[];r
 type BrainReply={
  conversation_id:string;message_id:string;read_only:true;intent_kind?:string;
  shopping_plan?:{query:string;minTotalWon?:number;maxTotalWon:number|null;requiredConditions:string[];revision:number;attributePreferences?:string[];reviewSort?:{aspect:string;direction:"MOST_POSITIVE"}}|null;
- explanation?:{text:string;kind:string;items:{productId:string;variantId?:string;evidenceIds:string[];reason?:string}[];clarification?:{questions:{key:string;text:string;choices:string[]}[]};limitations:string[];reviewSummary?:ReviewSummaryData;
+ explanation?:{text:string;kind:string;items:{productId:string;variantId?:string;evidenceIds:string[];reason?:string}[];clarification?:{questions:{key:string;text:string;choices:string[]}[]};limitations:string[];reviewSummary?:ReviewSummaryData;reviewAnalysis?:ReviewAnalysisData;
    failure?:{code:string;httpStatus?:number}}|null;
  ranking:BrainRankingResult;trace:{totalMs:number;graphWallMs?:number};
 };
@@ -71,7 +73,7 @@ export function createRetrievalRetryEntry(entry:Pick<Entry,"text"|"clientActionI
    ...(entry.pageContext?{pageContext:{...entry.pageContext}}:{}),status:"sending"};
 }
 export function canExploreBrainReply(reply:BrainReply|undefined):boolean{
- return !!reply&&reply.explanation?.kind!=="REVIEW_SUMMARY"&&reply.explanation?.failure?.code!=="RETRIEVAL_UNAVAILABLE"&&
+ return !!reply&&reply.explanation?.kind!=="REVIEW_SUMMARY"&&reply.explanation?.kind!=="REVIEW_ANALYSIS"&&reply.explanation?.failure?.code!=="RETRIEVAL_UNAVAILABLE"&&
    (reply.ranking.ranked.length>0||reply.explanation?.kind==="NO_MATCH"||reply.explanation?.kind==="REFERENCE_ONLY");
 }
 
@@ -316,7 +318,7 @@ export function BrainPreview({onClose,onOpenProduct,pageContext}:{onClose:()=>vo
  const latestReply=entries.at(-1)?.reply;
  const currentSavedPrice=memories.find(memory=>memory.key==="price_priority");
  const storedPricePreference=currentSavedPrice&&isPricePreference(currentSavedPrice.value)?currentSavedPrice.value:null;
- const showPreferencePrompt=!!sourceMessage&&!!conversation&&latestReply?.explanation?.kind!=="REVIEW_SUMMARY"&&
+ const showPreferencePrompt=!!sourceMessage&&!!conversation&&latestReply?.explanation?.kind!=="REVIEW_SUMMARY"&&latestReply?.explanation?.kind!=="REVIEW_ANALYSIS"&&
    (latestReply?.ranking.ranked.length??0)>0&&deferredSourceMessage!==sourceMessage;
  const changeConversation=async(id?:string)=>{
    if(lock.current||restoring)return;lock.current=true;setBusy(true);setError("");
@@ -400,7 +402,8 @@ export function BrainPreview({onClose,onOpenProduct,pageContext}:{onClose:()=>vo
          </div>}
           {e.reply.explanation?.kind==="REVIEW_SUMMARY"&&e.reply.explanation.reviewSummary&&<BrainReviewSummary
             summary={e.reply.explanation.reviewSummary} onOpenProduct={onOpenProduct} onChooseProduct={sendChoice}/>}
-          {e.reply.explanation?.kind!=="CONVERSATION"&&e.reply.explanation?.kind!=="CLARIFICATION"&&e.reply.explanation?.kind!=="REVIEW_SUMMARY"&&<BrainRanking explanation={e.reply.explanation} ranking={e.reply.ranking} onOpenProduct={onOpenProduct} onExcludeProduct={i===entries.length-1&&!busy?(id)=>sendChoice(`이 상품 제외: ${id}`):undefined}/>}
+          {e.reply.explanation?.kind==="REVIEW_ANALYSIS"&&e.reply.explanation.reviewAnalysis&&<BrainReviewAnalysis analysis={e.reply.explanation.reviewAnalysis}/>}
+          {e.reply.explanation?.kind!=="CONVERSATION"&&e.reply.explanation?.kind!=="CLARIFICATION"&&e.reply.explanation?.kind!=="REVIEW_SUMMARY"&&e.reply.explanation?.kind!=="REVIEW_ANALYSIS"&&<BrainRanking explanation={e.reply.explanation} ranking={e.reply.ranking} onOpenProduct={onOpenProduct} onExcludeProduct={i===entries.length-1&&!busy?(id)=>sendChoice(`이 상품 제외: ${id}`):undefined}/>}
        </>}
      </div>)}
       {showPreferencePrompt&&<BrainPreferencePrompt selected={selected} storedValue={storedPricePreference} status={preferenceStatus}
