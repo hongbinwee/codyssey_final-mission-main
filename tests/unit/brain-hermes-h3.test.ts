@@ -23,7 +23,7 @@ test("readExistingCart does not INSERT or create an empty cart",async()=>{
  const queries:string[]=[];
  const db={unsafe:async(query:string,params:unknown[])=>{queries.push(query);assert.deepEqual(params,["owner-a"]);return []}};
  const result=await readExistingCart("owner-a",db as never);
- assert.deepEqual(result.items,[]);assert.equal(result.totalWon,undefined); // intentionally not camel variant
+ assert.deepEqual(result.items,[]);
  assert.equal(result.totalWon,0);
  assert.equal(queries.length,1);assert.match(queries[0],/^SELECT /);
  assert.doesNotMatch(queries[0],/INSERT|UPDATE|DELETE/i);
