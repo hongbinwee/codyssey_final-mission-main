@@ -65,3 +65,20 @@ test("historical dataset handoff cannot keep pointing to stale product or order"
  assert.deepEqual(current.shoppingHandoffs,[]);
  assert.deepEqual(current.ranking.ranked,[]);
 });
+
+test("dynamic Agent wishlist Tool produces selectable active product handoffs without a write",()=>{
+ const observations=[observe("get_wishlist",{saved_products:[
+  {productId:"p1",active:true,minPriceWon:10000},
+  {productId:"p2",active:false,minPriceWon:null},
+  {productId:"p3",active:true,minPriceWon:11000}
+ ]})] as never;
+ const actions=validatedShoppingHandoffs({observations});
+ assert.deepEqual(actions.map(a=>a.kind==="PRODUCT_DETAIL"?a.productId:null),["p1","p3"]);
+ assert.equal(actions.some(a=>a.kind==="CHECKOUT_REVIEW"),false);
+});
+test("ranking handoffs cannot surface verified items not present in final displayed product IDs",()=>{
+ const actions=validatedShoppingHandoffs({ranking:ranked([
+  {id:"p1",variant:"v1",verified:true},{id:"hidden",variant:"vh",verified:true}
+ ]) as never,displayedProductIds:["p1"]});
+ assert.deepEqual(actions.map(a=>a.kind==="PRODUCT_DETAIL"?a.productId:null),["p1"]);
+});
