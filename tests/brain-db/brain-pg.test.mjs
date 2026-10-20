@@ -254,7 +254,7 @@ test("deleting canonical Memory does NOT constitute transcript or checkpoint era
  }finally{await Promise.allSettled([saver.end(),db.end()]);}
 });
 
-test("retry unfinished RAG turn after checkpoint restart does not double-apply budget changes",async()=>{
+test("retry interrupted RAG turn after checkpoint restart does not double-apply budget changes",async()=>{
  if(!url||new URL(url).pathname!=="/brain_ci")throw Error("disposable brain_ci required");
  const db=postgres(url,{max:2});
  let saver=PostgresSaver.fromConnString(url,{schema:"shopping_brain"});
@@ -263,6 +263,7 @@ test("retry unfinished RAG turn after checkpoint restart does not double-apply b
    const conversations=new PersistentConversations(runner),memory=new PersistentPreferences(runner);
    const thread=await conversations.create("user-recovery-audit");
    let retrievalCalls=0;
+   let leaseFailureInjected=false;
    const deps={conversations,memory,
      intent:{extract:async(message,preferences,prior)=>{
        if(message==="first")return {query:"monitor",queryMode:"SET",
@@ -273,31 +274,41 @@ test("retry unfinished RAG turn after checkpoint restart does not double-apply b
      }},
      retriever:{search:async()=>{
        retrievalCalls++;
-       if(retrievalCalls===2)throw new Error("CI injected RAG HTTP timeout");
        return {candidates:[],evidence:[]};
      }}
    };
    await saver.setup();
-   let graph=createPersistentResearchGraph(deps,saver);
+   const interruptDuringRag={tryAcquire:async()=>({assertHeld:async()=>{
+     if(!leaseFailureInjected&&retrievalCalls===2){leaseFailureInjected=true;throw new Error("CI injected lease lost");}
+   },release:async()=>{}})};
+   let graph=createPersistentResearchGraph(deps,saver,interruptDuringRag);
    const invoke=async(message,action)=>graph.invoke({
      actorUserId:"user-recovery-audit",conversationId:thread.id,
      requestId:crypto.randomUUID(),clientActionId:action,userMessage:message
    });
    const first=await invoke("first","recover-first");
    assert.equal(first.shoppingPlan.maxTotalWon,500000);
-   await assert.rejects(()=>invoke("second","recover-second"),/timeout/);
+   await assert.rejects(()=>invoke("second","recover-second"),/lease lost/);
+   assert.equal(leaseFailureInjected,true,"test MUST interrupt the turn at the post-RAG lease check");
    const prior=await graph.getOwnedState("user-recovery-audit",thread.id);
    assert.equal(prior.values.researchResult.clientActionId,"recover-first");
-   // Model a new process by replacing its connection/checkpointer after the failure.
+   assert.equal(prior.values.shoppingPlan.revision,2,"the interrupted turn has already applied the budget plan once");
+   assert.equal(prior.values.shoppingPlan.maxTotalWon,300000);
+   assert.equal(retrievalCalls,2,"the failure occurs after the second RAG read returns");
+   // Model a new process by replacing its connection/checkpointer after the unfinished RAG node.
    await saver.end();
    saver=PostgresSaver.fromConnString(url,{schema:"shopping_brain"});
    await saver.setup();
    graph=createPersistentResearchGraph(deps,saver);
    const recovered=await invoke("second","recover-second");
    assert.equal(recovered.shoppingPlan.maxTotalWon,300000);
-   assert.equal(recovered.shoppingPlan.revision,2,"an unfinished operation must not change plan twice");
+   assert.equal(recovered.shoppingPlan.revision,2,"resuming the interrupted RAG node must not apply the budget change twice");
    assert.equal(recovered.explanation.kind,"NO_MATCH");
-   assert.equal(retrievalCalls,3);
+   assert.equal(retrievalCalls,3,"recovery repeats the interrupted read once");
+   const replay=await invoke("second","recover-second");
+   assert.equal(replay.messageId,recovered.messageId,"same-action replay must remain idempotent after checkpoint restart");
+   assert.equal(replay.shoppingPlan.revision,2);
+   assert.equal(retrievalCalls,3,"same-action replay must not repeat RAG");
    const messages=await db.unsafe(
      "SELECT count(*)::int AS n FROM shopping_brain.messages WHERE conversation_id=$1 AND client_action_id='recover-second'",
      [thread.id]);
