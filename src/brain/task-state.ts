@@ -21,7 +21,7 @@ export function ownedTask(raw:unknown,scope:TaskScope):AgentTaskState|null{
  const t=raw as Partial<AgentTaskState>;
  if(t.schemaVersion!==1||t.actorUserId!==scope.actorUserId||t.conversationId!==scope.conversationId||
    t.datasetVersion!==scope.datasetVersion||!kinds.has(t.kind as AgentTaskKind)||
-   !phases.has(t.phase as AgentTaskPhase)||!Number.isSafeInteger(t.revision)||!(t.revision!>0)||
+   !phases.has(t.phase as AgentTaskPhase)||typeof t.revision!=="number"||!Number.isSafeInteger(t.revision)||t.revision<=0||
    !Array.isArray(t.displayedProductIds)||t.displayedProductIds.length>20||
    t.displayedProductIds.some(x=>!identifier(x))||new Set(t.displayedProductIds).size!==t.displayedProductIds.length||
    t.selectedProductId!==undefined&&(!identifier(t.selectedProductId)||!t.displayedProductIds.includes(t.selectedProductId))||
