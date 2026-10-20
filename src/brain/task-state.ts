@@ -54,3 +54,9 @@ export function taskForWishlistSelection(task:AgentTaskState|null):{kind:"WISHLI
  return task?.kind==="WISHLIST"&&task.phase==="ACTIVE"?
   {kind:"WISHLIST",items:task.displayedProductIds.map(productId=>({productId}))}:undefined;
 }
+
+/** Explicitly resets only the current shopping task, never account memory or orders. */
+export function resetTaskRequested(message:string):boolean{
+ const text=message.trim().replace(/[.!?~]+$/,"").trim();
+ return /^(?:처음부터(?:\s*다시)?\s*시작(?:해\s*줘|할게|하자)?|(?:쇼핑|검색|추천)(?:을|은)?\s*(?:처음부터|새로)\s*시작(?:해\s*줘|하자)?|새\s*(?:쇼핑|검색)\s*시작(?:해\s*줘|하자)?)$/.test(text);
+}
