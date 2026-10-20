@@ -1,7 +1,7 @@
 import {guardBrainMessage} from './routing.ts';
 import {runHermesReadLoop} from "./hermes-tools.ts";
 import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.ts";
-import {ownedTask,nextTask,retainTask,taskForWishlistSelection,type AgentTaskState,type TaskScope} from "./task-state.ts";
+import {ownedTask,nextTask,retainTask,taskForWishlistSelection,resetTaskRequested,type AgentTaskState,type TaskScope} from "./task-state.ts";
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
 import {interviewAnswer,needsInterview,rememberInterview} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
@@ -65,6 +65,12 @@ export function createPersistentResearchGraph(
      const started=performance.now();
      const previous=state.researchResult?.shoppingPlan;
      const activeTask=ownedTask(state.researchResult?.taskState,taskScope(state.request));
+     if(resetTaskRequested(state.request.userMessage)){
+       await verify();return {activeTask:null,priorExplanation:null,wishlistRequest:null,
+         intentRoute:{kind:"UNCERTAIN" as const,search:false,
+           text:"현재 쇼핑 작업과 조건을 초기화했어요. 저장된 장기 선호와 주문 기록은 그대로예요. 어떤 상품을 찾아볼까요?"},
+         routeMs:performance.now()-started};
+     }
      const priorExplanation=explainPreviousRecommendation(state.request.userMessage,state.researchResult,deps.datasetVersion);
      if(priorExplanation){await verify();return {priorExplanation,activeTask,intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},
        routeMs:performance.now()-started};}
@@ -112,7 +118,7 @@ export function createPersistentResearchGraph(
      await verify();return {researchResult,evidence:[]};
    })
    .addNode("converse",async state=>{
-     const previous=state.researchResult?.shoppingPlan;
+     const previous=resetTaskRequested(state.request.userMessage)?null:state.researchResult?.shoppingPlan;
      const started=performance.now();
      const explanation=deps.converse?await deps.converse({message:state.request.userMessage,route:state.intentRoute,previous}):
        {kind:"CONVERSATION" as const,text:state.intentRoute.text??"어떤 상품을 찾으시는지 알려주세요.",items:[],limitations:[]};
