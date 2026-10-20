@@ -3,6 +3,7 @@ import type {PersistentConversations,PersistentPreferences} from "./persistent-s
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {WishlistView} from "./wishlist-task.ts";
+import type {ShoppingHandoff} from "./shopping-handoff.ts";
 import type {AgentTaskState} from "./task-state.ts";
 import {BrainModelOutputError} from "./intent.ts";
 import type {BrainIntentKind} from "./routing.ts";
@@ -11,7 +12,7 @@ import {executionMode} from "./execution-mode.ts";
 export interface BrainGraphPort {
   invoke(input:{actorUserId:string;conversationId:string;requestId:string;clientActionId:string;userMessage:string}):Promise<{
     conversationId:string;messageId:string;ranking:RankingResult;trace:Record<string,number>;
-    shoppingPlan?:ShoppingPlan;agentUi?:WishlistView;taskState?:AgentTaskState;explanation?:GroundedExplanation;intentKind?:BrainIntentKind;datasetVersion?:string;
+    shoppingPlan?:ShoppingPlan;agentUi?:WishlistView;shoppingHandoffs?:ShoppingHandoff[];taskState?:AgentTaskState;explanation?:GroundedExplanation;intentKind?:BrainIntentKind;datasetVersion?:string;
   }>;
   getOwnedState(actorUserId:string,conversationId:string):Promise<{values?:Record<string,unknown>}>;
 }
@@ -98,7 +99,8 @@ export function createBrainApi(deps:BrainApiDeps) {
         const graphWallMs=performance.now()-started;
         return success({conversation_id:result.conversationId,message_id:result.messageId,
           ranking:result.ranking,trace:{...result.trace,graphWallMs},read_only:true,intent_kind:result.intentKind,
-          shopping_plan:result.shoppingPlan??null,agent_ui:result.agentUi??null,explanation:result.explanation??null});
+          shopping_plan:result.shoppingPlan??null,agent_ui:result.agentUi??null,
+          shopping_handoffs:result.shoppingHandoffs??[],explanation:result.explanation??null});
       }
       const state=path.match(/^\/api\/brain\/conversations\/([a-fA-F0-9-]+)\/state$/);
       if(method==="GET"&&state){
