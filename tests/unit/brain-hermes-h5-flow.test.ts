@@ -48,7 +48,7 @@ test("H5 selected item from authenticated wishlist becomes a product-detail hand
  const conversation=crypto.randomUUID();
  const first=await graph.invoke(request("내가 찜했던 상품 보여줘",conversation));
  assert.equal(first.agentUi?.items.length,2);
- const chosen=await graph.invoke(request("두 번째 상품 살게",conversation));
+ const chosen=await graph.invoke(request("두 번째 상품 장바구니에 담아줘",conversation));
  assert.deepEqual(chosen.shoppingHandoffs,[{kind:"PRODUCT_DETAIL",productId:"p2",label:"선택한 상품 옵션 확인"}]);
  assert.equal(chosen.agentUi?.selectedProductId,"p2");
 });
