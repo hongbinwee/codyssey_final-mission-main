@@ -63,3 +63,33 @@ Bugs discovered and fixed while executing the tests:
 **NOT_RUN:** full repository Typecheck/Build, full unit suite, existing CI at new HEAD, real database actor isolation, actual LLM/RAG tests, browser E2E and QA-server deployment. A mocked provider conditioned its second Tool choice on actual first Tool output; this validates the loop contract, *not* real model Tool-choice accuracy.
 
 Next priority: **H2/H3/H4** — first-class shopping Task State, additional bounded read Tools (cart/product/reviews/orders), and genuine LangGraph choose→execute→observe→replan control. The current `deep` graph can still perform mandatory retrieval; the wishlist task fast path alone does not make the whole application autonomous.
+
+## H2 – Scoped, versioned Task State (2026-10-20)
+
+### Implementation
+- `src/brain/task-state.ts` is the canonical server-side bounded task contract: `schemaVersion=1`, `actorUserId`, `conversationId`, `datasetVersion`, `kind` (WISHLIST / DISCOVERY / REVIEW_COMPARE / ORDER), `phase` (ACTIVE / AWAITING_INPUT / UNAVAILABLE), `revision`, bounded ordered `displayedProductIds`, optional `selectedProductId` and `pendingQuestion`.
+- `ownedTask` validates provenance and structure; a mismatched actor, conversation, dataset, duplicate/oversized product ID array, unavailable selection or malformed state does not qualify as current context. The existing Graph actor/session authorization and fencing remain the access-control authority.
+- `nextTask` creates a fresh revision on task transition, removes previous selected IDs and unanswered question keys, and cannot insert a selected product not present in the verified displayed list. The task state is **not** an authorization token and cannot perform orders, purchases or cart mutations.
+- `src/brain/graph.ts` routes via the scoped task, persists `taskState` in the server canonical `ResearchResult`, retains it through social interruptions, resets it on new recommendations/review comparisons/order requests, mirrors interview pending questions, and invalidates references on retrieval failure. Explicit "처음부터 시작" resets current Shopping Plan and Task State together but leaves long-term preferences and order data unchanged.
+- Wishlist selection no longer depends on the immediately previous `agentUi`: the prior displayed IDs come from the scoped task, while the selected product is **re-read from the current actor's wishlist**. The current bounded view must still contain that selected product.
+- `src/brain/dataset-state.ts` invalidates both `agentUi` and `taskState` on dataset changes. Public Brain turn/history responses do not expose the internal task-owner identity.
+- H2 adds no DB migration or new framework. Persistent canonical results already pass through the existing fenced LangGraph/turn-receipt checkpoint path.
+
+### Verification (isolated)
+The **exact committed Git blobs** for `task-state.ts`, `wishlist-task.ts`, `dataset-state.ts` and their unit-test files were copied to an isolated Node environment; matching Git blob hashes were checked. Executed:
+```sh
+node --experimental-strip-types --test \
+  tests/unit/brain-task-state.test.ts \
+  tests/unit/brain-task-multiturn.test.ts \
+  tests/unit/brain-wishlist-task.test.ts \
+  tests/unit/brain-dataset-state.test.ts
+# 18/18 PASS
+tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext \
+  --allowImportingTsExtensions src/brain/task-state.ts src/brain/wishlist-task.ts
+# PASS
+```
+
+**NOT_RUN:** full repository `npm run check` / `npm run build`; LangGraph+Postgres checkpoint/fencing integration; real authenticated HTTP/Browser E2E; live LLM Tool-choice accuracy; other regression suites. The execution sandbox cannot resolve the public GitHub host or install the full repository, so a passing isolated TS check does **not** prove the integrated graph compiles. Codex in an existing full checkout should run these before deployment.
+
+### Next: H3, then H4
+H2 provides safe task identity and continuity; it does **not** implement autonomous replanning. H3 must expose a small set of actor-owned cart/product/review/order read Tools. H4 must remove mandatory searches from non-search requests and actually use Tool observations to decide the next permitted Tool, ask a question, or finish. Never replace this with eight hard-coded dialog scripts.
