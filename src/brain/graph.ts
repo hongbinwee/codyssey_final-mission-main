@@ -1,5 +1,6 @@
 import {guardBrainMessage} from './routing.ts';
-import {runHermesReadLoop} from "./hermes-tools.ts";
+import {runHermesReadLoop,type HermesToolPort} from "./hermes-tools.ts";
+import {decideHermesAction,performHermesRead,readAgentRoute,summarizeAgentObservations,type AgentAction,type AgentObservation} from "./hermes-agent-step.ts";
 import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.ts";
 import {ownedTask,nextTask,retainTask,taskForWishlistSelection,resetTaskRequested,type AgentTaskState,type TaskScope} from "./task-state.ts";
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
@@ -28,7 +29,10 @@ const State=Annotation.Root({
  ,intentRoute:Annotation<BrainRoute>(),routeMs:Annotation<number>(),
  priorExplanation:Annotation<import("./grounded-response.ts").GroundedExplanation|null>(),
  wishlistRequest:Annotation<WishlistIntent|null>(),
- activeTask:Annotation<AgentTaskState|null>()
+ activeTask:Annotation<AgentTaskState|null>(),
+ agentRead:Annotation<boolean>(),agentAction:Annotation<AgentAction|null>(),
+ agentObservations:Annotation<AgentObservation[]>(),agentStart:Annotation<number>(),
+ agentSearched:Annotation<boolean>(),agentStop:Annotation<string|null>(),agentQuestion:Annotation<string|null>()
 });
 /**
  * Four explicit phases, each with a persisted checkpoint. Only a server-owned
@@ -46,6 +50,12 @@ export function createPersistentResearchGraph(
  const activeLease=new AsyncLocalStorage<TurnLease>();
  const verify=async()=>{await activeLease.getStore()?.assertHeld();};
  const taskScope=(request:GraphRequest):TaskScope=>({actorUserId:request.actorUserId,conversationId:request.conversationId,datasetVersion:deps.datasetVersion});
+ const agentPorts=(state:{request:GraphRequest;shoppingPlan?:ShoppingPlan;prepared:PreparedTurn}):HermesToolPort=>({
+  purchases:()=>deps.hermes!.history(state.request.actorUserId),
+  ...(deps.hermes!.toolPorts?.(state.request.actorUserId)??{}),
+  ...(deps.wishlist?{wishlist:()=>deps.wishlist!(state.request.actorUserId)}:{}),
+  search:async()=>{throw Error("search is executed by the fenced graph node");},
+ });
  const unavailable=(request:GraphRequest,prepared:PreparedTurn,plan:ShoppingPlan,route:BrainRoute,previousTask:AgentTaskState|null)=>({
    researchResult:{conversationId:request.conversationId,messageId:prepared.messageId,clientActionId:request.clientActionId,
      intentKind:route.kind,shoppingPlan:plan,datasetVersion:deps.datasetVersion,
@@ -59,7 +69,8 @@ export function createPersistentResearchGraph(
    .addNode("prepare",async state=>{
      const prepared=await prepareTurn(state.request,deps);
      await verify();
-     return {prepared};
+     return {prepared,agentRead:false,agentAction:null,agentObservations:[],agentStart:Date.now(),
+       agentSearched:false,agentStop:null,agentQuestion:null};
    })
    .addNode("route",async state=>{
      const started=performance.now();
@@ -77,6 +88,14 @@ export function createPersistentResearchGraph(
      const wishlistRequest=deps.wishlist?wishlistIntent(state.request.userMessage,taskForWishlistSelection(activeTask)):null;
      if(wishlistRequest){await verify();return {wishlistRequest,activeTask,priorExplanation:null,
        intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},routeMs:performance.now()-started};}
+     const guard=guardBrainMessage(state.request.userMessage);
+     if(deps.hermes&&readAgentRoute(state.request.userMessage)&&guard?.kind!=="UNCERTAIN"){
+       const available=deps.hermes.toolPorts?.(state.request.actorUserId);
+       if(available&&(available.cart||available.orders)){
+         await verify();return {agentRead:true,activeTask,priorExplanation:null,wishlistRequest:null,
+           intentRoute:{kind:"CS_REQUEST" as const,search:false},routeMs:performance.now()-started};
+       }
+     }
      const answer=deps.clarifyBeforeSearch&&interviewAnswer(state.request.userMessage,previous);
      const follow=previous&&['다른 상품 보기','다른 제품 보기','조건 바꾸기'].includes(state.request.userMessage.trim());
      const route=guardBrainMessage(state.request.userMessage)??(answer||follow?{kind:"SHOPPING_FOLLOWUP" as const,search:true}:await (deps.route?.(state.request.userMessage,state.researchResult?.shoppingPlan)??{kind:"SHOPPING_SEARCH" as const,search:true}));
@@ -116,6 +135,100 @@ export function createPersistentResearchGraph(
        trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,
          responseMs:performance.now()-started,totalMs:performance.now()-state.prepared.startedAt}};
      await verify();return {researchResult,evidence:[]};
+   })
+   .addNode("agent_decide",async state=>{
+     if(!deps.hermes)throw Error("Hermes provider unavailable");
+     // LLM reads only bounded, server-produced observations. Never a model-owned user ID.
+     const decision=await decideHermesAction({
+       provider:deps.hermes.provider,message:state.request.userMessage,
+       plan:state.intentRoute.search?state.shoppingPlan:undefined,
+       memories:state.prepared.memories,task:state.activeTask,
+       observations:state.agentObservations??[],tools:agentPorts(state),
+       offerSearch:state.intentRoute.search,startedAt:state.agentStart,
+     });
+     await verify();
+     return decision.kind==="CALL"?{agentAction:decision.action,agentStop:null,agentQuestion:null}:
+       {agentAction:null,agentStop:decision.reason,agentQuestion:decision.question??null};
+   })
+   .addNode("agent_execute",async state=>{
+     const action=state.agentAction;
+     if(!action)throw Error("missing agent action");
+     const observations=state.agentObservations??[];
+     if(action.name==="search_products"){
+       if(!state.intentRoute.search||!state.shoppingPlan)throw Error("unplanned search denied");
+       let plan=state.shoppingPlan;
+       const history=observations.find(o=>o.tool==="get_purchase_history"&&o.ok);
+       const purchases=(history?.data as {purchases?:import("./purchase-history.ts").PurchaseSnapshot[]})?.purchases??[];
+       const prior=purchases[0];
+       const unspecified=!plan.category&&/^(전에|이전에|지난번|그|구매|산 것)/.test(plan.query);
+       const matched=prior&&plan.query.replace(/\\s/g,"").length>=2&&
+         prior.productName.replace(/\\s/g,"").includes(plan.query.replace(/\\s/g,""));
+       if(prior&&(unspecified||matched))plan={...plan,...(unspecified?{query:prior.productName}:{}),
+         category:prior.category,...(plan.category!==prior.category?{attributePreferences:[]}:{})};
+       try{
+         const fetched=await retrieveTurn(state.request,state.prepared,plan,deps);
+         // Past-purchase comparisons must use the actor's observed history, never imagined purchases.
+         if(/전에|이전에|지난번|구매했던|산 것/.test(state.request.userMessage)&&
+           /저렴|더 싸|보다 싸|가격.*낮|리뷰.*많|후기.*많|리뷰 수|후기 수/.test(state.request.userMessage)){
+           const cheaper=/저렴|더 싸|보다 싸|가격.*낮/.test(state.request.userMessage);
+           const review=/리뷰.*많|후기.*많|리뷰 수|후기 수/.test(state.request.userMessage);
+           const previousCount=prior&&review?await deps.hermes!.reviewCount(prior.productId):null;
+           const selected=fetched.result.ranking.ranked.filter(row=>{
+             const c=row.candidate;
+             return !!prior&&c.productId!==prior.productId&&
+               (!cheaper||(c.unitPriceWon!==null&&c.unitPriceWon<prior.unitPriceWon))&&
+               (!review||(previousCount!==null&&c.wholeReviewCountVerified&&
+                 c.wholeReviewCount!==null&&c.wholeReviewCount>previousCount));
+           });
+           fetched.result.ranking={...fetched.result.ranking,ranked:selected,referenceOnly:[]};
+         }
+         await verify();
+         const observation:AgentObservation={tool:"search_products",ok:true,data:{
+           validated_candidates:fetched.result.ranking.ranked.slice(0,3).map(x=>({
+             productId:x.candidate.productId,variantId:x.candidate.variantId,
+             totalPriceWon:(x.candidate.unitPriceWon??0)+(x.candidate.shippingFeeWon??0),
+             reviewCount:x.candidate.wholeReviewCountVerified?x.candidate.wholeReviewCount:null
+           }))
+         }};
+         return {shoppingPlan:plan,researchResult:{...fetched.result,intentKind:state.intentRoute.kind},
+           evidence:fetched.evidence,agentSearched:true,agentObservations:[...observations,observation],agentAction:null};
+       }catch(error){
+         if(!(error instanceof RetrievalUnavailableError))throw error;
+         await verify();return {...unavailable(state.request,state.prepared,plan,state.intentRoute,state.activeTask),
+           agentSearched:false,agentStop:"RETRIEVAL_UNAVAILABLE",agentAction:null,
+           agentObservations:[...observations,{tool:"search_products",ok:false,data:{unavailable:true}}]};
+       }
+     }
+     const observation=await performHermesRead(action,agentPorts(state));
+     await verify();return {agentObservations:[...observations,observation],agentAction:null};
+   })
+   .addNode("agent_finish",async state=>{
+     const start=performance.now();
+     const observations=state.agentObservations??[];
+     const lastOrder=observations.some(o=>o.tool==="get_orders"||o.tool==="get_order"||o.tool==="get_shipping_status");
+     const lastCart=observations.some(o=>o.tool==="get_cart");
+     const lastWish=observations.some(o=>o.tool==="get_wishlist");
+     const taskKind=lastOrder?"ORDER":lastCart?"CART":lastWish?"WISHLIST":
+       state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY";
+     const ids=lastWish?(observations.find(o=>o.tool==="get_wishlist"&&o.ok)?.data as
+       {saved_products?:Array<{productId:string}>})?.saved_products?.map(x=>x.productId)??[]:[];
+     const text=state.agentStop==="RETRIEVAL_UNAVAILABLE"?
+       "상품 검색 연결에 문제가 생겼어요. 확인되지 않은 상품은 추천하지 않을게요.":
+       summarizeAgentObservations(observations,state.agentQuestion??undefined);
+     const result:ResearchResult={
+       conversationId:state.request.conversationId,messageId:state.prepared.messageId,
+       clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,
+       ...(state.intentRoute.search&&state.shoppingPlan?{shoppingPlan:state.shoppingPlan}:{}),
+       ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},datasetVersion:deps.datasetVersion,
+       taskState:nextTask(taskScope(state.request),taskKind,state.activeTask,{
+         phase:state.agentStop==="RETRIEVAL_UNAVAILABLE"?"UNAVAILABLE":"ACTIVE",displayedProductIds:ids,
+       }),
+       explanation:{kind:"CONVERSATION",items:[],limitations:[],text},
+       trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,
+         hermesToolCalls:observations.length,responseMs:performance.now()-start,
+         totalMs:performance.now()-state.prepared.startedAt}
+     };
+     await verify();return {researchResult:result,evidence:[]};
    })
    .addNode("converse",async state=>{
      const previous=(resetTaskRequested(state.request.userMessage)||state.intentRoute.kind==="CS_REQUEST")?undefined:state.researchResult?.shoppingPlan;
@@ -237,11 +350,17 @@ export function createPersistentResearchGraph(
    })
    .addEdge(START,"prepare")
    .addEdge("prepare","route")
-   .addConditionalEdges("route",state=>state.priorExplanation?"explain_previous":state.wishlistRequest?"wishlist":state.intentRoute.search?"plan":"converse",["explain_previous","wishlist","plan","converse"])
+   .addConditionalEdges("route",state=>state.priorExplanation?"explain_previous":state.wishlistRequest?"wishlist":state.agentRead?"agent_decide":state.intentRoute.search?"plan":"converse",["explain_previous","wishlist","agent_decide","plan","converse"])
    .addEdge("explain_previous",END)
    .addEdge("wishlist",END)
    .addEdge("converse",END)
-   .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes&&(/전에|이전에|구매|주문|후기|리뷰|비교/.test(state.request.userMessage))?"deep":"retrieve",["clarify","deep","retrieve"])
+   .addEdge("agent_finish",END)
+   .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes?"agent_decide":"retrieve",["clarify","agent_decide","retrieve"])
+   .addConditionalEdges("agent_decide",state=>state.agentAction?"agent_execute":
+     state.agentSearched?"respond":state.agentStop==="MODEL_UNAVAILABLE"&&state.intentRoute.search?"retrieve":"agent_finish",
+     ["agent_execute","respond","retrieve","agent_finish"])
+   .addConditionalEdges("agent_execute",state=>state.agentStop==="RETRIEVAL_UNAVAILABLE"?"agent_finish":"agent_decide",
+     ["agent_finish","agent_decide"])
    .addEdge("clarify",END)
    .addConditionalEdges("retrieve",state=>state.researchResult.explanation?.failure?.code==='RETRIEVAL_UNAVAILABLE'?END:'respond',[END,'respond'])
    .addConditionalEdges("deep",state=>state.researchResult.explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE"?END:"respond",[END,"respond"])
