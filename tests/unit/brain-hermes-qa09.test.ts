@@ -217,3 +217,29 @@ test("QA09 a quoted claim or mere attribute mention is not counted as a firsthan
   assert.equal(positiveForAspect(note,"촉촉"),false,note);
  }
 });
+
+test("QA09 product-wide reviews and option-specific reviews stay separated; no mixed variant count",()=>{
+ const a=candidate("a",16000);
+ const v1=candidate("moist",26000),v2={...candidate("moist",25000),variantId:"v-moist-other"};
+ const rows=rankProducts([a,v1,v2],[],plan(),[]);
+ const all=[
+  evidence("a1","a","촉촉해요."),
+  evidence("m1","moist","촉촉해요.","v-moist"),
+  evidence("m2","moist","촉촉해요.","v-moist-other"),
+  evidence("m3","moist","촉촉해서 좋아요.","v-moist-other")
+ ];
+ const sorted=sortByVerifiedPositiveReviews(rows,all,"촉촉");
+ assert.equal(sorted.status,"VERIFIED_SAMPLE_ORDER");
+ assert.equal(sorted.counts.get("moist"),2,"never combine m1 and m2/m3 into three");
+ assert.equal(sorted.ranking.ranked.filter(x=>x.candidate.productId==="moist").length,1);
+ assert.equal(sorted.ranking.ranked[0].candidate.variantId,"v-moist-other");
+});
+test("QA09 Commerce-unverified candidates are never counted as a verified user-requested review rank",()=>{
+ const all=[candidate("verified",18000),{...candidate("unverified",20000),commerceVerified:undefined}];
+ const ranked=rankProducts(all,[],plan(),[]);
+ const source=[evidence("v","verified","촉촉해요."),evidence("u","unverified","촉촉해요.")];
+ const sorted=sortByVerifiedPositiveReviews(ranked,source,"촉촉");
+ assert.equal(sorted.status,"INSUFFICIENT");
+ assert.equal(sorted.ranking.ranked.length,0);
+ assert.ok(sorted.ranking.referenceOnly.some(x=>x.candidate.productId==="unverified"));
+});
