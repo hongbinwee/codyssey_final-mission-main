@@ -117,6 +117,8 @@ export function readAgentRoute(message:string):boolean{
  const m=message.trim();
  // Writes and sensitive payment changes remain on the existing guarded CS/UI path.
  if(/취소|환불|반품|교환|결제|삭제|수정|해제|담아|빼줘|장바구니에\s*넣/.test(m))return false;
+ // Requests that compare or recommend products still need the planned agent path.
+ if(/추천|비교|대체|다른\\s*(?:상품|제품)|상품.*찾|제품.*찾/.test(m))return false;
  // Delivery requirements of new products are not tracking an existing order.
  if(/배송비|무료배송|배송\s*(?:빠른|좋은|가능한|조건|상품|제품|추천)|(?:상품|제품).{0,18}(?:추천|찾아|비교)/.test(m)&&
    !/(?:내|제)\s*주문|주문\s*(?:조회|상태|어디)|택배\s*(?:조회|추적|상태)/.test(m))return false;
