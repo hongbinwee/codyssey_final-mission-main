@@ -161,8 +161,8 @@ export function createPersistentResearchGraph(
        const purchases=(history?.data as {purchases?:import("./purchase-history.ts").PurchaseSnapshot[]})?.purchases??[];
        const prior=purchases[0];
        const unspecified=!plan.category&&/^(전에|이전에|지난번|그|구매|산 것)/.test(plan.query);
-       const matched=prior&&plan.query.replace(/\\s/g,"").length>=2&&
-         prior.productName.replace(/\\s/g,"").includes(plan.query.replace(/\\s/g,""));
+       const matched=prior&&plan.query.replace(/\s/g,"").length>=2&&
+         prior.productName.replace(/\s/g,"").includes(plan.query.replace(/\s/g,""));
        if(prior&&(unspecified||matched))plan={...plan,...(unspecified?{query:prior.productName}:{}),
          category:prior.category,...(plan.category!==prior.category?{attributePreferences:[]}:{})};
        try{
