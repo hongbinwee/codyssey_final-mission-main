@@ -19,6 +19,8 @@ type BrainReply={
  shopping_plan?:{query:string;maxTotalWon:number|null;requiredConditions:string[];revision:number;attributePreferences?:string[]}|null;
  agent_ui?:WishlistView|null;
  shopping_handoffs?:ShoppingHandoff[];
+ review_summary?:{productId:string;name:string;sampled:number;totalMatching:number;
+  citations:{sourceId:string;quote:string;sourceKind:"REAL"|"SYNTHETIC";sourceVariantId:string|null}[]}|null;
  explanation?:{text:string;kind:string;items:{productId:string;variantId?:string;evidenceIds:string[];reason?:string}[];clarification?:{questions:{key:string;text:string;choices:string[]}[]};limitations:string[];
    failure?:{code:string;httpStatus?:number}}|null;
  ranking:BrainRankingResult;trace:{totalMs:number;graphWallMs?:number};
@@ -249,6 +251,18 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
            :e.reply.explanation.items.length>0?e.reply.explanation.text
              :friendlyFailure(e.reply.explanation.failure.code)+((e.reply.ranking.ranked.length+e.reply.ranking.referenceOnly.length)>0?" 아래 검색 결과는 확인할 수 있어요.":"")
          :e.reply.explanation?.text??"상품 정보를 확인했어요."}/></div></div>
+         {e.reply.review_summary&&<section className="brain-review-summary state-box" aria-label="해당 상품 리뷰 요약">
+          <div className="brain-review-summary-header"><b>{e.reply.review_summary.name}</b>
+            <p className="muted sm">확인한 리뷰 {e.reply.review_summary.sampled}건
+             {e.reply.review_summary.totalMatching>e.reply.review_summary.sampled?" · 일부 리뷰 기준":""}</p>
+          </div>
+          {e.reply.review_summary.citations.length>0&&<details className="brain-review-citations">
+            <summary>확인한 리뷰 근거 보기 ({e.reply.review_summary.citations.length}건)</summary>
+            <ul>{e.reply.review_summary.citations.map((c,index)=><li key={c.sourceId}>
+              <span>“{c.quote}”</span><small>{c.sourceVariantId?"해당 옵션 리뷰":"상품 리뷰"}</small>
+            </li>)}</ul>
+          </details>}
+        </section>}
          {e.reply.agent_ui?.kind==="WISHLIST"&&<section className="brain-products" aria-label="내 찜 상품">{e.reply.agent_ui.items.map((item,index)=><article className="brain-product-card" key={item.productId}><div className="brain-product-info"><b>{index+1}. {item.name}</b><p className="muted sm">{!item.active?"판매 중단":money(item.minPriceWon)?`옵션 최저가 ${fmtWon(item.minPriceWon)} · 배송비·재고는 상세에서 확인`:"판매 가능한 옵션 확인 필요"}</p><button className="link" disabled={!item.active||!money(item.minPriceWon)} onClick={()=>onOpenProduct(item.productId)}>{e.reply?.agent_ui?.selectedProductId===item.productId?"선택한 상품 상세 보기":"상품 상세 보기"}</button></div></article>)}</section>}
          {!!e.reply.shopping_handoffs?.length&&<section className="brain-recovery-actions" aria-label="쇼핑 화면으로 이동">
            {e.reply.shopping_handoffs.filter(action=>
