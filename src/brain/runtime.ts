@@ -127,7 +127,7 @@ export async function readBrainHistory(db:SchemaProbe,actorUserId:string,convers
    if(!result||typeof result!=="object"||result.conversationId!==id||result.messageId!==row.message_id||
      result.clientActionId!==row.client_action_id||typeof row.content!=="string"||
      !result.ranking||!(["ranked","referenceOnly","rejected"] as const).every(key=>Array.isArray(result.ranking[key]))||
-     (result.shoppingPlan?typeof result.shoppingPlan.query!=="string":result.explanation?.kind!=="CONVERSATION")||
+     (result.shoppingPlan?typeof result.shoppingPlan.query!=="string":!["CONVERSATION","REVIEW_SUMMARY","CLARIFICATION"].includes(result.explanation?.kind??""))||
      !result.explanation||typeof result.explanation.text!=="string"||typeof result.explanation.kind!=="string")
      throw new Error("invalid canonical Brain receipt");
    result=currentDatasetResult(result,datasetVersion);
@@ -135,6 +135,7 @@ export async function readBrainHistory(db:SchemaProbe,actorUserId:string,convers
      ranking:result.ranking,shopping_plan:result.shoppingPlan??null,intent_kind:result.intentKind,
      ...(result.agentUi?{agent_ui:result.agentUi}:{}),
      ...(result.shoppingHandoffs?.length?{shopping_handoffs:result.shoppingHandoffs}:{}),
+     ...(result.reviewSummary?{review_summary:result.reviewSummary}:{}),
      explanation:result.explanation,trace:result.trace??{totalMs:0}}}];
  });
  return {conversationId:id,entries};
