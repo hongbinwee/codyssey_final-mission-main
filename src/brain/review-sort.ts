@@ -30,7 +30,7 @@ export function positiveForAspect(text:string,aspect:string):boolean{
      /(?:하지\s*않|하지\s*못|하지\s*않아|하지\s*않았|하지\s*않음|하지\s*않는|하진\s*않|하지\s*않더|하지\s*못해|지\s*않|지\s*못|아니|않아|별로|부족|없어|실망|아쉽|불만|과장|그렇지\s*않)/.test(around))continue;
   // Presence alone is insufficient: require an affirmative adjectival ending or explicit approval.
   const suffix=clause.slice(at+aspect.length,at+aspect.length+24);
-  if(/^(?:해요|해서|했고|하고|한\s*편|합니다|함이\s*(?:좋|느껴|만족)|하네요|해|하다(?=$|\\s|[,;])|하더라|했어요|한데|한\s*것|하게|하게\s*느껴|한\s*느낌)/.test(suffix)||
+  if(/^(?:해요|해서|했고|하고|한\s*편|합니다|함이\s*(?:좋|느껴|만족)|하네요|해|하다(?=$|\s|[,;])|하더라|했어요|한데|한\s*것|하게|하게\s*느껴|한\s*느낌)/.test(suffix)||
      /^(?:함|한|함이).{0,12}(?:좋|만족|추천)/.test(suffix))return true;
  }
  return false;
@@ -77,7 +77,7 @@ export function sortByVerifiedPositiveReviews(
    for(const [reviewId,group] of reviews){
     unique.add(productId+":"+reviewId);
     const positives=group.filter(e=>positiveForAspect(e.text!,aspect));
-    const negative=group.some(e=>/(?:하지\\s*않|지\\s*않|안\\s*|별로|아쉽|불만|실망|부족)/.test(e.text!));
+    const negative=group.some(e=>/(?:하지\s*않|지\s*않|안\s*|별로|아쉽|불만|실망|부족)/.test(e.text!));
     if(positives.length&&(!negative||group.every(e=>positiveForAspect(e.text!,aspect))))count++;
    }
    if(count>bestCount){bestRow=row;bestCount=count;}
