@@ -34,6 +34,8 @@ export type ReviewSummaryOutcome=
  |{kind:"SUMMARY";productId:string;productName:string;text:string;
    sampled:number;totalMatching:number;citations:{sourceId:string;quote:string;sourceKind:"REAL"|"SYNTHETIC";sourceVariantId:string|null}[]};
 const idOk=(x:unknown)=>typeof x==="string"&&x.length>0&&x.length<=128;
+/** Keep externally supplied instructions, links, personal contact and secrets out of model evidence and user citations. */
+const unsafeReview=(body:string)=>/https?:\\/\\/|(?:ignore|disregard).{0,30}(?:instruction|rule|prompt)|(?:system|developer)\\s*prompt|(?:시스템|개발자)\\s*프롬프트|(?:이전|모든)\\s*(?:지침|명령|규칙)\\s*무시|(?:api|인증)\\s*키|비밀번호|(?:주문|상품)\\s*취소\\s*(?:해|하라)|cancel.{0,20}order|(?:\\d{3}[- ]?\\d{3,4}[- ]?\\d{4})/i.test(body);
 const safeName=(x:string)=>x.replace(/[\r\n<>]/g," ").slice(0,100);
 /** This branch never requires stock, an active variant, a user budget, or RAG results. */
 export async function summarizeNamedProductReviews(input:{
@@ -72,7 +74,7 @@ export async function summarizeNamedProductReviews(input:{
  const byId=new Map<string,ReviewsResult["reviews"][number]>();
  for(const rev of result.reviews){
   if(!idOk(rev.id)||rev.product_id!==chosen||rev.variant_id!==null&&!allowedOptions.has(rev.variant_id)||
-     !["REAL","SYNTHETIC"].includes(rev.source_kind)||!rev.source_ref||typeof rev.body!=="string"||
+     !["REAL","SYNTHETIC"].includes(rev.source_kind)||!rev.source_ref||typeof rev.body!=="string"||unsafeReview(rev.body)||
      !Number.isFinite(rev.rating)||rev.rating<1||rev.rating>5)continue;
   const prior=byId.get(rev.id);
   if(prior&&(prior.body!==rev.body||prior.variant_id!==rev.variant_id||prior.source_kind!==rev.source_kind))
