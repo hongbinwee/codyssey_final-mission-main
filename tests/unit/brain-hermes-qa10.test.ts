@@ -5,6 +5,7 @@ import {reviewSummaryIntent,summarizeNamedProductReviews,type VerifiedReviewSumm
 import {routeBrainMessage} from "../../src/brain/routing.ts";
 import {createPersistentResearchGraph} from "../../src/brain/graph.ts";
 import type {ResearchDeps} from "../../src/brain/read-flow.ts";
+import {currentDatasetResult} from "../../src/brain/dataset-state.ts";
 import type {ProductDetail,ReviewsResult} from "../../src/contracts.ts";
 
 const detail=(id="p1",active=true,variants=true):ProductDetail=>({
@@ -151,4 +152,46 @@ test("QA10 dedicated LangGraph summary bypasses intent extraction, RAG and budge
  assert.equal(follow.reviewSummary?.productId,"p1");
  assert.equal(follow.ranking.ranked.length,0);
  assert.equal(intent,0);assert.equal(retrieval,0);assert.equal(reads,2);assert.ok(actorChecks>=2);
+});
+
+test("QA10 real LangGraph previous second recommendation is revalidated by Commerce before review read",async()=>{
+ let productReads=0,searches=0;
+ const source=fixture({findProducts:async()=>{throw Error("ordinal must not name-search");},
+  product:async(id)=>{productReads++;return detail(id);},
+  reviews:async id=>({...reports,reviews:[review("p2-r",4,"사용감이 부드러워요.",id)]})
+ });
+ const cand=(id:string,price:number)=>({productId:id,variantId:"v1",productName:"세럼 "+id,
+  unitPriceWon:price,shippingFeeWon:3000,rating:null,ratingScale:null,
+  wholeReviewCount:null,wholeReviewCountVerified:false,conditions:{},facets:{},
+  sourceKind:"REAL",commerceVerified:true,datasetVersion:"current"});
+ const deps={datasetVersion:"current",
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},
+  intent:{extract:async()=>({query:"세럼",queryMode:"SET",budgetMode:"CLEAR",requirementsMode:"REPLACE",
+   context:{maxTotalWon:null,requiredConditions:[],currentPreferences:{}}})},
+  retriever:{search:async()=>{searches++;return {candidates:[cand("p1",15000),cand("p2",25000)],evidence:[]};}},
+  reviewSummary:source
+ } as unknown as ResearchDeps;
+ const graph=createPersistentResearchGraph(deps,new MemorySaver() as never),conversationId=crypto.randomUUID();
+ const run=(userMessage:string)=>graph.invoke({actorUserId:"actor",conversationId,
+  requestId:crypto.randomUUID(),clientActionId:crypto.randomUUID(),userMessage});
+ const found=await run("세럼 추천해줘");
+ assert.deepEqual(found.shoppingPlan?.lastDisplayedProductIds,["p1","p2"]);
+ const detailResult=await run("2번 상품 리뷰 자세히 알려줘");
+ assert.equal(detailResult.intentKind,"REVIEW_SUMMARY");
+ assert.equal(detailResult.reviewSummary?.productId,"p2");
+ assert.equal(detailResult.ranking.ranked.length,0);
+ assert.equal(productReads,1);assert.equal(searches,1);
+});
+test("QA10 old dataset review evidence and selected IDs are never retained for an active catalogue",()=>{
+ const old={conversationId:"c",messageId:"m",datasetVersion:"old",clientActionId:"a",ranking:{
+  ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
+  reviewSummary:{productId:"old-product",name:"old",sampled:1,totalMatching:1,citations:[]},
+  explanation:{kind:"REVIEW_SUMMARY",text:"old review",items:[],limitations:[]},
+  trace:{memoryMs:0,intentMs:0,retrievalMs:0,rankMs:0,totalMs:1}
+ } as never;
+ const after=currentDatasetResult(old,"current");
+ assert.equal(after.reviewSummary,undefined);
+ assert.equal(after.taskState,undefined);
+ assert.equal(after.explanation?.kind,"CONVERSATION");
 });
