@@ -88,11 +88,11 @@ export function AgentPanel({
   setMessages: (m: AgentReply[]) => void;
   pageContext: { screen?: string; product_id?: string; order_id?: string };
   onOpenProduct: (id: string, variantId?: string) => void;
-  onOpenCart: () => void;
-  onOpenCheckout: () => void;
-  onOpenOrders: () => void;
-  onOpenOrder: (orderId: string) => void;
-  checkoutEnabled: boolean;
+  onOpenCart?: () => void;
+  onOpenCheckout?: () => void;
+  onOpenOrders?: () => void;
+  onOpenOrder?: (orderId: string) => void;
+  checkoutEnabled?: boolean;
   onCartChanged: () => void;
   onClose: () => void;
 }) {
@@ -167,10 +167,10 @@ export function AgentPanel({
     }
   }
 
-  if(useBrainPreview&&brain==="shopping")
+  if(useBrainPreview&&brain==="shopping"&&onOpenCart&&onOpenCheckout&&onOpenOrders&&onOpenOrder)
     return <BrainPreview onOpenProduct={onOpenProduct} onClose={onClose}
       onOpenCart={onOpenCart} onOpenCheckout={onOpenCheckout} onOpenOrders={onOpenOrders}
-      onOpenOrder={onOpenOrder} checkoutEnabled={checkoutEnabled}/>;
+      onOpenOrder={onOpenOrder} checkoutEnabled={checkoutEnabled===true}/>;
 
   return (
     <aside className="agent-panel">
