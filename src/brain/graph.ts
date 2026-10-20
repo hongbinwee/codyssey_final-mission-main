@@ -348,7 +348,8 @@ export function createPersistentResearchGraph(
        const selected=researchResult.ranking.ranked.filter(row=>row.candidate.commerceVerified===true&&(researchResult.explanation.failure||researchResult.explanation.items.some(item=>item.productId===row.candidate.productId&&item.variantId===row.candidate.variantId)));
        researchResult.shoppingPlan={...researchResult.shoppingPlan,lastDisplayedProductIds:[...new Set([...selected,...researchResult.ranking.referenceOnly].map(row=>row.candidate.productId))].slice(0,3)};
      }
-     researchResult.shoppingHandoffs=validatedShoppingHandoffs({ranking:researchResult.ranking});
+     researchResult.shoppingHandoffs=validatedShoppingHandoffs({ranking:researchResult.ranking,
+       displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
      researchResult.taskState=nextTask(taskScope(state.request),state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY",state.activeTask,
        {displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
      researchResult.trace={...researchResult.trace,hermesToolCalls:(state.agentObservations??[]).length,routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
