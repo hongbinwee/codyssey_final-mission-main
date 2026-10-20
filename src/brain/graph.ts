@@ -343,7 +343,7 @@ export function createPersistentResearchGraph(
      }
      researchResult.taskState=nextTask(taskScope(state.request),state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY",state.activeTask,
        {displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
-     researchResult.trace={...researchResult.trace,routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
+     researchResult.trace={...researchResult.trace,hermesToolCalls:(state.agentObservations??[]).length,routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
        totalMs:performance.now()-state.prepared.startedAt};
      await verify();
      return {researchResult};
