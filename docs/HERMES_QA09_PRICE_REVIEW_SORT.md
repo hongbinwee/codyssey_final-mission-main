@@ -8,7 +8,7 @@
 ## 실제 변경
 1. `price-band.ts` — 단일 `2만원대`(20,000~29,999원) 및 기존 10·20만원대 처리 유지, `1~3만원대`(10,000~39,999원), `1만~3만원대` 명시 범위 추가. 역전된 범위·이하/이상 혼합은 자동 단정하지 않는다.
 2. `shopping-plan.ts`, `read-flow.ts`, `contracts.ts` — `reviewSortAspect`를 Task-local ShoppingPlan에 보존한다. 새 상품 종류와 명시적인 다른 정렬 요청에는 지우고, 그 외 후속 조건 변경에는 유지한다. RAG 요청에도 범위 최소값·명시적 리뷰 기준 정보를 전달한다. 필터링은 기존 `rankProducts`의 검증된 Commerce 가격과 배송비 **합계**를 사용하고 미확인 배송비를 0원으로 취급하지 않는다.
-3. `rag-adapter.ts` — 명시적 리뷰 기준 또는 최솟값이 있는 가격 범위 요청만 RAG `top_k=10`을 사용하며 v4 검증 파서에도 최대 10개를 허용. 기본 검색은 여전히 최대 5개. RAG의 원본 리뷰 ID가 여러 청크로 반복되면 동일 상품·옵션·출처인 경우 1회만 Commerce 검증, 상품·옵션/출처가 충돌하면 거부. Commerce 신뢰 경계·데이터셋 버전 검증·최종 예산 적합성 유지. 기존 DGX `profile`/`filters.in_stock` 422 원인 조사나 변경을 하지 않았다.
+3. `rag-adapter.ts` — 명시적 리뷰 기준 또는 최솟값이 있는 가격 범위 요청만 RAG `top_k=10`을 사용하며 v4 검증 파서에도 최대 10개를 허용. 기본 검색은 여전히 최대 5개. RAG의 원본 리뷰 ID가 여러 청크로 반복되면 동일 상품·옵션·출처인 경우 1회만 Commerce 검증, 상품·옵션/출처가 충돌하면 거부. 제품에 여러 옵션이 있으면 옵션별 긍정 리뷰를 혼합하지 않고 가장 많은 검증 근거가 연결된 옵션 하나만 선택한다. Commerce 검증되지 않은 후보는 순위에서 제외한다. Commerce 신뢰 경계·데이터셋 버전 검증·최종 예산 적합성 유지. 기존 DGX `profile`/`filters.in_stock` 422 원인 조사나 변경을 하지 않았다.
 4. `review-sort.ts` — 사용자 명시 `[특성]하다는 긍정 리뷰가 많은 순` 의도를 제한적으로 파싱. Commerce와 연결된 검증된 리뷰 ID/상품 ID/옵션/데이터셋 버전/출처만 사용하고 원본 리뷰 ID 기준 1건으로 센다. 문장 내 직접 긍정적 형용사 표현만 보수적으로 포함하고 부정·질문·타인 인용·무관 언급은 제외. **문자열 등장 횟수, 전체 상품 리뷰 수, 평균 평점을 긍정 평가 건수로 대신하지 않는다.**
 5. `read-flow.ts` — 기존 기본 `rankProducts`는 계속 호출하여 적합성 필터를 적용한다. 그 후 명시적 리뷰 정렬이면 부분 리뷰 증거 정렬만 적용하고 `curateRecommendations`의 Cart/Wishlist/가격 재정렬을 건너뛴다. 긍정 표현이 확인된 상품이 2개 미만이면 `ranked=[]` 및 `referenceOnly`로 전환하여 검증되지 않은 순위를 절대 표시하지 않는다.
 6. `grounded-response.ts`, `graph.ts` — 배송비 포함 가격 범위를 안내하며, 정렬의 근거는 **확인된 일부 원본 리뷰의 표현**에 한정한다고 명시한다. 전체 리뷰 집계라고 과장하지 않는다. 명시 정렬에는 검색·검증된 특성의 긍정 근거를 우선 인용하고, 리뷰를 충분히 확인하지 못하면 순위를 만들지 않는다. 우회적인 자연어 모델의 무근거 순위 설명 대신 서버가 검증한 설명을 쓴다.
@@ -17,14 +17,14 @@
 ## 확인한 QA 회귀
 - 단일·복합 만원대, 배송비 포함 범위 31,000원 포함/42,000원 제외, 배송비 미확인 탈락
 - B 상품의 **원본 긍정 리뷰 건수**가 A보다 많으면 B를 우선, 장바구니·찜 선호로 재정렬하지 않음
-- 동일 Commerce 리뷰가 여러 RAG 청크에서 반복되어도 1회, 다른 상품/옵션 ID 충돌 거부
+- 동일 Commerce 리뷰가 여러 RAG 청크에서 반복되어도 1회, 다른 상품/옵션 ID 충돌 거부. 동일 상품의 서로 다른 옵션 후기 혼합 금지 및 Commerce 미검증 후보 순위 제외
 - `촉촉하지 않아요`, 인용·질문·단순 표현·타인 평가를 긍정으로 세지 않음
 - 근거 부족 시 순위/검증 주장 생략, 단순 일반 추천의 기존 개인화 우선순위 보존
 - LangGraph 실제 MemorySaver 테스트로 이전 범위/정렬 유지와 `가격순` 변경 검증
 - React/CSS 코드의 가격 필드·검증된 합계 연산·레이아웃 연결 확인(실제 브라우저 시각 검증은 별도)
 - RAG 검색 최대 10개 확장 및 기본 5개 불변, 청크 검증 중복 제거
 
-GitHub Actions [Run 39418830887](https://github.com/hongbinwee/codyssey_final-mission-main/actions/runs/39418830887) — `npm ci`, `npm run check`, `npm run build` PASS, H1–H6 + QA09 집중 회귀 **130/130 PASS**. 전체 `npm run test:unit` 참고 진단: **1,047개 중 1,003 PASS / 43 FAIL / 1 SKIP**. 실패한 전체 단위 검증은 `continue-on-error: true`이며 **전체 PASS가 아님**.
+GitHub Actions [Run 39419401610](https://github.com/hongbinwee/codyssey_final-mission-main/actions/runs/39419401610) — `npm ci`, `npm run check`, `npm run build` PASS, H1–H6 + QA09 집중 회귀 **132/132 PASS**. 전체 `npm run test:unit` 참고 진단: **1,049개 중 1,005 PASS / 43 FAIL / 1 SKIP**. 실패한 전체 단위 검증은 `continue-on-error: true`이며 **전체 PASS가 아님**.
 
 ## 남은 실환경 검증 / Codex 인수
 기존 H6 인스턴스는 소스 커밋이 고정된 detached HEAD이며 GitHub에 새 커밋을 Push하는 것만으로 자동 갱신되지 않는다. **기존 Worktree/DB/세션/포트/Tunnel을 승인 없이 갱신하거나 재시작하지 말 것**.
