@@ -207,7 +207,9 @@ async function retrieveV4(
     throw new Error("invalid RAG v4 request");
   const preferences=input.preferences??[];
   if(!Array.isArray(preferences)||preferences.length>20||!preferences.every(p=>text(p,128))||
-    input.maxTotalWon!==null&&(!Number.isSafeInteger(input.maxTotalWon)||input.maxTotalWon<0))throw Error('invalid RAG search context');
+    input.maxTotalWon!==null&&(!Number.isSafeInteger(input.maxTotalWon)||input.maxTotalWon<0)||
+     input.minTotalWon!==undefined&&(!Number.isSafeInteger(input.minTotalWon)||input.minTotalWon<0||
+       input.maxTotalWon!==null&&input.minTotalWon>input.maxTotalWon))throw Error('invalid RAG search context');
   const categories=connection.categories;
   if(categories&&(!categories.length||categories.length>100||!categories.every(c=>text(c,80))))throw Error("invalid RAG categories");
   const category=categories?(input.category??connection.category??""):(connection.category??"beauty");
@@ -222,13 +224,13 @@ async function retrieveV4(
       query:connection.mode==='local'?[input.query,...preferences].join(' ').slice(0,250):input.query,
       ...(category||connection.mode==='local'?{category}:{}),
       filters:connection.mode==='remote'?{in_stock:true,...(input.maxTotalWon!==null?{price_max:input.maxTotalWon,currency:'KRW'}:{})}:{},
-      required_conditions:input.requiredConditions,preferences:connection.mode==='local'?[]:preferences,top_k:input.reviewSortAspect?10:5})
+      required_conditions:input.requiredConditions,preferences:connection.mode==='local'?[]:preferences,top_k:input.reviewSortAspect||input.minTotalWon!==undefined?10:5})
   });
   const rawResponse=await boundedJson(response);
   const envelope=obj(rawResponse);
   if(connection.profile&&envelope?.profile_name!==connection.profile)throw Error('RAG profile mismatch');
   if(envelope?.status==='error'||envelope?.error_code)throw Error('RAG search failed');
-  const parsed=parseV4Response(rawResponse,connection.datasetVersion!,input.reviewSortAspect?10:5);
+  const parsed=parseV4Response(rawResponse,connection.datasetVersion!,input.reviewSortAspect||input.minTotalWon!==undefined?10:5);
   if(envelope?.status==='low_relevance'||envelope?.status==='no_results')return {candidates:[],evidence:[]};
   const candidates:ProductCandidate[]=[],evidence:EvidenceRecord[]=[];
   for(const item of parsed.items){
