@@ -114,7 +114,7 @@ export async function summarizeNamedProductReviews(input:{
  const headings:{label:string;kind:"PRO"|"CON"|"MIXED"}[]=[
   {label:"좋았다는 의견",kind:"PRO"},{label:"아쉬웠다는 의견",kind:"CON"},
   {label:"의견이 갈리거나 복합적인 평가",kind:"MIXED"}];
- const citations:ReviewSummaryOutcome extends never?never:Array<{sourceId:string;quote:string;sourceKind:"REAL"|"SYNTHETIC";sourceVariantId:string|null}>=[];
+ const citations:Array<{sourceId:string;quote:string;sourceKind:"REAL"|"SYNTHETIC";sourceVariantId:string|null}>=[];
  const sections:string[]=[];
  for(const h of headings){
   if(r.negativeOnly&&h.kind!=="CON")continue;
