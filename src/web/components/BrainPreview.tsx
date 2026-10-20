@@ -67,7 +67,15 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
        {safeImage(p.productImage)&&<img src={safeImage(p.productImage)} alt={p.productName??"상품"} loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.hidden=true;}}/>}</div>
      <div className="brain-product-info"><div className="brain-product-heading"><div className="brain-product-summary">
        {!reference&&recommendationLabel(recommendationRole)&&<p className="muted sm">{recommendationLabel(recommendationRole)}</p>}<b className="brain-product-name">{p.productName??"상품명 확인 중"}</b>
-       <p className="brain-product-price">{money(p.unitPriceWon)?fmtWon(p.unitPriceWon):"가격 정보 확인 전"}</p></div>
+       <dl className="brain-price-breakdown" aria-label="상품 가격 구성">
+         <div><dt>상품가</dt><dd>{p.commerceVerified===true&&money(p.unitPriceWon)?fmtWon(p.unitPriceWon):"확인 전"}</dd></div>
+         <div><dt>배송비</dt><dd>{p.commerceVerified===true&&money(p.shippingFeeWon)?fmtWon(p.shippingFeeWon):"확인 전"}</dd></div>
+         <div className="brain-price-total"><dt>배송비 포함 합계</dt><dd>{
+          p.commerceVerified===true&&money(p.unitPriceWon)&&money(p.shippingFeeWon)&&
+           Number.isSafeInteger(p.unitPriceWon+p.shippingFeeWon)?
+           fmtWon(p.unitPriceWon+p.shippingFeeWon):"금액 확인 필요"
+         }</dd></div>
+       </dl></div>
        {p.commerceVerified===true&&<button className="link brain-product-open" aria-label="상품 보기" onClick={()=>onOpenProduct(p.productId,p.variantId)}>상품 보기<svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg></button>}
        </div>
        {!!personalizationSignals?.length&&<p className="muted sm">맞춤 근거: {personalizationSignals.map(signal=>signal==="CART"?"장바구니":signal==="WISHLIST"?"찜":"구매 기록").join(" · ")}</p>}
