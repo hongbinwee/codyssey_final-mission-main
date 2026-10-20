@@ -12,6 +12,7 @@ import {resolveShoppingPlan} from "./shopping-plan.ts";
 import {parseKrwTenThousandBand} from "./price-band.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {WishlistItem,WishlistView} from "./wishlist-task.ts";
+import type {ShoppingHandoff} from "./shopping-handoff.ts";
 import type {AgentTaskState} from "./task-state.ts";
 import type {BrainRoute,BrainIntentKind} from "./routing.ts";
 
@@ -24,6 +25,7 @@ export interface ResearchResult {
  conversationId:string;messageId:string;clientActionId?:string;ranking:RankingResult;
  shoppingPlan?:ShoppingPlan;
  agentUi?:WishlistView;
+ shoppingHandoffs?:ShoppingHandoff[];
  taskState?:AgentTaskState;
  explanation?:GroundedExplanation;
  intentKind?:BrainIntentKind;
