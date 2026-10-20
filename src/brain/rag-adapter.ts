@@ -212,7 +212,7 @@ async function retrieveV4(
       query:connection.mode==='local'?[input.query,...preferences].join(' ').slice(0,250):input.query,
       ...(category||connection.mode==='local'?{category}:{}),
       filters:connection.mode==='remote'?{in_stock:true,...(input.maxTotalWon!==null?{price_max:input.maxTotalWon,currency:'KRW'}:{})}:{},
-      required_conditions:input.requiredConditions,preferences:connection.mode==='local'?[]:preferences,top_k:5})
+      required_conditions:input.requiredConditions,preferences:connection.mode==='local'?[]:preferences,top_k:input.reviewSortAspect?10:5})
   });
   const rawResponse=await boundedJson(response);
   const envelope=obj(rawResponse);
