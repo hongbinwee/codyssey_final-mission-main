@@ -67,17 +67,29 @@ export function summarizeHermesEvaluation(rows:readonly HermesEvalCase[]){
 export function evaluateHermesGate(summary:ReturnType<typeof summarizeHermesEvaluation>,options:{
  minExactToolRate:number;maxUnnecessarySearchRate:number;maxP95Ms:number;
  requireLiveModel:boolean;requireConnectedE2e:boolean;
+ minLiveCases?:number;minConnectedCases?:number;
+ minGroundingCases?:number;minIsolationCases?:number;
 }){
  const reasons:string[]=[];
  if(summary.toolSequenceExact.rate<options.minExactToolRate)reasons.push("TOOL_CHOICE_ACCURACY");
  if(summary.unnecessarySearch.rate===null||summary.unnecessarySearch.rate>options.maxUnnecessarySearchRate)reasons.push("UNNECESSARY_SEARCH");
  if(summary.latencyMs.p95===null||summary.latencyMs.p95>options.maxP95Ms)reasons.push("P95_LATENCY");
  if(summary.unauthorizedWrites>0)reasons.push("UNAUTHORIZED_WRITE");
- if(options.requireLiveModel&&!summary.liveModelValidated)reasons.push("LIVE_MODEL_NOT_MEASURED");
- if(options.requireConnectedE2e&&!summary.connectedE2eValidated)reasons.push("CONNECTED_E2E_NOT_MEASURED");
+ const minLive=options.minLiveCases??20,minConnected=options.minConnectedCases??10;
+ const minGrounded=options.minGroundingCases??10,minIsolated=options.minIsolationCases??10;
+ if(options.requireLiveModel){
+  if(!summary.liveModelValidated)reasons.push("LIVE_MODEL_NOT_MEASURED");
+  else if(summary.modes.LIVE_MODEL<minLive)reasons.push("LIVE_MODEL_INSUFFICIENT");
+ }
+ if(options.requireConnectedE2e){
+  if(!summary.connectedE2eValidated)reasons.push("CONNECTED_E2E_NOT_MEASURED");
+  else if(summary.modes.CONNECTED_E2E<minConnected)reasons.push("CONNECTED_E2E_INSUFFICIENT");
+ }
  if(summary.grounding.evaluated===0)reasons.push("GROUNDING_NOT_MEASURED");
  else if(summary.grounding.verified!==summary.grounding.evaluated)reasons.push("GROUNDING_VIOLATION");
+ else if(summary.grounding.evaluated<minGrounded)reasons.push("GROUNDING_INSUFFICIENT");
  if(summary.tenantIsolation.evaluated===0)reasons.push("TENANT_ISOLATION_NOT_MEASURED");
  else if(summary.tenantIsolation.passed!==summary.tenantIsolation.evaluated)reasons.push("TENANT_ISOLATION_VIOLATION");
+ else if(summary.tenantIsolation.evaluated<minIsolated)reasons.push("TENANT_ISOLATION_INSUFFICIENT");
  return {passed:reasons.length===0,reasons};
 }
