@@ -30,9 +30,9 @@ function simpleIntent(message:string,previous?:ShoppingPlan):ShoppingIntent|null
    context:{maxTotalWon:budget,requiredConditions:[],currentPreferences:prefs}};
 }
 export function createFastIntentPort(fallback:IntentPort):IntentPort{
- return {async extract(message,memory,previous){
+ return {async extract(message,memory,previous,context){
    const fast=simpleIntent(message,previous);if(fast)return fast;
-   const intent=await fallback.extract(message,memory,previous);
+   const intent=await fallback.extract(message,memory,previous,context);
    // Model defaults are not the user's stated intent. Confirmed memories are applied separately.
    const current={...intent.context.currentPreferences};
    const price=/가성비|저렴|가격.{0,5}(?:중요|우선|선호)/.test(message)?"value":/성능.{0,5}(?:중요|우선|선호)/.test(message)?"performance":/균형/.test(message)?"balanced":undefined;

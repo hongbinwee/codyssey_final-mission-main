@@ -4,6 +4,7 @@ import {createDecisionsRouter} from "../../src/brain/decisions-route.ts";
 import {routeBrainMessage} from "../../src/brain/routing.ts";
 
 const previous={query:"수분크림",maxTotalWon:50000,requiredConditions:["무향"],currentPreferences:{},revision:3};
+type Previous=typeof previous;
 function answer(kind:string,confidence=0.9,probability=0.96){
   return {answers:[{type:"choice",name:"intent",choice:kind,confidence,
     probabilities:[{value:kind,probability},{value:kind==="UNCERTAIN"?"GREETING":"UNCERTAIN",probability:1-probability}]}]};
@@ -28,6 +29,23 @@ test("Decisions mode sends a real /v1/decisions choice request, using bounded pr
   }});
   assert.deepEqual(await route("그럼 더 저렴한 걸로",previous),{kind:"SHOPPING_FOLLOWUP",search:true});
   assert.equal(called,1);
+});
+test("Decisions receives dialogue context as bounded JSON user data in its existing request",async()=>{
+ let calls=0;
+ const context={recentTurns:[{user:"그럼 이거 리뷰는?",assistant:"직전 상품의 리뷰를 요약할 수 있어요."}],
+  displayedProducts:[{productId:"p-1",variantId:"v-1",name:"수분크림"}],
+  pendingReview:{productId:"p-1",focus:"CONS"},
+  approvedPreferences:[{key:"price_priority",value:"value"}]};
+ const route=createDecisionsRouter({apiKey:"test",fetcher:async(_url,init)=>{
+  calls++;
+  const payload=JSON.parse(JSON.parse(String(init?.body)).input);
+  assert.deepEqual(payload.untrusted_dialogue_context,context);
+  return Response.json(answer("SHOPPING_FOLLOWUP"));
+ }});
+ const result=await (route as unknown as (message:string,previous:Previous,context:unknown)=>Promise<unknown>)(
+  "그럼 더 저렴한 걸로",previous,context);
+ assert.equal((result as {kind:string}).kind,"SHOPPING_FOLLOWUP");
+ assert.equal(calls,1,"context reuses the current Decisions request");
 });
 test("Decisions routes declared categories; conversation stays tool-free",async()=>{
   for(const [message,kind,search] of [

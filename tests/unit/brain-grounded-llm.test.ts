@@ -25,7 +25,7 @@ const ask=(...options:Parameters<typeof rank>)=>({
  originalQuestion:"무선 헤드폰을 찾고 있어요.",ranking:rank(...options),
  evidence:options.length?[proof()]:[],plan
 });
-type Responder=(input:{originalQuestion:string;ranking:RankingResult;evidence:EvidenceRecord[];plan:ShoppingPlan})=>Promise<grounded.GroundedExplanation>;
+type Responder=grounded.GroundedResponder;
 type Call={messages:ChatMsg[];tools:unknown[];signal?:AbortSignal};
 function create(output:string|Error){
  const calls:Call[]=[];
@@ -41,6 +41,44 @@ function create(output:string|Error){
 const defaultQuote="착용감이 편하고 오래 사용해도 귀가 덜 아팠습니다.";
 const cite=(productId="p-1",variantId="v-blue",sourceId="review-11",sourceKind="REAL",quote=defaultQuote)=>
  JSON.stringify({sourceKind,productId,variantId,sourceId,quote});
+
+test("grounded recommendation receives dialogue context in the existing evidence-bounded request",async()=>{
+ const context:NonNullable<grounded.GroundedResponseInput['context']>={recentTurns:[{user:"오래 쓸 수 있어?",assistant:"리뷰 일부에서 사용감을 확인했어요."}],
+  displayedProducts:[{productId:"p-1",variantId:"v-blue",name:"무선 헤드폰"}],
+  approvedPreferences:[{key:"noise_sensitivity",value:"important"}]};
+ const {respond,calls}=create(cite());
+ await respond({...ask(product()),context,mode:"RECOMMEND"});
+ const payload=JSON.parse(calls[0].messages[1].content!);
+ assert.deepEqual(payload.untrusted_dialogue_context,context);
+ assert.equal(calls.length,1,"dialogue context reuses the existing grounded call");
+});
+
+test("catalog facts expose allowlisted labels and never leak internal package or comparison fields",async()=>{
+ const specs=[
+  {id:"s-color",productId:"p-1",variantId:"v-blue",kind:"SPEC",sourceRef:"color",text:"검정",verified:true,datasetVersion:"qa-v4-2026-10"},
+  {id:"s-package",productId:"p-1",variantId:"v-blue",kind:"SPEC",sourceRef:"package_label_from_name",text:"10매",verified:true,datasetVersion:"qa-v4-2026-10"},
+  {id:"s-group",productId:"p-1",variantId:"v-blue",kind:"SPEC",sourceRef:"comparison_group_id",text:"internal-family-1",verified:true,datasetVersion:"qa-v4-2026-10"},
+ ] as unknown as EvidenceRecord[];
+ const {respond,calls}=create(cite());
+ await respond({...ask(product()),evidence:[proof(),...specs],mode:"RECOMMEND"});
+ const payload=JSON.parse(calls[0].messages[1].content!);
+ const encoded=JSON.stringify(payload.candidates[0].facts);
+ assert.match(encoded,/색상: 검정/);
+ assert.match(encoded,/구성: 10매/);
+ assert.doesNotMatch(encoded,/comparison_group_id|package_label_from_name|internal-family-1/);
+});
+
+test("efficacy language in review claims remains attributed to the reviewer",async()=>{
+ const evidence=proof("eff-1","p-1","v-blue",{text:"효과가 확실하다고 느꼈어요."});
+ const claim={sourceKind:"REAL",productId:"p-1",variantId:"v-blue",sourceId:"eff-1",
+  quote:"효과가 확실하다고 느꼈어요.",polarity:"PRO"};
+ const unsafe=await create(JSON.stringify({claims:[{...claim,claim:"효과가 확실해요."}]}))
+  .respond({...ask(product()),evidence:[evidence]});
+ assert.equal(unsafe.kind,"EVIDENCE_INSUFFICIENT");
+ const attributed=await create(JSON.stringify({claims:[{...claim,claim:"작성자가 효과가 확실하다고 느꼈다는 의견이에요."}]}))
+  .respond({...ask(product()),evidence:[evidence]});
+ assert.equal(attributed.kind,"LLM_GROUNDED");
+});
 
 test("mixed REAL and SYNTHETIC product-level reviews retain provenance without inventing a variant mapping",async()=>{
  const candidate=product("p-1","v-blue",{sourceKind:"SYNTHETIC",isSimulated:true,qaRankingEligible:true});

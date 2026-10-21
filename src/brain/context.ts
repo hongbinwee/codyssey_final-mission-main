@@ -2,6 +2,7 @@ import type {Preference,PreferenceKey,PreferenceValue} from "./contracts.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import {assertPreference} from "./memory.ts";
 import {selectShoppingSkill,type SkillId} from "./skills.ts";
+import type {DialogueContext} from "./dialogue-context.ts";
 
 export interface IntentContext {
  trustedSkillId:SkillId;
@@ -13,7 +14,7 @@ export interface IntentContext {
  * Previous plan, memory and current user text are DATA (user-level context).
  * Memory cannot silently turn into an explicit current turn preference.
  */
-export function assembleIntentContext(userMessage:string,memories:Preference[],previous?:ShoppingPlan):IntentContext{
+export function assembleIntentContext(userMessage:string,memories:Preference[],previous?:ShoppingPlan,dialogue?:DialogueContext):IntentContext{
  if(typeof userMessage!=="string"||!userMessage.trim()||userMessage.length>3000)
    throw new Error("invalid user intent text");
  const latestSkill=selectShoppingSkill(userMessage);
@@ -42,6 +43,7 @@ export function assembleIntentContext(userMessage:string,memories:Preference[],p
    untrustedUserContent:JSON.stringify({
      untrusted_previous_shopping_plan:context,
      untrusted_confirmed_long_term_preferences:remembered,
+     ...(dialogue?{untrusted_dialogue_context:dialogue}:{}),
      latest_user_message:userMessage
    })
  };

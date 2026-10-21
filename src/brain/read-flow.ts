@@ -11,15 +11,18 @@ import {parseKrwTenThousandBand} from "./price-band.ts";
 import {parseExplicitReviewSort,reviewSortAspectLabel,normalizeReviewSortAspect} from "./review-sort.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import type {BrainRoute,BrainIntentKind} from "./routing.ts";
+import type {DialogueContext} from "./dialogue-context.ts";
 
 export type ShoppingIntent=PlanExtraction & {attributeSources?:Record<string,string>};
 export interface IntentPort {
- extract(userMessage:string,knownPreferences:Preference[],previous?:ShoppingPlan):Promise<ShoppingIntent>
+ extract(userMessage:string,knownPreferences:Preference[],previous?:ShoppingPlan,context?:DialogueContext):Promise<ShoppingIntent>
 }
 export interface ResearchResult {
  datasetVersion?:string;
  conversationId:string;messageId:string;clientActionId?:string;ranking:RankingResult;
  shoppingPlan?:ShoppingPlan;
+ pendingReview?:ReviewSummaryRequest;
+ recentTurns?:{user:string;assistant:string}[];
  explanation?:GroundedExplanation;
  intentKind?:BrainIntentKind;
  trace:{memoryMs:number;intentMs:number;retrievalMs:number;rankMs:number;totalMs:number;[key:string]:number}
@@ -31,7 +34,7 @@ export interface ResearchDeps {
  datasetVersion?:string;
  conversations:Pick<PersistentConversations,"assertOwned"|"appendUserMessage">;
  memory:MemoryRepository;retriever:RetrieverPort;intent:IntentPort;
- route?:(message:string,previous?:ShoppingPlan)=>BrainRoute|Promise<BrainRoute>;
+ route?:(message:string,previous?:ShoppingPlan,context?:DialogueContext)=>BrainRoute|Promise<BrainRoute>;
  converse?:ConversationResponder;
  activity?:(actorUserId:string)=>Promise<CommerceActivity>;
  fastResponses?:boolean;
@@ -82,7 +85,7 @@ export async function prepareTurn(req:Request,deps:ResearchDeps):Promise<Prepare
  if(memories.some(m=>m.userId!==req.actorUserId))throw new Error("cross-tenant memory response");
  return {messageId,memories,startedAt:t0,memoryMs:performance.now()-t0};
 }
-export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous:ShoppingPlan|null|undefined,deps:ResearchDeps):Promise<ShoppingPlan>{
+export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous:ShoppingPlan|null|undefined,deps:ResearchDeps,context?:DialogueContext):Promise<ShoppingPlan>{
  const trimmed=req.userMessage.trim();
  if(deps.clarifyBeforeSearch){const answered=interviewAnswer(trimmed,previous??undefined);if(answered)return answered;}
  const last=previous?.lastDisplayedProductIds??[];
@@ -92,7 +95,7 @@ export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous
    const extra=excludeAll?last:[excludeOne!];
    return {...previous,excludedProductIds:[...new Set([...(previous.excludedProductIds??[]),...extra])].slice(0,100),revision:previous.revision+1};
  }
- const intent=await deps.intent.extract(req.userMessage,prepared.memories,previous??undefined);
+ const intent=await deps.intent.extract(req.userMessage,prepared.memories,previous??undefined,context);
  let plan=resolveShoppingPlan(previous,intent);
  const explicitBand=parseKrwTenThousandBand(req.userMessage);
  if(explicitBand)plan={...plan,...explicitBand};

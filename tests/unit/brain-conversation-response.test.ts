@@ -22,6 +22,21 @@ test("CAPABILITY calls configured Claude provider with no tools, not a product c
  assert.match(JSON.stringify(calls[0]?.messages),/넌 뭘 할수있어/);
  assert.equal(calls.length,1);
 });
+test("conversation responder receives recent turns and displayed products in one JSON user message",async()=>{
+ const context={recentTurns:[{user:"그 상품은?",assistant:"수분크림을 추천했어요."}],
+  displayedProducts:[{productId:"p-1",variantId:"v-1",name:"수분크림"}],
+  approvedPreferences:[{key:"eye_comfort",value:"important"}]};
+ let calls=0;
+ const respond=createConversationResponder({async chat(messages){
+  calls++;
+  const payload=JSON.parse(messages[1].content!);
+  assert.deepEqual(payload.untrusted_dialogue_context,context);
+  return {content:"직전 추천 목록에서 상품을 골라 리뷰를 확인할 수 있어요."};
+ }});
+ const result=await respond({message:"그 상품은?",route:capability,context:context as never});
+ assert.equal(result.kind,"CONVERSATION");
+ assert.equal(calls,1,"dialogue context adds no provider request");
+});
 
 test("purchase history, delivery and cancellation requests remain deterministic and distinct",async()=>{
  let invoked=0;

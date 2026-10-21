@@ -37,3 +37,18 @@ test("M11 saved preference remains lower-trust and cannot become a trusted Skill
   [{key:"price_priority",value:"performance"}]);
  assert.doesNotMatch(ctx.trustedSkillInstruction,/2026-10-17|owner/);
 });
+test("intent extraction carries same-turn dialogue context inside its JSON data payload",async()=>{
+ const dialogue={recentTurns:[{user:"수분크림 찾아줘",assistant:"두 가지를 추천했어요."}],
+  displayedProducts:[{productId:"p-1",variantId:"v-1",name:"수분크림"}],
+  pendingReview:{productId:"p-1",focus:"CONS"},
+  approvedPreferences:[{key:"price_priority",value:"value"}]};
+ let calls=0;
+ const port=createIntentPort({complete:async(_system,user)=>{
+  calls++;
+  assert.deepEqual(JSON.parse(user).untrusted_dialogue_context,dialogue);
+  return JSON.stringify({query:"수분크림",maxTotalWon:null,requiredConditions:[],
+   currentPreferences:{},queryMode:"KEEP",budgetMode:"KEEP",requirementsMode:"KEEP"});
+ }});
+ await port.extract("그중 아쉬운 리뷰는?",[],previous,dialogue as never);
+ assert.equal(calls,1,"dialogue context is sent in the existing intent call");
+});

@@ -4,6 +4,7 @@ import {assertPreference} from './memory.ts';
 import type {ShoppingPlan,PlanOperations} from './shopping-plan.ts';
 import {assembleIntentContext} from "./context.ts";
 import {SHOPPING_POLICY} from "./policy.ts";
+import type {DialogueContext} from "./dialogue-context.ts";
 
 export interface IntentModel { complete(system:string,user:string):Promise<string> }
 const keys=new Set<PreferenceKey>(['price_priority','eye_comfort','noise_sensitivity']);
@@ -131,8 +132,8 @@ export function parseShoppingIntent(raw:string,latestUserMessage?:string):Shoppi
 }
 /** Tool-free intent planner: prior state is user/context data, not a system override. */
 export function createIntentPort(model:IntentModel,catalogCategory?:string|string[]):IntentPort {
- return {async extract(userMessage:string,memory:Preference[],previous?:ShoppingPlan):Promise<ShoppingIntent>{
-   const context=assembleIntentContext(userMessage,memory,previous);
+ return {async extract(userMessage:string,memory:Preference[],previous?:ShoppingPlan,dialogue?:DialogueContext):Promise<ShoppingIntent>{
+   const context=assembleIntentContext(userMessage,memory,previous,dialogue);
    // A selected Skill is a fixed, trusted procedure; user data remains user-level.
     const system=SHOPPING_POLICY+"\n"+SYSTEM+"\nBuilt-in shopping procedure: "+context.trustedSkillInstruction
       +(catalogCategory?"\nCurrent catalog category identifiers: "+JSON.stringify(catalogCategory)+". Choose an exact identifier only when the user's requested product belongs to it. Preserve unsupported product intent; never replace it with a catalog product.":"")

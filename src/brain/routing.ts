@@ -44,6 +44,7 @@ const GENERIC_TARGET=/^(?:(?:이|그|해당)\s*)?(?:제품|상품|거|것|걸|�
 function requestQuery(prefix:string|undefined):string|undefined{
  if(!prefix)return;
  const query=prefix.trim()
+  .replace(/\s*(?:이거|그거|이\s*(?:상품|제품)|그\s*(?:상품|제품)|해당\s*(?:상품|제품))\s*$/," ").trim()
   .replace(/\s*(?:에\s*대한|에\s*관한|에\s*대해|에\s*관해서)$/," ").trim()
   .replace(/\s*(?:리뷰|후기|상품|제품)$/," ").trim();
  if(!query||query.length>120||GENERIC_TARGET.test(query)||
@@ -63,10 +64,10 @@ export function parseReviewSummaryRequest(message:string):ReviewSummaryRequest|u
  const wordIndex=text.match(/(첫|첫째|첫\s*번째|두|둘째|두\s*번째|세|셋째|세\s*번째)\s*(?:상품|제품|후기|리뷰)/);
  const displayIndex=indexMatch?Number(indexMatch[1]):wordIndex?
   (/^(?:첫|첫째|첫\s*번째)$/.test(wordIndex[1])?1:/^(?:두|둘째|두\s*번째)$/.test(wordIndex[1])?2:3):undefined;
- const useCurrent=CURRENT_PRODUCT.test(text);
  const reviewPrefix=text.match(/^\s*(.+?)\s*(?:리뷰|후기)/)?.[1];
  const negativePrefix=text.match(/^\s*(.+?)\s*(?:단점|아쉬운\s*점|불편한\s*점)/)?.[1];
  const query=requestQuery(reviewPrefix??negativePrefix);
+ const useCurrent=CURRENT_PRODUCT.test(text)&&!query;
  const mentionsReview=/(?:리뷰|후기)/.test(text);
  const summaryMarker=SUMMARY_MARKER.test(text);
  const hasTarget=Boolean(useCurrent||displayIndex||query);

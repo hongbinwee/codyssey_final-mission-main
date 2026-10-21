@@ -4,9 +4,10 @@ import type {ShoppingPlan} from "./shopping-plan.ts";
 import type {GroundedExplanation} from "./grounded-response.ts";
 import {SHOPPING_POLICY} from "./policy.ts";
 import {serviceRequestRoute} from './routing.ts';
+import type {DialogueContext} from "./dialogue-context.ts";
 
 export type ConversationResponder=(input:{
- message:string;route:BrainRoute;previous?:ShoppingPlan
+ message:string;route:BrainRoute;previous?:ShoppingPlan;context?:DialogueContext
 })=>Promise<GroundedExplanation>;
 
 const CONVERSATION_SYSTEM=`You are 토스쇼핑 AI Brain, a 쇼핑 전담 AI 비서 responding to a non-search message. Never introduce yourself as "assistant".
@@ -29,9 +30,10 @@ const DEFAULT_ERROR="대화 답변을 지금 생성하지 못했어요. 잠시 �
 
 export function createConversationResponder(provider:Pick<Provider,"chat">,timeoutMs=15000):ConversationResponder{
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1000||timeoutMs>60000)throw Error("invalid conversation timeout");
- return async ({message,route,previous})=>{
+ return async ({message,route,previous,context})=>{
   if(route.kind==="CS_REQUEST")return {kind:"CONVERSATION",text:serviceRequestRoute(message)?.text??route.text??"현재 요청은 주문 화면에서 확인해 주세요.",items:[],limitations:[]};
   const payload={intent:route.kind,latest_user_message:message.slice(0,3000),
+   ...(context?{untrusted_dialogue_context:context}:{}),
    ...(previous&&route.kind==="UNCERTAIN"?{previous_shopping_context:{
     query:previous.query.slice(0,200),maxTotalWon:previous.maxTotalWon,
     requiredConditions:previous.requiredConditions.slice(0,10)}}:{})};

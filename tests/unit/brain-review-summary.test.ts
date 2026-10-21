@@ -54,6 +54,22 @@ test("exact name directly reads balanced Commerce reviews for a sold-out product
  assert.equal(calls.products[0],"p-1");
 });
 
+test("review name selection resolves a unique verified lastDisplayedProducts entry before catalog search",async()=>{
+ const prior=previous({shoppingPlan:{
+  query:"수분크림",lastDisplayedProductIds:["p-1","p-2"],
+  lastDisplayedProducts:[
+   {productId:"p-1",variantId:"v-1",name:"노프랍 수분 진정 대용량 하이드로겔 패드 [NEW3종/5+1매] 마스크팩 기획 6종",displayIndex:1},
+   {productId:"p-2",variantId:"v-2",name:"노프랍 수분 크림",displayIndex:2},
+  ],
+ }});
+ const {catalog,calls}=catalogStub({products:{"p-1":detail("p-1","노프랍 수분 진정 대용량 하이드로겔 패드 [NEW3종/5+1매] 마스크팩 기획 6종")}});
+ const lookup=createReviewSummaryLookup(catalog as never,"dataset-7");
+ const result=await lookup({query:"노프랍 하이드로겔 마스크팩",focus:"ALL"},prior);
+ assert.equal(result.status,"NO_REVIEWS");
+ assert.equal(calls.search.length,0);
+ assert.equal(calls.products.at(-1),"p-1");
+});
+
 test("ambiguous exact names ask for a choice, and only a previous choice ID can select it",async()=>{
  const choices=[summary("p-1","수분크림"),summary("p-2","수분크림")];
  const {catalog,calls}=catalogStub({matches:choices,products:{"p-2":detail("p-2","수분크림")}});

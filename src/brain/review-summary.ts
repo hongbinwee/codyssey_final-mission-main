@@ -26,13 +26,19 @@ function validId(value:unknown):value is string{
  return typeof value==="string"&&value.length>0&&value.length<=160&&value===value.trim()&&!/[\u0000-\u001f]/.test(value);
 }
 function focusOf(request:ReviewSummaryRequest):"ALL"|"CONS"{return request.focus==="CONS"?"CONS":"ALL";}
+function sameDataset(previous:ResearchResult|undefined,version:string|undefined):boolean{
+ return !previous?.datasetVersion||!version||previous.datasetVersion===version;
+}
 function result(status:SummaryStatus,focus:"ALL"|"CONS",datasetVersion?:string,
  extra:Partial<ReviewSummaryData>={}):ReviewSummaryData{
  return {status,focus,evidence:[],...(datasetVersion!==undefined?{datasetVersion}:{}),...extra};
 }
-function previousProductIds(previous?:ResearchResult):Set<string>{
+function previousProductIds(previous?:ResearchResult,version?:string):Set<string>{
  const ids=new Set<string>();
+ if(!sameDataset(previous,version))return ids;
  for(const id of previous?.shoppingPlan?.lastDisplayedProductIds??[])if(validId(id))ids.add(id);
+ for(const row of previous?.shoppingPlan?.lastDisplayedProducts??[])
+  if(row&&validId(row.productId))ids.add(row.productId);
  for(const item of previous?.explanation?.items??[])if(validId(item.productId))ids.add(item.productId);
  const current=previous?.explanation?.reviewSummary?.product?.id;
  if(validId(current))ids.add(current);
@@ -45,7 +51,10 @@ function choiceId(query:string,previous?:ResearchResult):string|undefined{
  const id=parsed[1];
  return previous?.explanation?.reviewSummary?.choices?.some(choice=>choice.productId===id)?id:"";
 }
-function previousProductName(id:string,previous?:ResearchResult):string|undefined{
+function previousProductName(id:string,previous?:ResearchResult,version?:string):string|undefined{
+ if(!sameDataset(previous,version))return;
+ const displayed=previous?.shoppingPlan?.lastDisplayedProducts?.find(item=>item.productId===id);
+ if(displayed&&typeof displayed.name==="string"&&displayed.name.trim())return displayed.name;
  const product=previous?.explanation?.reviewSummary?.product;
  if(product?.id===id&&typeof product.name==="string"&&product.name.trim())return product.name;
  const choice=previous?.explanation?.reviewSummary?.choices?.find(item=>item.productId===id);
@@ -64,6 +73,19 @@ function enoughNameMatch(query:string,name:string):boolean{
  if(qLength>=4&&n.includes(q))return true;
  if(q.startsWith(n)&&nLength>=6)return true;
  return q.includes(n)&&nLength>=8;
+}
+function displayedNameMatch(query:string,name:string):boolean{
+ if(enoughNameMatch(query,name))return true;
+ const normalized=normalizedName(name);
+ const terms=query.trim().split(/\s+/).map(normalizedName).filter(term=>[...term].length>=2);
+ if(terms.length<2)return false;
+ let cursor=0;
+ for(const term of terms){
+  const index=normalized.indexOf(term,cursor);
+  if(index<0)return false;
+  cursor=index+term.length;
+ }
+ return true;
 }
 function summaryChoices(items:ProductSummary[]):{productId:string;name:string}[]{
  const seen=new Set<string>(),choices:{productId:string;name:string}[]=[];
@@ -117,36 +139,63 @@ export function createReviewSummaryLookup(catalog:ReviewSummaryCatalog,datasetVe
    if(!id||!choice||typeof choice.name!=="string"||!choice.name.trim())return notFound();
    selection={productId:id,expectedName:choice.name,nameMatch:"EXACT",...(explicitVariant?{variantId:explicitVariant}:{})};
   }else if(request.productId!==undefined){
-   if(!validId(request.productId)||!previousProductIds(previous).has(request.productId))return notFound();
-   const expectedName=previousProductName(request.productId,previous);
+   if(!validId(request.productId)||!previousProductIds(previous,version).has(request.productId))return notFound();
+   const expectedName=previousProductName(request.productId,previous,version);
    selection={productId:request.productId,...(expectedName?{expectedName,nameMatch:"EXACT" as const}:{}),...(explicitVariant?{variantId:explicitVariant}:{})};
   }else if(request.displayIndex!==undefined){
    if(!Number.isSafeInteger(request.displayIndex)||request.displayIndex<1)return notFound();
+   if(!sameDataset(previous,version))return notFound();
    const index=request.displayIndex-1;
    const displayedItem=previous?.explanation?.items?.[index];
    const displayed=displayedItem?.productId;
    const id=validId(displayed)?displayed:previous?.shoppingPlan?.lastDisplayedProductIds?.[index];
    if(!validId(id))return notFound();
-   const expectedName=displayedItem?.productId===id&&typeof displayedItem.name==="string"&&displayedItem.name.trim()
-    ?displayedItem.name:previousProductName(id,previous);
+   const expectedName=displayedItem?.productId===id&&typeof displayedItem.name==="string"&&displayedItem.name.trim()&&sameDataset(previous,version)
+    ?displayedItem.name:previousProductName(id,previous,version);
    selection={productId:id,...(expectedName?{expectedName,nameMatch:"EXACT" as const}:{}),...(explicitVariant?{variantId:explicitVariant}:{})};
   }else if(request.useCurrent===true){
    const prior=previous?.explanation?.reviewSummary;
    if(validId(prior?.product?.id)){
-    const expectedName=typeof prior.product.name==="string"&&prior.product.name.trim()?prior.product.name:previousProductName(prior.product.id,previous);
+    if(!sameDataset(previous,version))return notFound();
+    const expectedName=typeof prior.product.name==="string"&&prior.product.name.trim()?prior.product.name:previousProductName(prior.product.id,previous,version);
     selection={productId:prior.product.id,...(expectedName?{expectedName,nameMatch:"EXACT" as const}:{}),
      ...(explicitVariant?{variantId:explicitVariant}:validId(prior.product.variantId)?{variantId:prior.product.variantId}:{})};
    }else if(prior?.status==="AMBIGUOUS"&&prior.choices?.length){
     return choicesFromIds(prior.choices.map(choice=>choice.productId));
    }else{
+    if(!sameDataset(previous,version))return notFound();
     const ids=[...(previous?.explanation?.items??[]).map(item=>item.productId),...(previous?.shoppingPlan?.lastDisplayedProductIds??[])];
     const unique=[...new Set(ids.filter(validId))];
     if(unique.length>1)return choicesFromIds(unique);
-    if(unique.length===1){const id=unique[0]!,expectedName=previousProductName(id,previous);selection={productId:id,...(expectedName?{expectedName,nameMatch:"EXACT" as const}:{}),...(explicitVariant?{variantId:explicitVariant}:{})};}
+    if(unique.length===1){const id=unique[0]!,expectedName=previousProductName(id,previous,version);selection={productId:id,...(expectedName?{expectedName,nameMatch:"EXACT" as const}:{}),...(explicitVariant?{variantId:explicitVariant}:{})};}
     else return notFound();
    }
   }else if(query){
    if(query.length>200)return notFound();
+   const displayed:{productId:string;name:string;displayIndex:number;variantId?:string}[]=[];
+   for(const item of sameDataset(previous,version)?previous?.shoppingPlan?.lastDisplayedProducts??[]:[]){
+    if(!validId(item.productId)||typeof item.name!=="string"||!item.name.trim()||
+       !Number.isSafeInteger(item.displayIndex)||item.displayIndex<1||item.displayIndex>3||
+       item.variantId!==undefined&&!validId(item.variantId)||!displayedNameMatch(query,item.name))continue;
+    displayed.push({productId:item.productId,name:item.name,displayIndex:item.displayIndex,
+     ...(item.variantId?{variantId:item.variantId}:{})});
+   }
+   const normalizedQuery=normalizedName(query);
+   const displayedExact=displayed.filter(item=>normalizedName(item.name)===normalizedQuery);
+   const displayedMatches=displayedExact.length?displayedExact:displayed;
+   const displayedUnique=[...new Map(displayedMatches.map(item=>[item.productId,item])).values()];
+   if(displayedUnique.length>1)
+    return result("AMBIGUOUS",focus,version,{choices:displayedUnique.slice(0,MAX_CHOICES).map(item=>({
+     productId:item.productId,name:item.name.slice(0,160),
+    }))});
+   if(displayedUnique.length===1){
+    const item=displayedUnique[0]!;
+    selection={productId:item.productId,expectedName:item.name,nameMatch:"EXACT",
+     ...(explicitVariant?{variantId:explicitVariant}:validId(item.variantId)?{variantId:item.variantId}:{})};
+   }
+   if(selection){
+    // A unique verified display-name match is more authoritative than a fresh fuzzy catalog search.
+   }else{
    let cursor:string|undefined,unfinished=false;
    const found:ProductSummary[]=[],seenCursors=new Set<string>();
    for(let page=0;page<MAX_SEARCH_PAGES;page++){
@@ -169,6 +218,7 @@ export function createReviewSummaryLookup(catalog:ReviewSummaryCatalog,datasetVe
     return result("AMBIGUOUS",focus,version,{choices:summaryChoices(candidates)});
    }
    selection={productId:candidates[0]!.product_id,expectedName:query,nameMatch:"QUERY",...(validId(request.variantId)?{variantId:request.variantId}:{})};
+   }
   }else return notFound();
 
   const productResult=await catalog.getProduct({product_id:selection.productId});
