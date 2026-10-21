@@ -396,7 +396,7 @@ export function createPersistentResearchGraph(
      const text=state.agentStop==="RETRIEVAL_UNAVAILABLE"?
        "상품 검색 연결에 문제가 생겼어요. 확인되지 않은 상품은 추천하지 않을게요.":
        noTools?(state.agentQuestion??state.agentAnswer??
-         (state.agentStop==="MODEL_UNAVAILABLE"||state.agentStop==="INVALID"||state.agentStop==="LIMIT"?
+         (deps.agentPlanning&&(state.agentStop==="MODEL_UNAVAILABLE"||state.agentStop==="INVALID"||state.agentStop==="LIMIT")?
            "AI 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.":summarizeAgentObservations(observations))):
        summarizeAgentObservations(observations)+(state.agentQuestion?"\n\n"+state.agentQuestion:"");
      const result:ResearchResult={

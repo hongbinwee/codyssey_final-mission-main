@@ -326,7 +326,7 @@ test("V2 cannot treat a model-requested write as a callable Commerce Tool",async
  const result=await createPersistentResearchGraph(data,new MemorySaver() as never)
   .invoke(request("내 주문 취소해줘"));
  assert.equal(result.trace.hermesToolCalls,0);
- assert.match(result.explanation?.text??"",/확인된 조회 결과가 없어요/);
+ assert.match(result.explanation?.text??"",/AI 응답을 만들지 못했어요/);
 });
 
 test("V2 Agent-initiated reset clears only task context after explicit user confirmation in words",async()=>{
