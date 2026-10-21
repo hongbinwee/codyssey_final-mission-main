@@ -305,7 +305,8 @@ export function createPersistentResearchGraph(
            }))
          }};
          const searchKind=deps.agentPlanning?
-           (state.researchResult?.explanation&&state.researchResult.shoppingPlan?"SHOPPING_FOLLOWUP" as const:"SHOPPING_SEARCH" as const):state.intentRoute.kind;
+           (state.researchResult?.shoppingPlan?.query===plan.query?
+             "SHOPPING_FOLLOWUP" as const:"SHOPPING_SEARCH" as const):state.intentRoute.kind;
          return {shoppingPlan:plan,intentRoute:{kind:searchKind,search:true},
            researchResult:{...fetched.result,intentKind:searchKind},
            evidence:fetched.evidence,agentSearched:true,agentObservations:[...observations,observation],
@@ -394,7 +395,9 @@ export function createPersistentResearchGraph(
      const noTools=observations.length===0&&!state.agentSearched;
      const text=state.agentStop==="RETRIEVAL_UNAVAILABLE"?
        "상품 검색 연결에 문제가 생겼어요. 확인되지 않은 상품은 추천하지 않을게요.":
-       noTools?(state.agentQuestion??state.agentAnswer??summarizeAgentObservations(observations)):
+       noTools?(state.agentQuestion??state.agentAnswer??
+         (state.agentStop==="MODEL_UNAVAILABLE"||state.agentStop==="INVALID"||state.agentStop==="LIMIT"?
+           "AI 응답을 만들지 못했어요. 잠시 후 다시 시도해 주세요.":summarizeAgentObservations(observations))):
        summarizeAgentObservations(observations)+(state.agentQuestion?"\n\n"+state.agentQuestion:"");
      const result:ResearchResult={
        conversationId:state.request.conversationId,messageId:state.prepared.messageId,
@@ -419,6 +422,7 @@ export function createPersistentResearchGraph(
          hermesToolCalls:observations.length,hermesDecisions:state.agentDecisionCount??0,
          hermesDecisionMs:Math.round(state.agentDecisionMs??0),hermesToolMs:Math.round(state.agentToolMs??0),
          hermesFailedTools:observations.filter(o=>!o.ok).length,agentV2:deps.agentPlanning?1:0,
+         agentModelUnavailable:state.agentStop==="MODEL_UNAVAILABLE"?1:0,agentDecisionInvalid:state.agentStop==="INVALID"?1:0,
          responseMs:performance.now()-start,
          totalMs:performance.now()-state.prepared.startedAt}
      };

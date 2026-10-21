@@ -47,7 +47,7 @@ function observedIds(observations:readonly AgentObservation[]){
 function safeAnswer(input:unknown):string|undefined{
  if(typeof input!=="string")return;
  const s=input.trim();
- return s&&s.length<=800&&!/[\u0000-\u001f]/.test(s)&&!s.includes("```")?s:undefined;
+ return s&&s.length<=1600&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s)&&!s.includes("```")?s:undefined;
 }
 function safeQuestion(input:string|null):string|undefined{
  const text=input?.trim();

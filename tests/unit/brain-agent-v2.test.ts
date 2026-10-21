@@ -366,3 +366,54 @@ test("V2 never allows an Agent-only reset without the user's explicit reset requ
  assert.equal(result.trace.hermesToolCalls,0);
  assert.doesNotMatch(result.explanation?.text??"",/초기화했어요/);
 });
+
+test("V2 model outage on greeting returns a retry message, without product-routing fallback",async()=>{
+ let rag=0,reads=0;
+ const data={agentPlanning:true,
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},intent:{extract:async()=>{throw Error("unexpected planner");}},
+  retriever:{search:async()=>{rag++;throw Error("unexpected RAG");}},
+  hermes:{provider:{chat:async()=>{throw Error("model offline");}},
+   history:async()=>{reads++;return [];},reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const result=await createPersistentResearchGraph(data,new MemorySaver() as never).invoke(request("안녕?"));
+ assert.equal(result.trace.agentModelUnavailable,1);
+ assert.equal(result.trace.hermesToolCalls,0);
+ assert.deepEqual([reads,rag],[0,0]);
+ assert.match(result.explanation?.text??"",/AI 응답을 만들지 못했어요/);
+ assert.doesNotMatch(result.explanation?.text??"",/어떤 상품이나 조건/);
+});
+test("V2 accepts safe multiline natural capability explanations",async()=>{
+ const data={agentPlanning:true,
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},intent:{extract:async()=>{throw Error("planner");}},
+  retriever:{search:async()=>{throw Error("RAG");}},
+  hermes:{provider:{chat:async()=>({content:"안녕하세요!\n- 상품 추천\n- 리뷰 분석\n- 주문 조회"})},
+   history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const result=await createPersistentResearchGraph(data,new MemorySaver() as never)
+  .invoke(request("넌 어떤 걸 해줄 수 있어?"));
+ assert.equal(result.explanation?.text,"안녕하세요!\n- 상품 추천\n- 리뷰 분석\n- 주문 조회");
+ assert.equal(result.trace.agentDecisionInvalid,0);
+ assert.equal(result.trace.hermesToolCalls,0);
+});
+test("V2 distinguishes a new product task from the existing product follow-up",async()=>{
+ const conversationId=crypto.randomUUID();let searches=0;
+ const data={agentPlanning:true,
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},intent:{extract:async()=>{throw Error("planner");}},
+  retriever:{search:async()=>{searches++;return {candidates:[candidate],evidence:[]};}},
+  hermes:{provider:{chat:async(messages:import("../../src/llm.ts").ChatMsg[])=>{
+   const prompt=JSON.parse(messages.find(x=>x.role==="user")?.content??"{}");
+   const change=prompt.user_message==="이번에는 무선 이어폰 추천해줘";
+   return {content:null,tool_calls:[{id:change?"new":"old",name:"search_products",
+     arguments:JSON.stringify(change?searchIntent({query:"무선 이어폰",category:"audio"}):searchIntent())}]};
+  }},history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const graph=createPersistentResearchGraph(data,new MemorySaver() as never);
+ await graph.invoke({...request("세럼 추천해줘"),conversationId});
+ const result=await graph.invoke({...request("이번에는 무선 이어폰 추천해줘"),conversationId});
+ assert.equal(searches,2);
+ assert.equal(result.intentKind,"SHOPPING_SEARCH");
+ assert.equal(result.shoppingPlan?.query,"무선 이어폰");
+});

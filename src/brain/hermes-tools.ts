@@ -76,7 +76,7 @@ export function parseHermesToolArgs(name:HermesToolName,raw:string,planning?:{me
 const agentOutcomeDefinitions=[
  {type:"function",function:{name:"respond_to_user",
   description:"Respond conversationally without retrieving data. Use for greetings, capabilities, small talk, unsupported write requests, or when existing verified context is sufficient. Never claim a Tool result you did not receive.",
-  parameters:{type:"object",properties:{text:{type:"string",minLength:1,maxLength:800},
+  parameters:{type:"object",properties:{text:{type:"string",minLength:1,maxLength:1600},
     intent_kind:{type:"string",enum:["GREETING","SOCIAL","CAPABILITY","UNCERTAIN"]}},
    required:["text"],additionalProperties:false}}},
  {type:"function",function:{name:"ask_user",
