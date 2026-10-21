@@ -24,6 +24,7 @@ export async function loadSearchPages(
   base: string,
   fetchPage: (url: string) => Promise<ApiResult<SearchResult>>,
   isStale: () => boolean,
+  onProgress?: (data: SearchResult) => void,
 ): Promise<SearchLoad> {
   const acc: SearchResult["items"] = [];
   const seenIds = new Set<string>();
@@ -56,6 +57,9 @@ export async function loadSearchPages(
       };
     }
     seenCursors.add(r.data.next_cursor);
+    // Preview only after cursor validation; completion/error semantics stay unchanged.
+    onProgress?.({ ...r.data, items: [...acc] });
+    if (isStale()) return { stale: true };
     cursor = r.data.next_cursor;
   }
   return {

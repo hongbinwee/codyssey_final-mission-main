@@ -165,3 +165,54 @@ describe("loadSearchPages", () => {
     assert.equal(r.data.items.length, 1);
   });
 });
+
+
+test("progress publishes a copied first page before the remaining request completes", async () => {
+  const snapshots: SearchResult[] = [];
+  let release!: (value: ApiResult<SearchResult>) => void;
+  const pending = new Promise<ApiResult<SearchResult>>(resolve => { release = resolve; });
+  let calls = 0;
+  const result = loadSearchPages("/api/products?limit=50", async () => ++calls === 1
+    ? page(["a"], "next", true) : pending, () => false, data => snapshots.push(data));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(snapshots.length, 1);
+  assert.deepEqual(snapshots[0].items.map(x => x.product_id), ["a"]);
+  assert.equal(snapshots[0].has_more, true);
+  release(page(["a", "b"], null, false));
+  const complete = await result;
+  assert.ok("ok" in complete && complete.ok);
+  assert.deepEqual(complete.data.items.map(x => x.product_id), ["a", "b"]);
+  assert.deepEqual(snapshots[0].items.map(x => x.product_id), ["a"], "later pages cannot mutate an already displayed snapshot");
+});
+
+test("progress never publishes stale, invalid-cursor or failed pages", async () => {
+  for (const [pages, stale] of [
+    [[page(["a"], null, true)], false],
+    [[page(["a"], null, false)], true],
+    [[fail()], false],
+  ] as [ApiResult<SearchResult>[], boolean][]) {
+    const snapshots: SearchResult[] = [];
+    const {fn} = fetcher(pages);
+    await loadSearchPages("/api/products?limit=50", fn, () => stale, data => snapshots.push(data));
+    assert.equal(snapshots.length, 0);
+  }
+  const snapshots: SearchResult[] = [];
+  const {fn} = fetcher([page(["a"], "next", true), fail()]);
+  const result = await loadSearchPages("/api/products?limit=50", fn, () => false, data => snapshots.push(data));
+  assert.equal(snapshots.length, 1);
+  assert.ok("ok" in result && !result.ok, "partial preview never becomes a successful complete result after failure");
+});
+
+
+test("leaving during progress stops before another fetch and repeated cursors are never published", async () => {
+  let stale = false;
+  const first = fetcher([page(["a"], "next", true)]);
+  const stopped = await loadSearchPages("b?", first.fn, () => stale, () => { stale = true; });
+  assert.ok("stale" in stopped);
+  assert.equal(first.urls.length, 1);
+  const snapshots: SearchResult[] = [];
+  const repeated = fetcher([page(["a"], "next", true), page(["b"], "next", true)]);
+  const result = await loadSearchPages("b?", repeated.fn, () => false, data => snapshots.push(data));
+  assert.ok("ok" in result && !result.ok);
+  assert.equal(snapshots.length, 1);
+});

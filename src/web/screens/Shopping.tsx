@@ -180,7 +180,9 @@ function HomeView({
   userId,
   onGoWish,
   commerceEnabled,
+  complete,
 }: {
+  complete: boolean;
   items: ProductSummary[];
   userName: string;
   onNav: (cat: string, sub?: string) => void;
@@ -242,7 +244,7 @@ function HomeView({
       <Hero products={hero} onOpen={onOpen} />
       <button className="benefit" onClick={() => onNav("sale")}>
         <b>특가 · 배송 혜택 모아보기</b>
-        <span className="benefit-chip">최대 {maxRate}%</span>
+        {complete && <span className="benefit-chip">최대 {maxRate}%</span>}
       </button>
       <div className="shortcut-rail">
         {shortcuts.map((s) => (
@@ -790,11 +792,13 @@ export function Shopping({
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setRes(null);
     void (async () => {
       const result = await loadSearchPages(
         "/api/products?limit=50",
         (url) => apiSafe<SearchResult>(url),
         () => !active,
+        (data) => { if (active) setRes({ ok: true, data }); },
       );
       if (!active || "stale" in result) return;
       setRes(
@@ -866,7 +870,8 @@ export function Shopping({
         </nav>
       )}
 
-      {loading ? (
+      {loading && res?.ok && <p className="muted sm" role="status">상품을 더 불러오는 중이에요.</p>}
+      {loading && (view !== "home" || !res?.ok) ? (
         <div className="product-grid">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="skel-card">
@@ -883,6 +888,7 @@ export function Shopping({
         />
       ) : view === "home" ? (
         <HomeView
+          complete={!loading}
           items={items}
           userName={userName}
           onNav={onNav}

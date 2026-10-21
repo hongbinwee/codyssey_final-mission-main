@@ -11,6 +11,8 @@ on:
       - "src/catalog.ts"
       - "src/orders.ts"
       - "tests/unit/brain-*.test.ts"
+      - "tests/unit/search-loader.test.ts"
+      - "tests/ui/shopping-progress.test.mjs"
       - "tests/brain-db/brain-hermes-*.test.mjs"
       - "tests/ui/hermes-narrow-layout.test.mjs"
       - ".github/workflows/hermes-h3-check.yml"
@@ -51,6 +53,7 @@ jobs:
       - name: H1-H6 and QA09-QA11 unit regression
         run: >
           node --test
+          tests/unit/search-loader.test.ts
           tests/unit/brain-hermes-loop.test.ts
           tests/unit/brain-hermes-h3.test.ts
           tests/unit/brain-hermes-h4.test.ts
@@ -92,4 +95,4 @@ jobs:
       - name: Install Chromium for offline responsive layout regression
         run: npx playwright install --with-deps chromium
       - name: Narrow layout with repository CSS and synthetic UI fixtures (not live E2E)
-        run: node --test tests/ui/hermes-narrow-layout.test.mjs
+        run: node --test tests/ui/hermes-narrow-layout.test.mjs tests/ui/shopping-progress.test.mjs
