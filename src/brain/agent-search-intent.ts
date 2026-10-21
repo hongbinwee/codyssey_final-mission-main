@@ -36,6 +36,13 @@ export function parseAgentSearchIntent(raw:unknown,message:string,previous?:Shop
   const intent=parseShoppingIntent(JSON.stringify(x.intent));
   if(!intent.queryMode||!intent.budgetMode)return null;
   if(!previous&&intent.queryMode!=="SET")return null;
+  // An identical product query in a follow-up is not a fresh task simply because the
+  // model said SET. A new task resets hard constraints and displayed-item references.
+  if(previous&&intent.queryMode==="SET"&&intent.query===previous.query)
+    intent.queryMode="KEEP";
+  if(previous&&intent.queryMode==="KEEP"&&intent.context.category&&previous.category&&
+     intent.context.category!==previous.category)return null;
+  if(intent.budgetMode==="SET"&&intent.context.maxTotalWon===null)return null;
   const changed=intent.queryMode==="SET"&&(!previous||intent.query!==previous.query);
   // A model-proposed numeric ceiling must be explicitly present in this user's message
   // (or be the unchanged prior ceiling), never guessed from catalogue prices.
@@ -46,6 +53,9 @@ export function parseAgentSearchIntent(raw:unknown,message:string,previous?:Shop
    if(!amounts.includes(intent.context.maxTotalWon))return null;
   }
   if(previous&&!changed){
+   // CLEAR must come from the user's current explicit instruction, not the model.
+   if(intent.preferencesMode==="CLEAR"&&
+      !/(?:선호|취향|조건|통풍|소음|눈|가격).{0,20}(?:해제|취소|빼|없애|상관없|무시|초기화)|(?:선호|취향).{0,12}(?:바꿔|새로)/.test(message))return null;
    if(intent.budgetMode==="CLEAR"&&previous.maxTotalWon!==null&&
       !/(예산|가격|금액).{0,15}(?:상관없|제한없|없애|취소|초기화|해제)/.test(message))return null;
    if(["CLEAR","REPLACE"].includes(intent.requirementsMode??"")&&
@@ -59,6 +69,11 @@ export function parseAgentSearchIntent(raw:unknown,message:string,previous?:Shop
    const sources=intent.attributeSources??{};
    intent.context.attributePreferences=intent.context.attributePreferences.filter(k=>
     typeof sources[k]==="string"&&sources[k].length>=2&&message.includes(sources[k]));
+  }
+  if(previous&&!changed&&intent.preferencesMode!=="CLEAR"&&
+     (!intent.context.attributePreferences||intent.context.attributePreferences.length===0)){
+    // An omitted/empty attribute list is NOT a request to discard task preferences.
+    delete intent.context.attributePreferences;
   }
   if(intent.queryMode==="KEEP"&&previous&&intent.query!==previous.query)intent.query=previous.query;
   return intent;

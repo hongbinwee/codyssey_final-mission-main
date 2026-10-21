@@ -6,6 +6,7 @@ import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.
 import {ownedTask,nextTask,retainTask,taskForWishlistSelection,resetTaskRequested,type AgentTaskState,type TaskScope} from "./task-state.ts";
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
 import {captureDisplayedReviewTargets} from "./review-targets.ts";
+import {isScopedProsConsFollowup,canFinishSimpleDiscovery} from "./agent-v2-flow.ts";
 import {interviewAnswer,needsInterview,rememberInterview,recommendationBudgetQuestion} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
 import {AsyncLocalStorage} from "node:async_hooks";
@@ -98,6 +99,16 @@ export function createPersistentResearchGraph(
        const target=reviewRequest??{target:state.request.userMessage.trim().slice(0,120),ordinal:null,negativeOnly:false};
        await verify();return {reviewSummaryRequest:target,activeTask,priorExplanation:null,wishlistRequest:null,
          intentRoute:{kind:"REVIEW_SUMMARY" as const,search:false},routeMs:performance.now()-started};
+     }
+     // Narrow fast path: only a server-displayed product reference, never an
+     // arbitrary model-produced ID or a full comparison/recommendation request.
+     if(deps.agentPlanning&&deps.hermes&&
+       state.researchResult?.datasetVersion===deps.datasetVersion&&
+       deps.hermes.toolPorts?.(state.request.actorUserId)?.reviews&&
+       isScopedProsConsFollowup(state.request.userMessage,previous?.lastDisplayedProducts)){
+       await verify();return {activeTask,agentRead:true,priorExplanation:null,wishlistRequest:null,
+         intentRoute:{kind:"REVIEW_SUMMARY" as const,search:false},
+         routeMs:performance.now()-started};
      }
      const priorExplanation=explainPreviousRecommendation(state.request.userMessage,state.researchResult,deps.datasetVersion);
      if(priorExplanation){await verify();return {priorExplanation,activeTask,intentRoute:{kind:"SHOPPING_FOLLOWUP" as const,search:false},
@@ -340,10 +351,12 @@ export function createPersistentResearchGraph(
      const lastOrder=observations.some(o=>o.tool==="get_orders"||o.tool==="get_order"||o.tool==="get_shipping_status");
      const lastCart=observations.some(o=>o.tool==="get_cart");
      const lastWish=observations.some(o=>o.tool==="get_wishlist");
+     const reviewRead=observations.some(o=>o.tool==="get_product_reviews"||o.tool==="get_product_detail");
      const taskKind=lastOrder?"ORDER":lastCart?"CART":lastWish?"WISHLIST":
-       state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY";
+       reviewRead?"REVIEW_SUMMARY":state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY";
      const ids=lastWish?(observations.find(o=>o.tool==="get_wishlist"&&o.ok)?.data as
-       {saved_products?:Array<{productId:string}>})?.saved_products?.map(x=>x.productId)??[]:[];
+       {saved_products?:Array<{productId:string}>})?.saved_products?.map(x=>x.productId)??[]
+       :reviewRead?state.researchResult?.shoppingPlan?.lastDisplayedProductIds??state.activeTask?.displayedProductIds??[]:[];
      const text=state.agentStop==="RETRIEVAL_UNAVAILABLE"?
        "상품 검색 연결에 문제가 생겼어요. 확인되지 않은 상품은 추천하지 않을게요.":
        summarizeAgentObservations(observations,state.agentQuestion??undefined);
@@ -478,7 +491,10 @@ export function createPersistentResearchGraph(
      ["agent_execute","respond","agent_recover","agent_finish"])
    .addConditionalEdges("agent_execute",state=>state.agentStop==="NEEDS_CLARIFICATION"?"clarify":
      state.agentStop==="RETRIEVAL_UNAVAILABLE"?"agent_finish":
-     deps.agentPlanning&&state.agentSearched&&!/(리뷰|후기|단점|장점|비교|전에|지난번|구매했던)/.test(state.request.userMessage)?"respond":"agent_decide",
+     deps.agentPlanning&&state.agentSearched&&canFinishSimpleDiscovery({
+       intentKind:state.intentRoute.kind,ranking:state.researchResult?.ranking,
+       plan:state.shoppingPlan,observations:state.agentObservations??[]
+     })?"respond":"agent_decide",
      ["clarify","agent_finish","agent_decide","respond"])
    .addEdge("clarify",END)
    .addConditionalEdges("retrieve",state=>state.researchResult.explanation?.failure?.code==='RETRIEVAL_UNAVAILABLE'?END:'respond',[END,'respond'])

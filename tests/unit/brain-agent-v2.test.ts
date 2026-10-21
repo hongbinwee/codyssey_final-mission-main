@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {MemorySaver} from "@langchain/langgraph";
 import {createPersistentResearchGraph} from "../../src/brain/graph.ts";
 import {parseAgentSearchIntent} from "../../src/brain/agent-search-intent.ts";
+import {resolveShoppingPlan} from "../../src/brain/shopping-plan.ts";
+import {isScopedProsConsFollowup,canFinishSimpleDiscovery} from "../../src/brain/agent-v2-flow.ts";
 import {appendAgentToolTranscript} from "../../src/brain/hermes-agent-step.ts";
 import {hermesToolDefinitions} from "../../src/brain/hermes-tools.ts";
 import type {ProductCandidate} from "../../src/brain/contracts.ts";
@@ -147,4 +149,94 @@ test("V2 continues one ordered Tool transcript across order and shipping decisio
  assert.equal(ragCalls,0);
  assert.deepEqual(toolNames,["orders","shipping owned-1"]);
  assert.equal(result.taskState?.kind,"ORDER");
+});
+
+test("V2 treats same-product SET as a follow-up and preserves hard/soft conditions",()=>{
+ const prior={query:"남성용 팬티",revision:4,maxTotalWon:30000,
+  requiredConditions:["남성용"],category:"fashion",attributePreferences:["breathability"],
+  currentPreferences:{},lastDisplayedProductIds:["p-1"]};
+ const proposal=searchIntent({query:"남성용 팬티",queryMode:"SET",budgetMode:"KEEP",
+  requirementsMode:"KEEP",requiredConditions:[],category:"fashion",attributePreferences:[]});
+ const change=parseAgentSearchIntent(proposal,"같은 남성용 팬티 다른 거 추천해 줘",prior as never);
+ assert.equal(change?.queryMode,"KEEP");
+ assert.equal(change?.context.attributePreferences,undefined);
+ const next=resolveShoppingPlan(prior as never,change!);
+ assert.deepEqual(next.requiredConditions,["남성용"]);
+ assert.deepEqual(next.attributePreferences,["breathability"]);
+ assert.equal(next.maxTotalWon,30000);
+ assert.deepEqual(next.lastDisplayedProductIds,["p-1"]);
+});
+test("V2 rejects changing category while claiming the previous query is unchanged",()=>{
+ const prior={query:"남성용 팬티",revision:1,maxTotalWon:null,
+  requiredConditions:["남성용"],category:"fashion",currentPreferences:{}};
+ const proposal=searchIntent({query:"남성용 팬티",queryMode:"KEEP",budgetMode:"KEEP",
+  category:"beauty"});
+ assert.equal(parseAgentSearchIntent(proposal,"더 저렴하게",prior as never),null);
+});
+test("V2 conserves simple-model latency without skipping grounded preference or review searches",()=>{
+ const ranking={ranked:[{candidate:{commerceVerified:true,productId:"p-1"}}],
+  referenceOnly:[],rejected:[],evaluatedCount:1} as never;
+ const obs=[{tool:"search_products",ok:true,data:{}}] as never;
+ assert.equal(canFinishSimpleDiscovery({intentKind:"SHOPPING_SEARCH",ranking,
+  plan:{attributePreferences:[]} as never,observations:obs}),true);
+ assert.equal(canFinishSimpleDiscovery({intentKind:"SHOPPING_SEARCH",ranking,
+  plan:{attributePreferences:["breathability"]} as never,observations:obs}),false);
+ assert.equal(canFinishSimpleDiscovery({intentKind:"REVIEW_COMPARE",ranking,
+  plan:{} as never,observations:obs}),false);
+ assert.equal(canFinishSimpleDiscovery({intentKind:"SHOPPING_SEARCH",
+  ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},plan:{} as never,observations:obs}),false);
+});
+test("V2 scoped pros and cons requires a verified displayed product and does not hijack comparisons",()=>{
+ const shown=[{displayIndex:1,productId:"p-1",variantId:"v-1",name:"세럼",commerceVerified:true}];
+ assert.equal(isScopedProsConsFollowup("그중 1번 상품 단점 알려줘",shown),true);
+ assert.equal(isScopedProsConsFollowup("그중 1번 상품 단점 비교해줘",shown),false);
+ assert.equal(isScopedProsConsFollowup("그중 1번 상품 단점 알려줘",[]),false);
+ assert.equal(isScopedProsConsFollowup("그중 1번 상품 단점 알려줘",
+  [{...shown[0],commerceVerified:false}]),false);
+});
+test("V2 follow-up reads only the first displayed product's reviews and retains the full shopping task",async()=>{
+ const conversationId=crypto.randomUUID(),actorUserId="actor-a";
+ const repoCalls:string[]=[],toolSeen:string[]=[];
+ let intents=0;
+ const deps3={agentPlanning:true,clarifyBeforeSearch:true,
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},
+  intent:{extract:async()=>{intents++;throw Error("Unexpected legacy Planner");}},
+  retriever:{search:async()=>({candidates:[candidate],evidence:[]})},
+  hermes:{
+   provider:{chat:async(messages:import("../../src/llm.ts").ChatMsg[])=>{
+    const user=JSON.parse(messages.find(x=>x.role==="user")?.content??"{}") as Record<string,unknown>;
+    const q=String(user.user_message??"");
+    if(q==="세럼 추천해줘")return {content:null,tool_calls:[{id:"find",name:"search_products",
+     arguments:JSON.stringify(searchIntent())}]};
+    if(!messages.some(x=>x.role==="tool")){
+     const displayed=user.previous_displayed_products as Array<{productId:string}>;
+     assert.equal(displayed[0]?.productId,"p-serum");
+     return {content:null,tool_calls:[{id:"reviews",name:"get_product_reviews",
+       arguments:'{"product_id":"p-serum","query":"단점"}'}]};
+    }
+    const tool=messages.find(x=>x.role==="tool");
+    assert.equal(tool?.tool_call_id,"reviews");
+    toolSeen.push(String(tool?.content));
+    return {content:"조회 완료"};
+   }},
+   history:async()=>[],reviewCount:async()=>null,
+   toolPorts:()=>({reviews:async(productId:string,query:string)=>{
+    repoCalls.push(productId,query);
+    return {productId,query,totalMatching:1,reviews:[{id:"rv-1",body:"향이 강해요",rating:2}]};
+   }})
+  }
+ } as unknown as ResearchDeps;
+ const graph=createPersistentResearchGraph(deps3,new MemorySaver() as never);
+ const first=await graph.invoke({actorUserId,conversationId,requestId:crypto.randomUUID(),
+  clientActionId:crypto.randomUUID(),userMessage:"세럼 추천해줘"});
+ assert.equal(first.shoppingPlan?.lastDisplayedProducts?.[0]?.productId,"p-serum");
+ const second=await graph.invoke({actorUserId,conversationId,requestId:crypto.randomUUID(),
+  clientActionId:crypto.randomUUID(),userMessage:"그중 1번 상품 단점 알려줘"});
+ assert.deepEqual(repoCalls,["p-serum","단점"]);
+ assert.equal(intents,0);
+ assert.equal(toolSeen.length,1);
+ assert.deepEqual(second.taskState?.displayedProductIds,["p-serum"]);
+ assert.deepEqual(second.shoppingPlan?.lastDisplayedProductIds,["p-serum"]);
+ assert.match(second.explanation?.text??"",/향이 강해요/);
 });
