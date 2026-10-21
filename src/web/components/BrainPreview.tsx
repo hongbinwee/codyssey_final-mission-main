@@ -51,7 +51,7 @@ export function canExploreBrainReply(reply:BrainReply|undefined):boolean{
    (reply.ranking.ranked.length>0||reply.explanation?.kind==="NO_MATCH"||reply.explanation?.kind==="REFERENCE_ONLY");
 }
 
-export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct}:{explanation?:BrainReply["explanation"];ranking:BrainRankingResult;onOpenProduct:(id:string,variantId?:string)=>void;onExcludeProduct?:(id:string)=>void}){
+export function BrainRanking({ranking,explanation,onOpenProduct}:{explanation?:BrainReply["explanation"];ranking:BrainRankingResult;onOpenProduct:(id:string,variantId?:string)=>void}){
  const seen=new Set<string>();
  const unique=<T extends {candidate:ProductCandidate}>(rows:T[]):T[]=>rows.filter(row=>{
    if(seen.has(row.candidate.productId))return false;seen.add(row.candidate.productId);return true;
@@ -81,7 +81,7 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
        <dl className="brain-price-breakdown" aria-label="상품 가격 구성">
          <div><dt>상품가</dt><dd>{p.commerceVerified===true&&money(p.unitPriceWon)?fmtWon(p.unitPriceWon):"확인 전"}</dd></div>
          <div><dt>배송비</dt><dd>{p.commerceVerified===true&&money(p.shippingFeeWon)?fmtWon(p.shippingFeeWon):"확인 전"}</dd></div>
-         <div className="brain-price-total"><dt>배송비 포함 합계</dt><dd>{
+         <div className="brain-price-total"><dt aria-label="배송비 포함 합계">합계</dt><dd>{
           p.commerceVerified===true&&money(p.unitPriceWon)&&money(p.shippingFeeWon)&&
            Number.isSafeInteger(p.unitPriceWon+p.shippingFeeWon)?
            fmtWon(p.unitPriceWon+p.shippingFeeWon):"금액 확인 필요"
@@ -92,7 +92,6 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
        {(p.keywords??[]).filter(k=>!/(?:type|sub_category|source_kind|[a-z]+_[a-z]+)/.test(k)).slice(0,3).map((keyword,i)=><span key={i} className="chip">{keyword}</span>)}
      </div>
       </div>
-      {!reference&&onExcludeProduct&&<div className="brain-product-footer"><button className="link brain-product-exclude" onClick={()=>onExcludeProduct(p.productId)}>이 상품은 빼주세요</button></div>}
      </div>
      {hasExplanation&&<div className="brain-assistant-message brain-product-explanation"><span className="brain-avatar" aria-hidden="true">✦</span><div className="msg ai">
        {!!personalizationSignals?.length&&<p>맞춤 근거: {personalizationSignals.map(signal=>signal==="CART"?"장바구니":signal==="WISHLIST"?"찜":"구매 기록").join(" · ")}</p>}
@@ -343,7 +342,7 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
            <button className="link" disabled={busy} onClick={()=>retry(e)}>다시 검색</button>
            <button className="link" disabled={busy} onClick={()=>editQuestion(e)}>조건 바꾸기</button>
          </div>}
-         {e.reply.explanation?.kind!=="CONVERSATION"&&e.reply.explanation?.kind!=="CLARIFICATION"&&<BrainRanking explanation={e.reply.explanation} ranking={e.reply.ranking} onOpenProduct={onOpenProduct} onExcludeProduct={i===entries.length-1&&!busy?(id)=>sendChoice(`이 상품 제외: ${id}`):undefined}/>}
+         {e.reply.explanation?.kind!=="CONVERSATION"&&e.reply.explanation?.kind!=="CLARIFICATION"&&<BrainRanking explanation={e.reply.explanation} ranking={e.reply.ranking} onOpenProduct={onOpenProduct}/>}
        </>}
      </div>)}
      {showExplore&&!busy&&<div className="brain-explore"><button className="btn" disabled={restoring} onClick={()=>sendChoice("조건 바꾸기")}>조건 바꾸기</button><button className="btn" disabled={restoring} onClick={()=>sendChoice("다른 상품 보기")}>다른 상품 보기</button></div>}

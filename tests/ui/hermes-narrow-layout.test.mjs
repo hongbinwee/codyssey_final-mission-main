@@ -35,7 +35,6 @@ const markup = `
           <header class="brain-product-card-header"><span class="brain-rank">1순위</span><span class="muted sm">나에게 맞춤</span></header>
           <div class="brain-product-main"><div class="brain-product-image"><span>상품 이미지</span></div>
           <div class="brain-product-info"><div class="brain-product-heading"><div class="brain-product-summary"><b class="brain-product-name">가벼운 무선 이어폰 추천 상품</b><dl class="brain-price-breakdown" aria-label="상품 가격 구성"><div><dt>상품가</dt><dd>119,000원</dd></div><div><dt>배송비</dt><dd>무료</dd></div><div class="brain-price-total"><dt>배송비 포함 합계</dt><dd>119,000원</dd></div></dl></div><button class="link brain-product-open">상품 보기<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"></svg></button></div></div></div>
-          <div class="brain-product-footer"><button class="link brain-product-exclude">이 상품은 빼주세요</button></div>
         </div><div class="brain-assistant-message brain-product-explanation"><span class="brain-avatar" aria-hidden="true">✦</span><div class="msg ai"><div class="brain-product-reason">확인한 상품 정보와 요청 조건을 기준으로 정리했어요.</div></div></div></article>
       </section>
       <section class="brain-review-summary state-box" aria-label="해당 상품 리뷰 요약"><div class="brain-review-summary-header"><b>무선 이어폰 사용 후기 요약</b><p class="muted sm">확인한 리뷰 3건</p></div><details class="brain-review-citations"><summary>확인한 리뷰 근거 보기 (3건)</summary><ul><li>착용감이 편하고 오래 사용해도 부담이 적어요.<small>구매 후기 · 2026</small></li></ul></details></section>
@@ -287,7 +286,7 @@ test('actual React app shell keeps header and Brain results within narrow viewpo
       assert.equal(await page.locator('.brain-product-image .brain-rank').count(), 0, 'rank must not cover the product image');
       assert.equal(await groups.first().locator('.brain-product-card .brain-product-reason').count(), 0);
       assert.equal(await groups.first().locator('.brain-product-explanation .brain-product-reason .brain-answer p').count(), 3, 'budget, comparison and composition use separate paragraphs');
-      assert.equal(await groups.first().locator('.brain-product-card .brain-product-exclude').count(), 1, 'exclude stays in the product card');
+      assert.equal(await groups.locator('.brain-product-exclude, .brain-product-footer').count(), 0, 'no exclusion control or empty footer');
       const separation = await groups.first().evaluate(group => {
         const card=group.querySelector('.brain-product-card'), header=group.querySelector('.brain-product-card-header'), image=group.querySelector('.brain-product-image');
         return { badgeAboveImage: header.getBoundingClientRect().bottom <= image.getBoundingClientRect().top,
@@ -304,7 +303,7 @@ test('actual React app shell keeps header and Brain results within narrow viewpo
         };
         const root = document.documentElement;
         const controls = [...document.querySelectorAll(
-          '.brain-preference-field select, .brain-preference-actions .btn, .brain-send, .brain-product-open, .brain-product-exclude'
+          '.brain-preference-field select, .brain-preference-actions .btn, .brain-send, .brain-product-open'
         )].map(element => ({
           selector: element.id || element.className || element.tagName.toLowerCase(),
           width: element.getBoundingClientRect().width,

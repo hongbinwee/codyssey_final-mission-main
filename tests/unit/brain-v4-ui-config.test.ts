@@ -329,17 +329,16 @@ test('retrieval failure does not retain stale ranked or reference cards',()=>{
  assert.equal(html,'');
 });
 
-test('card actions keep exact product/variant targets with separate view and polite exclusion labels',()=>{
- const opened:string[][]=[],excluded:string[]=[];
+test('compact card keeps the exact product/variant target without an exclusion control',()=>{
+ const opened:string[][]=[];
  const props={ranking:{ranked:[{candidate:{productId:'card-p',variantId:'card-v',productName:'상품명',commerceVerified:true,unitPriceWon:12000},score:1,evidenceCoverage:1}],referenceOnly:[],rejected:[],evaluatedCount:1},
-   onOpenProduct:(id:string,variant?:string)=>opened.push([id,variant!]),onExcludeProduct:(id:string)=>excluded.push(id)};
+   onOpenProduct:(id:string,variant?:string)=>opened.push([id,variant!])};
  const element=BrainRanking(props)!;
  const buttons:any[]=[];
  function walk(node:any){if(!node||typeof node!=='object')return;if(node.type==='button')buttons.push(node);for(const child of [node.props?.children].flat(Infinity))walk(child);}
  walk(element);
- const remove=buttons.find(b=>b.props.children==='이 상품은 빼주세요');assert.ok(remove);remove.props.onClick();
  const view=buttons.find(b=>b.props['aria-label']==='상품 보기');assert.ok(view);view.props.onClick();
- assert.deepEqual(excluded,['card-p']);assert.deepEqual(opened,[['card-p','card-v']]);
- const html=renderToStaticMarkup(element);assert.match(html,/brain-product-heading/);assert.match(html,/brain-product-footer/);
- assert.doesNotMatch(html,/>이 상품 제외</);
+ assert.equal(buttons.length,1);assert.deepEqual(opened,[['card-p','card-v']]);
+ const html=renderToStaticMarkup(element);assert.match(html,/brain-product-heading/);
+ assert.doesNotMatch(html,/brain-product-footer|이 상품은 빼주세요|이 상품 제외/);
 });
