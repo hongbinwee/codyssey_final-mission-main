@@ -328,3 +328,41 @@ test("V2 cannot treat a model-requested write as a callable Commerce Tool",async
  assert.equal(result.trace.hermesToolCalls,0);
  assert.match(result.explanation?.text??"",/확인된 조회 결과가 없어요/);
 });
+
+test("V2 Agent-initiated reset clears only task context after explicit user confirmation in words",async()=>{
+ const conversationId=crypto.randomUUID();
+ let retrievals=0,planner=0;
+ const data={
+  agentPlanning:true,route:async()=>{throw Error("legacy router");},
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},intent:{extract:async()=>{planner++;throw Error("legacy planner");}},
+  retriever:{search:async()=>{retrievals++;return {candidates:[candidate],evidence:[]};}},
+  hermes:{provider:{chat:async(messages:import("../../src/llm.ts").ChatMsg[])=>{
+    const message=JSON.parse(messages.find(m=>m.role==="user")?.content??"{}").user_message;
+    if(message==="세럼 추천해줘")return {content:null,tool_calls:[{id:"search",name:"search_products",
+      arguments:JSON.stringify(searchIntent())}]};
+    if(message==="처음부터 시작")return {content:null,tool_calls:[{id:"reset",name:"reset_shopping_task",arguments:"{}"}]};
+    throw Error("unexpected");
+   }},history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const graph=createPersistentResearchGraph(data,new MemorySaver() as never);
+ const first=await graph.invoke({...request("세럼 추천해줘"),conversationId});
+ assert.equal(first.shoppingPlan?.query,"세럼");
+ assert.equal(retrievals,1);
+ const reset=await graph.invoke({...request("처음부터 시작"),conversationId});
+ assert.equal(reset.shoppingPlan,undefined);
+ assert.equal(reset.taskState,undefined);
+ assert.match(reset.explanation?.text??"",/초기화/);
+ assert.equal(retrievals,1);assert.equal(planner,0);
+});
+test("V2 never allows an Agent-only reset without the user's explicit reset request",async()=>{
+ const data={agentPlanning:true,conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},intent:{extract:async()=>{throw Error("legacy planner");}},
+  retriever:{search:async()=>{throw Error("no RAG");}},
+  hermes:{provider:{chat:async()=>({content:null,tool_calls:[{id:"bad",name:"reset_shopping_task",arguments:"{}"}]})},
+   history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const result=await createPersistentResearchGraph(data,new MemorySaver() as never).invoke(request("안녕"));
+ assert.equal(result.trace.hermesToolCalls,0);
+ assert.doesNotMatch(result.explanation?.text??"",/초기화했어요/);
+});

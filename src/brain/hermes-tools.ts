@@ -82,7 +82,10 @@ const agentOutcomeDefinitions=[
  {type:"function",function:{name:"ask_user",
   description:"Ask one specific question only when necessary to continue the current user goal; do not require optional budget for a concrete product search.",
   parameters:{type:"object",properties:{question:{type:"string",minLength:1,maxLength:140}},
-   required:["question"],additionalProperties:false}}}
+   required:["question"],additionalProperties:false}}},
+ {type:"function",function:{name:"reset_shopping_task",
+  description:"Reset only the current shopping task and its plan when the user explicitly requests to start over. Does not erase account preferences, order history or other conversations.",
+  parameters:{type:"object",properties:{},additionalProperties:false}}}
 ];
 /** Shared authoritative tool catalogue for both the original bounded loop and LangGraph H4. */
 export function hermesToolDefinitions(tools:HermesToolPort,offerSearch=true,agentPlanning=false){

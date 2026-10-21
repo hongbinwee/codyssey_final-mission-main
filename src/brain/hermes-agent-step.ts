@@ -10,7 +10,7 @@ import type {ShoppingIntent} from "./read-flow.ts";
 import {SHOPPING_POLICY} from "./policy.ts";
 import {selectShoppingSkill} from "./skills.ts";
 import {HERMES_TOOL_LIMIT,hermesToolDefinitions,parseHermesToolArgs,type HermesToolName,type HermesToolPort} from "./hermes-tools.ts";
-import type {AgentTaskState} from "./task-state.ts";
+import {resetTaskRequested,type AgentTaskState} from "./task-state.ts";
 import {buildAgentDecisionContext,type RecentAgentTurn} from "./agent-context.ts";
 import {agentPromptObservations} from "./hermes-observation-prompt.ts";
 import {resolveDisplayedReviewTargets,type DisplayedReviewTarget} from "./review-targets.ts";
@@ -21,6 +21,7 @@ export type AgentDecision=
  |{kind:"CALL";action:AgentAction}
  |{kind:"RESPOND";answer:string;intent?:"GREETING"|"SOCIAL"|"CAPABILITY"|"UNCERTAIN"}
  |{kind:"ASK_USER";question:string}
+ |{kind:"RESET"}
  |{kind:"FINISH";reason:"DONE"|"LIMIT"|"INVALID"|"MODEL_UNAVAILABLE";question?:string};
 
 const MAX_AGENT_MS=45000;
@@ -70,7 +71,7 @@ export async function decideHermesAction(input:{
  const system=SHOPPING_POLICY+"\n[Hermes H4 Agent]\nYou decide the next action after inspecting trusted tool observations. "+
   (input.agentPlanning?
     "You are the FIRST semantic decision-maker for EVERY user message: greeting, capability question, mixed request, shopping, review or authenticated account read. No intent router has interpreted it for you. "+
-    "Choose ONE action: respond_to_user, ask_user, or ONE allowed read Tool. Use respond_to_user for natural conversation, not a forced product clarification. For a combined request, get needed facts first and then finish. "+
+    "Choose ONE action: respond_to_user, ask_user, reset_shopping_task (only if user explicitly asks to start over), or ONE allowed read Tool. Use respond_to_user for natural conversation, not a forced product clarification. For a combined request, get needed facts first and then finish. "+
     "Tools never grant Commerce writes. For cancellation, payment or cart modifications, describe the safe UI approval path; never claim an action was done. "+
     "Only claim retrieved prices, products, orders, reviews or delivery details after the Tool has returned verified facts. "+
     "Avoid a search when the user is only greeting or asking capabilities. ":
@@ -100,7 +101,10 @@ export async function decideHermesAction(input:{
    return {kind:"FINISH",reason:"DONE",...(safeQuestion(response.content)?{question:safeQuestion(response.content)}:{})};
   }
   if(calls.length!==1)return {kind:"FINISH",reason:"INVALID"};
-  const name=calls[0].name as HermesToolName|"respond_to_user"|"ask_user";
+  const name=calls[0].name as HermesToolName|"respond_to_user"|"ask_user"|"reset_shopping_task";
+  if(input.agentPlanning&&name==="reset_shopping_task"){
+   return calls[0].arguments==="{}"&&resetTaskRequested(input.message)?{kind:"RESET"}:{kind:"FINISH",reason:"INVALID"};
+  }
   if(input.agentPlanning&&(name==="respond_to_user"||name==="ask_user")){
    try{
     const value:unknown=JSON.parse(calls[0].arguments),v=value as Record<string,unknown>;

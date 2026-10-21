@@ -8,6 +8,7 @@ The former V2 first ran `guardBrainMessage` / `routeBrainMessage` and only enter
 With V2 enabled, the Graph `route` node provides a **neutral execution permission**, not a semantic class, and immediately enters the same Agent decision loop for all ordinary user turns. The model selects:
 - `respond_to_user` or a bounded text response (non-Tool action);
 - `ask_user` (one explicit clarification);
+- `reset_shopping_task` only after the model selects it AND the server verifies an explicit current-user reset request; historical orders and saved long-term preferences remain unchanged.
 - any enabled **read-only** Commerce/RAG Tool, with strict server-side argument/ID/actor/Shopping Plan validation.
 
 The current Shopping Plan, verified displayed-product snapshot, bounded conversation history, and per-turn Tool Call/Result transcript remain the Agent context. Real prices, order facts, reviews, and Tool observations are not made authoritative by model prose. When the Agent did a Commerce read, the server retains verified summaries rather than treating free-form model assertions as facts.

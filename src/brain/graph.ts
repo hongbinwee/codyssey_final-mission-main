@@ -38,7 +38,7 @@ const State=Annotation.Root({
  activeTask:Annotation<AgentTaskState|null>(),
  agentRead:Annotation<boolean>(),agentAction:Annotation<AgentAction|null>(),
  agentObservations:Annotation<AgentObservation[]>(),agentTranscript:Annotation<ChatMsg[]>(),agentStart:Annotation<number>(),
- agentSearched:Annotation<boolean>(),agentStop:Annotation<string|null>(),agentQuestion:Annotation<string|null>(),agentAnswer:Annotation<string|null>(),agentAnswerIntent:Annotation<BrainRoute["kind"]|null>(),
+ agentSearched:Annotation<boolean>(),agentStop:Annotation<string|null>(),agentQuestion:Annotation<string|null>(),agentAnswer:Annotation<string|null>(),agentAnswerIntent:Annotation<BrainRoute["kind"]|null>(),agentReset:Annotation<boolean>(),
  agentDecisionMs:Annotation<number>(),agentToolMs:Annotation<number>(),agentDecisionCount:Annotation<number>()
 });
 /**
@@ -77,7 +77,7 @@ export function createPersistentResearchGraph(
      const prepared=await prepareTurn(state.request,deps);
      await verify();
      return {prepared,agentRead:false,agentAction:null,agentObservations:[],agentTranscript:[],agentStart:0,
-       agentSearched:false,agentStop:null,agentQuestion:null,agentAnswer:null,agentAnswerIntent:null,
+       agentSearched:false,agentStop:null,agentQuestion:null,agentAnswer:null,agentAnswerIntent:null,agentReset:false,
        agentDecisionMs:0,agentToolMs:0,agentDecisionCount:0};
    })
    .addNode("route",async state=>{
@@ -244,6 +244,9 @@ export function createPersistentResearchGraph(
        decision.kind==="ASK_USER"?
        {...metrics,agentStart:startAt,agentAction:null,agentStop:"DONE",agentQuestion:decision.question,agentAnswer:null,
         agentAnswerIntent:"UNCERTAIN"}:
+       decision.kind==="RESET"?
+       {...metrics,agentStart:startAt,agentAction:null,agentStop:"DONE",agentQuestion:null,agentAnswer:null,
+        agentAnswerIntent:"UNCERTAIN",agentReset:true}:
        {...metrics,agentStart:startAt,agentAction:null,agentStop:decision.reason,agentQuestion:decision.question??null,
         agentAnswer:null,agentAnswerIntent:null};
    })
@@ -365,6 +368,19 @@ export function createPersistentResearchGraph(
    })
    .addNode("agent_finish",async state=>{
      const start=performance.now();
+     if(deps.agentPlanning&&state.agentReset){
+       const result:ResearchResult={
+         conversationId:state.request.conversationId,messageId:state.prepared.messageId,
+         clientActionId:state.request.clientActionId,intentKind:"UNCERTAIN",datasetVersion:deps.datasetVersion,
+         ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},
+         explanation:{kind:"CONVERSATION",text:"현재 쇼핑 작업과 조건을 초기화했어요. 저장된 장기 선호와 주문 기록은 그대로예요.",
+           items:[],limitations:[]},
+         trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,
+           rankMs:0,hermesDecisions:state.agentDecisionCount??0,agentV2:1,
+           responseMs:performance.now()-start,totalMs:performance.now()-state.prepared.startedAt}
+       };
+       await verify();return {researchResult:result,evidence:[]};
+     }
      const observations=state.agentObservations??[];
      const lastOrder=observations.some(o=>o.tool==="get_orders"||o.tool==="get_order"||o.tool==="get_shipping_status");
      const lastCart=observations.some(o=>o.tool==="get_cart");
