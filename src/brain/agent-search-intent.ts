@@ -37,10 +37,19 @@ export function parseAgentSearchIntent(raw:unknown,message:string,previous?:Shop
   if(!intent.queryMode||!intent.budgetMode)return null;
   if(!previous&&intent.queryMode!=="SET")return null;
   const changed=intent.queryMode==="SET"&&(!previous||intent.query!==previous.query);
+  // A model-proposed numeric ceiling must be explicitly present in this user's message
+  // (or be the unchanged prior ceiling), never guessed from catalogue prices.
+  if(intent.budgetMode==="SET"&&intent.context.maxTotalWon!==null&&
+     intent.context.maxTotalWon!==previous?.maxTotalWon){
+   const amounts=[...message.matchAll(/(\d+(?:,\d{3})*)\s*(만\s*원|원)/g)]
+     .map(m=>Number(m[1].replaceAll(",",""))*(m[2].replace(/\s/g,"")==="만원"?10000:1));
+   if(!amounts.includes(intent.context.maxTotalWon))return null;
+  }
   if(previous&&!changed){
    if(intent.budgetMode==="CLEAR"&&previous.maxTotalWon!==null&&
       !/(예산|가격|금액).{0,15}(?:상관없|제한없|없애|취소|초기화|해제)/.test(message))return null;
    if(["CLEAR","REPLACE"].includes(intent.requirementsMode??"")&&
+       previous.requiredConditions.some(c=>!intent.context.requiredConditions.includes(c))&&
        !/(?:조건|필수).{0,20}(?:해제|취소|빼|없애|상관없|제외)|(?:남성|남자|여성|여자).{0,10}(?:아닌|말고|제외)/.test(message))return null;
   }
   const stated=(s:string)=>message.includes(s)||(gender(s)!==null&&gender(message)===gender(s));
