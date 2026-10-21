@@ -31,7 +31,9 @@ import {createConversationResponder} from "./conversation-response.ts";
 import {createFastIntentPort} from "./fast-intent.ts";
 import {currentDatasetResult} from "./dataset-state.ts";
 import type {ResearchResult} from "./read-flow.ts";
-import {createReviewSummaryLookup} from "./review-summary.ts";
+import {createReviewEvidenceLookup} from "./review-evidence.ts";
+import {createScopedReviewSearch} from "./review-rag.ts";
+import {createReviewRequestResolver} from "./review-request-resolver.ts";
 import {createReviewSummaryResponder} from "./review-summary-response.ts";
 import {createReviewAnalysisLookup} from "./review-analysis.ts";
 
@@ -225,13 +227,15 @@ export async function createBrainRuntime(options:{
    const groundedResponder=options.rag?.contract==="v4"
      ?createLlmGroundedResponder(options.provider):undefined;
    const catalog=options.catalog??createCatalog(options.catalogSource??"public");
-   const lookupReviewSummary=createReviewSummaryLookup(catalog,options.rag?.datasetVersion);
+   const lookupReviewSummary=createReviewEvidenceLookup(catalog,options.rag?.datasetVersion,
+     options.rag?.mode!=='local'&&options.rag?.contract==='v4'?createScopedReviewSearch(options.rag,catalog):undefined);
    const respondReviewSummary=createReviewSummaryResponder(options.provider);
    const lookupReviewAnalysis=createReviewAnalysisLookup(catalog,options.rag?.datasetVersion);
    const ownQaCommerce=qaCommerceActivityAllowed({catalogSource:options.catalogSource,
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
-     reviewSummary:async ({request,previous})=>respondReviewSummary(await lookupReviewSummary(request,previous)),
+     reviewRoute:createReviewRequestResolver(options.provider),
+     reviewSummary:async input=>respondReviewSummary(await lookupReviewSummary(input)),
      reviewAnalysis:lookupReviewAnalysis,
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:options.rag?.contract!=="v4",datasetVersion:options.rag?.datasetVersion,
      ...(ownQaCommerce?{activity:(actorUserId:string)=>readCommerceActivity(sql,actorUserId)}:{}),

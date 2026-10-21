@@ -143,6 +143,13 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
 export function BrainReviewSummary({summary,onOpenProduct,onChooseProduct}:{
  summary:ReviewSummaryData;onOpenProduct:(id:string,variantId?:string)=>void;onChooseProduct:(message:string)=>void;
 }){
+ if(summary.products&&summary.products.length>1){
+   const seen=new Set<string>();
+   const products=summary.products.filter(p=>p&&typeof p.id==='string'&&typeof p.name==='string'&&p.name.trim()&&!seen.has(p.id)&&seen.add(p.id)).slice(0,3);
+   return <>{products.map(product=><BrainReviewSummary key={product.id}
+     summary={{...summary,products:undefined,product,evidence:summary.evidence.filter(row=>row.productId===product.id)}}
+     onOpenProduct={onOpenProduct} onChooseProduct={onChooseProduct}/>)}</>;
+ }
  const product=summary.product&&typeof summary.product.id==="string"&&summary.product.id.length>0&&
    typeof summary.product.name==="string"&&summary.product.name.trim()?summary.product:undefined;
  const choices=(Array.isArray(summary.choices)?summary.choices:[]).filter(choice=>
@@ -152,11 +159,11 @@ export function BrainReviewSummary({summary,onOpenProduct,onChooseProduct}:{
  const evidence=product?allEvidence.filter(row=>{
    if(row.kind!=="REVIEW"||row.verified!==true||row.productId!==product.id||typeof row.text!=="string"||!row.text.trim()||
       row.text.length>1200||(summary.datasetVersion!==undefined&&row.datasetVersion!==summary.datasetVersion)||
-      (row.variantId!==null&&(!product.variantId||row.variantId!==product.variantId))||seen.has(row.id))return false;
+      (row.variantId!==null&&product.variantId!==undefined&&row.variantId!==product.variantId)||seen.has(row.id))return false;
    seen.add(row.id);return true;
  }).slice(0,20):[];
  const productEvidence=evidence.filter(row=>row.variantId===null);
- const variantEvidence=product?.variantId?evidence.filter(row=>row.variantId===product.variantId):[];
+ const variantEvidence=evidence.filter(row=>row.variantId!==null);
  const productImage=product?safeImage(product.image):undefined;
  const renderEvidence=(title:string,rows:typeof evidence)=>rows.length>0&&<section className="brain-review-evidence-scope" aria-label={title}>
    <h4>{title}</h4><ul>{rows.map(row=><li key={row.id}>
@@ -177,7 +184,7 @@ export function BrainReviewSummary({summary,onOpenProduct,onChooseProduct}:{
    {product&&(productEvidence.length>0||variantEvidence.length>0)&&<div className="brain-review-evidence">
      <h3>요약에 사용한 후기 원문</h3>
      {renderEvidence("상품 단위 후기",productEvidence)}
-     {renderEvidence("선택 옵션 후기",variantEvidence)}
+     {renderEvidence(product.variantId?"선택 옵션 후기":"상품에 속한 옵션 후기",variantEvidence)}
    </div>}
  </section>;
 }

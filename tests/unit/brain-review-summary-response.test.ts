@@ -47,22 +47,24 @@ test('CONS summaries expose only negative claims and preserve product-level revi
  const result=await respond(data('CONS',evidence));
  assert.equal(result.citations?.length,1);assert.equal(result.citations?.[0]?.sourceId,'negative');
  assert.equal(result.citations?.[0]?.sourceVariantId,null);
- assert.deepEqual(result.reviewSummary?.evidence.map(row=>row.sourceId),['negative','mixed']);
+ assert.deepEqual(result.reviewSummary?.evidence.map(row=>row.sourceId),['negative']);
  assert.match(payload,/향이 너무 강해 아쉬워요/);
- assert.doesNotMatch(payload,/향이 은은해서 좋아요|향에 대한 이야기예요/);
+ assert.match(payload,/향이 은은해서 좋아요/);
+ assert.match(payload,/향에 대한 이야기예요/);
  assert.doesNotMatch(result.reviewSummary?.evidence.map(row=>row.text).join(' ')??'',/향이 은은해서 좋아요|향에 대한 이야기예요/);
  assert.match(result.text,/아쉬운 점/);assert.doesNotMatch(result.text,/좋은 점|은은해서 좋아요/);
  let calls=0;
  const noNegative=await createReviewSummaryResponder({async chat(){calls++;return {content:output([])};}})(
    data('CONS',[review('only-positive','향이 은은해서 좋아요.'),review('neutral','향에 대한 이야기예요.')]),
  );
- assert.equal(calls,0);assert.match(noNegative.text,/뚜렷한 아쉬운 점을 찾지 못했어요/);
+ assert.equal(calls,1);assert.match(noNegative.text,/검색된 후기 표본에서 확인된 아쉬운 점을 찾지 못했어요/);
+ assert.equal(noNegative.failure,undefined);
  assert.deepEqual(noNegative.reviewSummary?.evidence,[]);
  const abstained=await createReviewSummaryResponder({async chat(){return {content:output([])};}})(data('CONS',[evidence[1]!]));
- assert.match(abstained.text,/후기를 요약하지 못했어요/);
- assert.doesNotMatch(abstained.text,/뚜렷한 아쉬운 점을 찾지 못했어요/);
- assert.deepEqual(abstained.citations?.map(row=>row.quote),['향이 너무 강해 아쉬워요.']);
- assert.deepEqual(abstained.reviewSummary?.evidence.map(row=>row.text),['향이 너무 강해 아쉬워요.']);
+ assert.equal(abstained.failure,undefined);
+ assert.match(abstained.text,/확인된 아쉬운 점을 찾지 못했어요/);
+ assert.deepEqual(abstained.citations,[]);
+ assert.deepEqual(abstained.reviewSummary?.evidence,[]);
 });
 
 test('invalid model claims fall back to a clearly labeled exact source excerpt without presenting it as a summary',async()=>{
@@ -112,14 +114,14 @@ test('preserves Commerce names with numbers and still writes a natural, scoped s
  assert.match(result.text,/좋은 점 \(향\): 부드러운 향을 좋게 평가해요/);
 });
 
-test('a negative polarity cannot be assigned to a positive quote even when the full review also has criticism',async()=>{
+test('model-selected positive wording remains positive when another part of the review has criticism',async()=>{
  const source=review('mixed-source','향이 은은해서 좋아요. 다만 향이 너무 강해 아쉬워요.');
  const respond=createReviewSummaryResponder({async chat(){return {content:output([
-  {sourceId:'mixed-source',quote:'향이 은은해서 좋아요.',aspect:'scent',polarity:'CON',claim:'은은한 향을 아쉬워해요.'},
+  {sourceId:'mixed-source',quote:'향이 은은해서 좋아요.',aspect:'scent',polarity:'PRO',claim:'은은한 향을 좋게 평가해요.'},
  ])};}});
  const result=await respond(data('ALL',[source]));
- assert.match(result.text,/요약하지 못했어요/);
- assert.doesNotMatch(result.text,/은은한 향을 아쉬워해요/);
+ assert.match(result.text,/좋은 점 \(향\)/);
+ assert.doesNotMatch(result.text,/아쉬운 점.*은은한 향/);
  assert.deepEqual(result.citations?.map(row=>row.quote),['향이 은은해서 좋아요.']);
 });
 
@@ -183,4 +185,96 @@ test('unverified input evidence is removed from the response data passed to the 
  const result=await respond(data('ALL',[source,unverified]));
  assert.deepEqual(result.reviewSummary?.evidence.map(row=>row.sourceId),['safe-review']);
  assert.ok(result.reviewSummary?.evidence.every(row=>row.kind==='REVIEW'&&row.verified===true));
+});
+
+test('CONS sends the complete verified sample to the model and exposes only model-selected negative evidence',async()=>{
+ const positive=review('clear-skin','트러블이 없고 촉촉해요.');
+ const negative=review('dry-later','몇 시간 지나면 건조해져요.');
+ const mixed=review('mixed-dry','처음엔 촉촉하지만 몇 시간 지나면 건조해요.');
+ let payload='';
+ const respond=createReviewSummaryResponder({async chat(messages){
+  payload=messages[1]?.content??'';
+  return {content:output([
+   {sourceId:'clear-skin',quote:'트러블이 없고 촉촉해요.',aspect:'moisturizing',polarity:'PRO',claim:'촉촉하고 트러블이 없다는 긍정 의견이에요.'},
+   {sourceId:'dry-later',quote:'몇 시간 지나면 건조해져요.',aspect:'moisturizing',polarity:'CON',claim:'시간이 지나면서 건조해진다는 의견이에요.'},
+   {sourceId:'mixed-dry',quote:'몇 시간 지나면 건조해요.',aspect:'moisturizing',polarity:'CON',claim:'시간이 지나면 건조하다는 의견이에요.'},
+  ])};
+ }});
+ const result=await respond(data('CONS',[positive,negative,mixed]));
+ assert.match(payload,/트러블이 없고 촉촉해요/);
+ assert.match(payload,/몇 시간 지나면 건조해져요/);
+ assert.match(payload,/처음엔 촉촉하지만 몇 시간 지나면 건조해요/);
+ assert.deepEqual(result.citations?.map(row=>row.sourceId),['dry-later','mixed-dry']);
+ assert.deepEqual(result.reviewSummary?.evidence.map(row=>row.sourceId),['dry-later','mixed-dry']);
+ assert.doesNotMatch(result.text,/트러블이 없고 촉촉|처음엔 촉촉/);
+});
+
+test('CONS service failure never presents an untroubled positive review as a drawback excerpt',async()=>{
+ const positive=review('clear-skin','트러블이 없고 촉촉해요.');
+ const result=await createReviewSummaryResponder({async chat(){throw new Error('LLM unavailable');}})(
+  data('CONS',[positive]));
+ assert.equal(result.failure?.code,'MODEL_UNAVAILABLE');
+ assert.match(result.text,/요약하지 못했어요/);
+ assert.doesNotMatch(result.text,/트러블이 없고 촉촉/);
+ assert.deepEqual(result.citations,[]);
+ assert.deepEqual(result.reviewSummary?.evidence,[]);
+});
+
+test('a valid empty CONS answer is a no-drawback result, distinct from failed summarization',async()=>{
+ const result=await createReviewSummaryResponder({async chat(){return {content:output([])};}})(
+  data('CONS',[review('positive','트러블이 없고 촉촉해요.')]));
+ assert.equal(result.failure,undefined);
+ assert.match(result.text,/검색된 후기 표본에서 확인된 아쉬운 점을 찾지 못했어요/);
+ assert.doesNotMatch(result.text,/요약하지 못했어요/);
+ assert.deepEqual(result.citations,[]);
+ assert.deepEqual(result.reviewSummary?.evidence,[]);
+});
+
+test('semantic multi-product claims retain only exact query matches linked to their product sources',async()=>{
+ const products=[{id:'p-mask',name:'수분 마스크'},{id:'p-toner',name:'수분 토너'}];
+ const evidence=[
+  review('unrelated-mask','향이 은은해서 좋아요.'),
+  review('wrong-time','몇 시간 지나면 건조해요.'),
+  {...review('semantic-toner','처음부터 건조해요.'),productId:'p-toner'},
+ ];
+ const input={...data('ALL',evidence),product:undefined,products,semanticQuery:'처음부터 건조함',scope:'SEMANTIC_SAMPLES'};
+ const respond=createReviewSummaryResponder({async chat(messages){
+  const payload=JSON.parse(messages[1]?.content??'{}');
+  assert.equal(payload.semanticQuery,'처음부터 건조함');
+  assert.equal(payload.products.length,2);
+  return {content:output([
+   {sourceId:'unrelated-mask',quote:'향이 은은해서 좋아요.',aspect:'scent',polarity:'PRO',claim:'은은한 향을 좋게 평가해요.',matches:false},
+   {sourceId:'wrong-time',quote:'몇 시간 지나면 건조해요.',aspect:'moisturizing',polarity:'CON',claim:'시간이 지난 뒤 건조하다는 의견이에요.',matches:false},
+   {sourceId:'semantic-toner',quote:'처음부터 건조해요.',aspect:'moisturizing',polarity:'MIXED',claim:'처음부터 건조하다는 아쉬움이 언급돼요.',matches:true},
+  ])};
+ }});
+ const result=await respond(input as unknown as ReviewSummaryData);
+ assert.deepEqual(result.citations?.map(row=>[row.productId,row.sourceId]),[['p-toner','semantic-toner']]);
+ const summary=result.reviewSummary as unknown as {products?:{id:string}[]}|undefined;
+ assert.deepEqual(summary?.products?.map(row=>row.id),['p-mask','p-toner']);
+ assert.deepEqual(result.reviewSummary?.evidence.map(row=>row.sourceId),['semantic-toner']);
+ assert.doesNotMatch(result.text,/은은한 향/);
+ assert.match(result.text,/수분 토너/);
+});
+
+test('semantic temporal matching accepts an exact numeric time quote and excludes the positive opposite',async()=>{
+ const query='2시간 뒤 건조함';
+ const dry=review('dry-after-two-hours','처음엔 촉촉하지만 2시간 뒤 건조해져요.');
+ const moist=review('moist-after-thirty-minutes','30분 뒤에도 촉촉해요.');
+ const input={...data('ALL',[dry,moist]),semanticQuery:query,scope:'SEMANTIC_SAMPLES'};
+ const respond=createReviewSummaryResponder({async chat(){return {content:output([
+  {sourceId:'dry-after-two-hours',quote:'2시간 뒤 건조해져요.',aspect:'moisturizing',polarity:'CON',claim:'시간이 지난 뒤 건조하다는 의견이에요.',matches:true},
+  {sourceId:'moist-after-thirty-minutes',quote:'30분 뒤에도 촉촉해요.',aspect:'moisturizing',polarity:'PRO',claim:'시간이 지난 뒤에도 촉촉하다는 의견이에요.',matches:false},
+ ])};}});
+
+ const result=await respond(input as unknown as ReviewSummaryData);
+
+ assert.deepEqual(result.citations?.map(row=>[row.sourceId,row.quote]),[
+  ['dry-after-two-hours','2시간 뒤 건조해져요.'],
+ ]);
+ assert.deepEqual(result.reviewSummary?.evidence.map(row=>[row.sourceId,row.text]),[
+  ['dry-after-two-hours','2시간 뒤 건조해져요.'],
+ ]);
+ assert.match(result.text,/건조하다는 의견/);
+ assert.doesNotMatch(result.text,/30분|촉촉하다는 의견/);
 });

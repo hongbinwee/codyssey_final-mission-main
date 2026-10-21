@@ -28,7 +28,8 @@ export interface ResearchResult {
  trace:{memoryMs:number;intentMs:number;retrievalMs:number;rankMs:number;totalMs:number;[key:string]:number}
 }
 export interface ResearchDeps {
- reviewSummary?:(input:{request:ReviewSummaryRequest;previous?:ResearchResult})=>Promise<GroundedExplanation>;
+ reviewSummary?:(input:{request:ReviewSummaryRequest;previous?:ResearchResult;originalQuestion?:string;requestId?:string;category?:string})=>Promise<GroundedExplanation>;
+ reviewRoute?:(input:{message:string;previous?:ResearchResult;context?:DialogueContext;pageContext?:import('./page-context.ts').SafePageContext})=>Promise<BrainRoute|undefined>;
  reviewAnalysis?:(input:{request:ReviewAnalysisRequest;products:DisplayedReviewProduct[]})=>Promise<ReviewAnalysisData>;
  clarifyBeforeSearch?:boolean;
  datasetVersion?:string;

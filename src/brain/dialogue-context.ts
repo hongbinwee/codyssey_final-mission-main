@@ -57,6 +57,9 @@ function displayedProducts(previous: ResearchResult): DialogueContext["displayed
       variantId: previous.explanation.reviewSummary.product.variantId,
       name: previous.explanation.reviewSummary.product.name,
     }] : []),
+    ...(previous.explanation?.reviewSummary?.products??[]).map(product=>({
+      productId:product.id,variantId:product.variantId,name:product.name,
+    })),
     ...(previous.explanation?.reviewSummary?.choices ?? []).map((choice) => ({
       productId: choice.productId, name: choice.name,
     })),
@@ -119,13 +122,18 @@ function pendingReview(
   const query = safeText(request.query, 160);
   const displayIndex = Number.isSafeInteger(request.displayIndex) && request.displayIndex! >= 1 && request.displayIndex! <= 3
     ? request.displayIndex : undefined;
+  const productIds=request.productIds?.length&&request.productIds.length<=3&&new Set(request.productIds).size===request.productIds.length&&
+    request.productIds.every(id=>ids.has(id))?request.productIds:undefined;
+  const semanticQuery=safeText(request.semanticQuery,300);
   const useCurrent = typeof request.useCurrent === "boolean" ? request.useCurrent : undefined;
   if ((request.productId && !productId) || (request.pageProductId && !pageProductId) ||
-      (request.variantId && !variantId) || (request.query && !query)) return undefined;
+      (request.variantId && !variantId) || (request.query && !query) || (request.productIds&&!productIds) ||
+      (request.semanticQuery&&!semanticQuery)) return undefined;
   return {
     ...(query ? { query } : {}), ...(productId ? { productId } : {}),
     ...(pageProductId ? { pageProductId } : {}), ...(variantId ? { variantId } : {}),
     ...(displayIndex ? { displayIndex } : {}), ...(useCurrent !== undefined ? { useCurrent } : {}),
+    ...(productIds?{productIds}:{}),...(semanticQuery?{semanticQuery}:{}),
     focus: request.focus,
   };
 }

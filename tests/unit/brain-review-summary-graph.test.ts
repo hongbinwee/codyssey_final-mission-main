@@ -165,7 +165,8 @@ test("review lookup failures are sanitized and never become recommendation failu
  assert.equal(result.intentKind,"REVIEW_SUMMARY");
  assert.equal(result.explanation?.kind,"REVIEW_SUMMARY");
  assert.doesNotMatch(result.explanation!.text,/secret database detail/);
- assert.equal(result.explanation?.failure,undefined);
+ assert.deepEqual(result.explanation?.failure,{code:'RETRIEVAL_UNAVAILABLE'});
+ assert.ok(result.pendingReview);
  assert.deepEqual(result.ranking,{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0});
 });
 

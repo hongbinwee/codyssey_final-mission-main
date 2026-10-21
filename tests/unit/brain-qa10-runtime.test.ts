@@ -10,9 +10,10 @@ import {MemorySaver} from '@langchain/langgraph';
 
 test('QA10 runtime connects the selected Commerce catalog to review lookup and grounded summary',()=>{
  const source=readFileSync(new URL('../../src/brain/runtime.ts',import.meta.url),'utf8');
- assert.match(source,/createReviewSummaryLookup\(catalog,options\.rag\?\.datasetVersion\)/);
+ assert.match(source,/createReviewEvidenceLookup\(catalog,options\.rag\?\.datasetVersion,/);
+ assert.match(source,/createScopedReviewSearch\(options\.rag,catalog\)/);
  assert.match(source,/createReviewSummaryResponder\(options\.provider\)/);
- assert.match(source,/reviewSummary:async\s*\(\{request,previous\}\)=>respondReviewSummary\(await lookupReviewSummary\(request,previous\)\)/);
+ assert.match(source,/reviewSummary:async input=>respondReviewSummary\(await lookupReviewSummary\(input\)\)/);
 });
 
 test('QA10 turn keeps authenticated ownership and forwards only sanitized navigation hints',async()=>{

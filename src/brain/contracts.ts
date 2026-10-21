@@ -11,11 +11,14 @@ export interface ReviewSort {aspect:string;direction:"MOST_POSITIVE"}
 export interface ShoppingContext { maxTotalWon:number|null;minTotalWon?:number; requiredConditions:string[]; currentPreferences:Partial<Record<PreferenceKey,PreferenceValue>>; category?:string;attributePreferences?:string[];reviewSort?:ReviewSort }
 export interface EvidenceRecord { id:string;productId:string;variantId:string|null;kind:"SPEC"|"REVIEW";sourceKind?:"REAL"|"SYNTHETIC";sourceRef?:string;text?:string;sourceId?:string;rating?:number;verified?:boolean;datasetVersion?:string }
 /** Read-only review requests are independent of recommendation price/stock gates. */
-export interface ReviewSummaryRequest {query?:string;productId?:string;pageProductId?:string;variantId?:string;displayIndex?:number;useCurrent?:boolean;focus:"ALL"|"CONS"}
+export interface ReviewSummaryRequest {query?:string;productId?:string;pageProductId?:string;variantId?:string;displayIndex?:number;useCurrent?:boolean;productIds?:string[];semanticQuery?:string;focus:"ALL"|"CONS"}
 export interface ReviewSummaryData {
  status:"READY"|"AMBIGUOUS"|"NOT_FOUND"|"NO_REVIEWS";
  focus:"ALL"|"CONS";
  product?:{id:string;name:string;variantId?:string;image?:string};
+ products?:{id:string;name:string;variantId?:string;image?:string}[];
+ semanticQuery?:string;
+ scope?:"SEMANTIC_SAMPLES";
  choices?:{productId:string;name:string}[];
  evidence:EvidenceRecord[];datasetVersion?:string;
 }

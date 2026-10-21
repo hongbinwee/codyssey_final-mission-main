@@ -42,6 +42,7 @@ function previousProductIds(previous?:ResearchResult,version?:string):Set<string
  for(const item of previous?.explanation?.items??[])if(validId(item.productId))ids.add(item.productId);
  const current=previous?.explanation?.reviewSummary?.product?.id;
  if(validId(current))ids.add(current);
+ for(const row of previous?.explanation?.reviewSummary?.products??[])if(validId(row.id))ids.add(row.id);
  return ids;
 }
 function choiceId(query:string,previous?:ResearchResult):string|undefined{
@@ -57,6 +58,8 @@ function previousProductName(id:string,previous?:ResearchResult,version?:string)
  if(displayed&&typeof displayed.name==="string"&&displayed.name.trim())return displayed.name;
  const product=previous?.explanation?.reviewSummary?.product;
  if(product?.id===id&&typeof product.name==="string"&&product.name.trim())return product.name;
+ const semanticProduct=previous?.explanation?.reviewSummary?.products?.find(item=>item.id===id);
+ if(semanticProduct&&typeof semanticProduct.name==='string'&&semanticProduct.name.trim())return semanticProduct.name;
  const choice=previous?.explanation?.reviewSummary?.choices?.find(item=>item.productId===id);
  if(choice&&typeof choice.name==="string"&&choice.name.trim())return choice.name;
  const item=previous?.explanation?.items?.find(candidate=>candidate.productId===id);
