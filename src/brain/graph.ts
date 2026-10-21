@@ -206,11 +206,12 @@ export function createPersistentResearchGraph(
      const decisionStarted=performance.now();
      const decision=await decideHermesAction({
        provider:deps.hermes.provider,message:state.request.userMessage,
-       plan:state.intentRoute.search?state.shoppingPlan:undefined,
+       plan:state.intentRoute.search?(state.shoppingPlan??state.researchResult?.shoppingPlan):undefined,
        memories:state.prepared.memories,task:state.activeTask,
        recentTurns:state.prepared.recentTurns,
        observations:state.agentObservations??[],tools:agentPorts(state),
-       displayedProducts:state.intentRoute.search?state.shoppingPlan?.lastDisplayedProducts:state.researchResult?.shoppingPlan?.lastDisplayedProducts,
+       displayedProducts:state.shoppingPlan?.lastDisplayedProducts??state.researchResult?.shoppingPlan?.lastDisplayedProducts,
+       agentPlanning:deps.agentPlanning===true&&state.intentRoute.search,
        offerSearch:state.intentRoute.search,startedAt:startAt,
      });
      const metrics={agentDecisionMs:(state.agentDecisionMs??0)+performance.now()-decisionStarted,
@@ -225,8 +226,21 @@ export function createPersistentResearchGraph(
      const observations=state.agentObservations??[];
      const toolStarted=performance.now();
      if(action.name==="search_products"){
-       if(!state.intentRoute.search||!state.shoppingPlan)throw Error("unplanned search denied");
+       if(!state.intentRoute.search)throw Error("unplanned search denied");
        let plan=state.shoppingPlan;
+       if(deps.agentPlanning){
+         if(!action.args.planIntent)throw Error("agent search missing validated intent");
+         const previous=state.researchResult?.explanation?state.researchResult.shoppingPlan:null;
+         const resolved=await resolveTurnPlan(state.request,state.prepared,previous,{
+           ...deps,intent:{extract:async()=>action.args.planIntent!}
+         });
+         plan=deps.clarifyBeforeSearch?rememberInterview(resolved,state.request.userMessage,state.prepared.memories):resolved;
+         if(deps.clarifyBeforeSearch&&needsInterview(plan,state.request.userMessage,state.prepared.memories).length){
+           await verify();
+           return {shoppingPlan:plan,agentAction:null,agentStop:"NEEDS_CLARIFICATION"};
+         }
+       }
+       if(!plan)throw Error("search plan not available");
        const history=observations.find(o=>o.tool==="get_purchase_history"&&o.ok);
        const purchases=(history?.data as {purchases?:import("./purchase-history.ts").PurchaseSnapshot[]})?.purchases??[];
        const prior=purchases[0];
@@ -405,7 +419,8 @@ export function createPersistentResearchGraph(
        // explanation that can imply a whole-review ranking or unrelated claims.
        explanation:state.researchResult.reviewSortInfo||state.shoppingPlan.priceSortOrder?
          buildGroundedExplanation(state.researchResult.ranking,state.evidence,state.shoppingPlan):
-         groundedResponder&&(!deps.fastResponses||state.intentRoute.kind==="REVIEW_COMPARE")
+         groundedResponder&&(!deps.fastResponses||state.intentRoute.kind==="REVIEW_COMPARE")&&
+           (!deps.agentPlanning||state.evidence.some(e=>e.kind==="REVIEW"&&e.verified===true))
           ?await groundedResponder({originalQuestion:state.request.userMessage,
             ranking:state.researchResult.ranking,evidence:state.evidence,plan:state.shoppingPlan,mode:"RECOMMEND"})
           :buildGroundedExplanation(state.researchResult.ranking,state.evidence,state.shoppingPlan)
@@ -436,6 +451,7 @@ export function createPersistentResearchGraph(
      researchResult.trace={...researchResult.trace,hermesToolCalls:(state.agentObservations??[]).length,
        hermesDecisions:state.agentDecisionCount??0,hermesDecisionMs:Math.round(state.agentDecisionMs??0),
        hermesToolMs:Math.round(state.agentToolMs??0),hermesFailedTools:(state.agentObservations??[]).filter(o=>!o.ok).length,
+       agentV2:deps.agentPlanning?1:0,contextHistoryMs:Math.round(state.prepared.historyMs??0),
        routeMs:state.routeMs,candidatesReadyMs:started-state.prepared.startedAt,responseMs:performance.now()-started,
        totalMs:performance.now()-state.prepared.startedAt};
      await verify();
@@ -443,7 +459,7 @@ export function createPersistentResearchGraph(
    })
    .addEdge(START,"prepare")
    .addEdge("prepare","route")
-   .addConditionalEdges("route",state=>state.reviewSummaryRequest?"review_summary":state.priorExplanation?"explain_previous":state.wishlistRequest?"wishlist":state.agentRead?"agent_decide":state.intentRoute.search?"plan":"converse",["review_summary","explain_previous","wishlist","agent_decide","plan","converse"])
+   .addConditionalEdges("route",state=>state.reviewSummaryRequest?"review_summary":state.priorExplanation?"explain_previous":state.wishlistRequest?"wishlist":state.agentRead?"agent_decide":state.intentRoute.search?(deps.agentPlanning&&deps.hermes?"agent_decide":"plan"):"converse",["review_summary","explain_previous","wishlist","agent_decide","plan","converse"])
    .addEdge("review_summary",END)
    .addEdge("explain_previous",END)
    .addEdge("wishlist",END)
@@ -452,12 +468,14 @@ export function createPersistentResearchGraph(
    .addConditionalEdges("agent_recover",state=>state.researchResult.explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE"?END:"respond",[END,"respond"])
    .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes?"agent_decide":"retrieve",["clarify","agent_decide","retrieve"])
    .addConditionalEdges("agent_decide",state=>state.agentAction?"agent_execute":
-     state.agentSearched?"respond":state.intentRoute.search&&!state.agentQuestion&&
+     state.agentSearched?"respond":!deps.agentPlanning&&state.intentRoute.search&&!state.agentQuestion&&
        (state.agentStop==="MODEL_UNAVAILABLE"||state.agentStop==="DONE")&&
        (state.agentObservations??[]).every(o=>o.tool==="get_purchase_history")?"agent_recover":"agent_finish",
      ["agent_execute","respond","agent_recover","agent_finish"])
-   .addConditionalEdges("agent_execute",state=>state.agentStop==="RETRIEVAL_UNAVAILABLE"?"agent_finish":"agent_decide",
-     ["agent_finish","agent_decide"])
+   .addConditionalEdges("agent_execute",state=>state.agentStop==="NEEDS_CLARIFICATION"?"clarify":
+     state.agentStop==="RETRIEVAL_UNAVAILABLE"?"agent_finish":
+     deps.agentPlanning&&state.agentSearched&&!/(리뷰|후기|단점|장점|비교|전에|지난번|구매했던)/.test(state.request.userMessage)?"respond":"agent_decide",
+     ["clarify","agent_finish","agent_decide","respond"])
    .addEdge("clarify",END)
    .addConditionalEdges("retrieve",state=>state.researchResult.explanation?.failure?.code==='RETRIEVAL_UNAVAILABLE'?END:'respond',[END,'respond'])
    .addEdge("respond",END)

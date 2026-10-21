@@ -233,6 +233,7 @@ export async function createBrainRuntime(options:{
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:options.rag?.contract!=="v4",datasetVersion:options.rag?.datasetVersion,
+     agentPlanning:options.hermesEnabled===true&&process.env.BRAIN_AGENT_ARCH_V2==="1",
      ...(options.hermesEnabled?{recentTurns:async(actorUserId:string,conversationId:string)=>{
        // Actor-owned completed receipts only. No raw checkpoints, payment data or Tool payloads.
        const rows=await db.unsafe<Array<{user_message:string;assistant_summary:string|null}>>(

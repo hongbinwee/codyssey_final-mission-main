@@ -38,6 +38,7 @@ export interface ResearchResult {
  trace:{memoryMs:number;intentMs:number;retrievalMs:number;rankMs:number;totalMs:number;[key:string]:number}
 }
 export interface ResearchDeps {
+ agentPlanning?:boolean;
  clarifyBeforeSearch?:boolean;
  recentTurns?:(actorUserId:string,conversationId:string)=>Promise<RecentAgentTurn[]>;
  reviewSummary?:VerifiedReviewSummarySource;

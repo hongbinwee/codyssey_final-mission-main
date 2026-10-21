@@ -2,6 +2,8 @@
 import type {Provider,ChatMsg} from "../llm.ts";
 import type {PurchaseSnapshot} from "./purchase-history.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
+import type {ShoppingIntent} from "./read-flow.ts";
+import {agentSearchSchema,parseAgentSearchIntent} from "./agent-search-intent.ts";
 import type {Preference} from "./contracts.ts";
 import {SHOPPING_POLICY} from "./policy.ts";
 import {selectShoppingSkill} from "./skills.ts";
@@ -49,11 +51,15 @@ const conditionalDefs:{name:HermesToolName;key:keyof HermesToolPort;description:
  {name:"get_shipping_status",key:"shipping",description:"Read shipping status for an owned order ID returned by get_orders.",schema:orderParam}
 ];
 const validId=(s:unknown):s is string=>typeof s==="string"&&s.length>0&&s.length<=128&&/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(s);
-export function parseHermesToolArgs(name:HermesToolName,raw:string):{productId?:string;orderId?:string;query:string}|null{
+export function parseHermesToolArgs(name:HermesToolName,raw:string,planning?:{message:string;previous?:ShoppingPlan}):{productId?:string;orderId?:string;query:string;planIntent?:ShoppingIntent}|null{
  let parsed:unknown;
  try{parsed=JSON.parse(raw);}catch{return null;}
  if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))return null;
  const input=parsed as Record<string,unknown>,keys=Object.keys(input);
+ if(name==="search_products"&&planning){
+  const planIntent=parseAgentSearchIntent(input,planning.message,planning.previous);
+  return planIntent?{query:"",planIntent}:null;
+ }
  const allowed=name==="get_product_detail"||name==="get_product_reviews"
   ?name==="get_product_reviews"?["product_id","query"]:["product_id"]
   :name==="get_order"||name==="get_shipping_status"?["order_id"]:[];
@@ -67,8 +73,10 @@ export function parseHermesToolArgs(name:HermesToolName,raw:string):{productId?:
   ...(order?{orderId:input.order_id as string}:{})};
 }
 /** Shared authoritative tool catalogue for both the original bounded loop and LangGraph H4. */
-export function hermesToolDefinitions(tools:HermesToolPort,offerSearch=true){
- return [...(offerSearch?HERMES_BASE_DEFINITIONS:HERMES_BASE_DEFINITIONS.filter(d=>d.function.name!=="search_products")),
+export function hermesToolDefinitions(tools:HermesToolPort,offerSearch=true,agentPlanning=false){
+ const defs=agentPlanning?HERMES_BASE_DEFINITIONS.map(d=>d.function.name==="search_products"?
+  definition("search_products","Propose current shopping intent and call Commerce-verified RAG. Preserve the confirmed plan: query/budget/requirements modes must reflect the CURRENT user message; never invent a hard constraint.",agentSearchSchema):d):HERMES_BASE_DEFINITIONS;
+ return [...(offerSearch?defs:defs.filter(d=>d.function.name!=="search_products")),
   ...conditionalDefs.filter(d=>typeof tools[d.key]==="function").map(d=>definition(d.name,d.description,d.schema))];
 }
 /** The model can make a second selection after it reads the first real Tool observation. */
