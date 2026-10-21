@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {MemorySaver} from "@langchain/langgraph";
 import {createPersistentResearchGraph} from "../../src/brain/graph.ts";
 import {parseAgentSearchIntent} from "../../src/brain/agent-search-intent.ts";
+import {appendAgentToolTranscript} from "../../src/brain/hermes-agent-step.ts";
 import {hermesToolDefinitions} from "../../src/brain/hermes-tools.ts";
 import type {ProductCandidate} from "../../src/brain/contracts.ts";
 import type {ResearchDeps} from "../../src/brain/read-flow.ts";
@@ -95,4 +96,55 @@ test("V2 rejects guessed numeric budgets on follow-ups",()=>{
  const previous={query:"세럼",maxTotalWon:50000,revision:1,requiredConditions:[],currentPreferences:{}} as const;
  const proposal=searchIntent({query:"세럼",queryMode:"KEEP",maxTotalWon:20000,budgetMode:"SET"});
  assert.equal(parseAgentSearchIntent(proposal,"그냥 다른 걸로",previous as never),null);
+});
+
+test("V2 preserves the native Tool Call/Result pair with bounded verified observations",()=>{
+ const transcript=appendAgentToolTranscript([],{
+  name:"get_orders",args:{query:""},callId:"call-1",
+  modelMessage:{role:"assistant",content:null,tool_calls:[{id:"call-1",name:"get_orders",arguments:"{}"}]}
+ },{tool:"get_orders",ok:true,data:{orders:{orders:[{orderId:"o-1",status:"CONFIRMED",itemSummary:"상품",
+ shippingStatus:"IN_TRANSIT",totalWon:10000,cancelEligible:false}],hasMore:false}}});
+ assert.equal(transcript.length,2);
+ assert.equal(transcript[0]?.role,"assistant");
+ assert.equal(transcript[1]?.role,"tool");
+ assert.equal(transcript[1]?.tool_call_id,"call-1");
+ assert.match(transcript[1]?.content??"",/o-1/);
+ assert.doesNotMatch(transcript[1]?.content??"",/actorUserId|password/);
+});
+test("V2 continues one ordered Tool transcript across order and shipping decisions without RAG",async()=>{
+ const toolNames:string[]=[];
+ let llmCalls=0,complete=false,ragCalls=0;
+ const deps2={agentPlanning:true,
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},
+  intent:{extract:async()=>{throw Error("unexpected Planner");}},
+  retriever:{search:async()=>{ragCalls++;throw Error("RAG not allowed");}},
+  hermes:{provider:{chat:async(messages:import("../../src/llm.ts").ChatMsg[])=>{
+    llmCalls++;
+    const priorTools=messages.filter(m=>m.role==="tool");
+    if(!priorTools.length)return {content:null,tool_calls:[{id:"order-id",name:"get_orders",arguments:"{}"}]};
+    assert.equal(priorTools[0]?.tool_call_id,"order-id");
+    if(priorTools.length===1){
+     const order=JSON.parse(priorTools[0]!.content??"{}");
+     assert.equal(order.orders.orders[0].orderId,"owned-1");
+     return {content:null,tool_calls:[{id:"shipping-id",name:"get_shipping_status",arguments:'{"order_id":"owned-1"}'}]};
+    }
+    assert.equal(priorTools[1]?.tool_call_id,"shipping-id");
+    complete=true;
+    return {content:"done",tool_calls:[]};
+   }},
+   history:async()=>[],reviewCount:async()=>null,toolPorts:()=>({
+    orders:async()=>{toolNames.push("orders");return {orders:[{orderId:"owned-1",createdAt:"2026-10-21",
+      itemSummary:"이어폰",totalWon:20000,status:"CONFIRMED",shippingStatus:"IN_TRANSIT",cancelEligible:false}],hasMore:false};},
+    shipping:async(id:string)=>{toolNames.push("shipping "+id);return {orderId:id,information:"AVAILABLE",
+      status:"IN_TRANSIT",estimatedArrivalAt:null,events:[]};}
+   })}
+ } as unknown as ResearchDeps;
+ const result=await createPersistentResearchGraph(deps2,new MemorySaver() as never)
+  .invoke(request("내 주문 배송 어디까지 왔어?"));
+ assert.equal(complete,true);
+ assert.equal(llmCalls,3);
+ assert.equal(ragCalls,0);
+ assert.deepEqual(toolNames,["orders","shipping owned-1"]);
+ assert.equal(result.taskState?.kind,"ORDER");
 });

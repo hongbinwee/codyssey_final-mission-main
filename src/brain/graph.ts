@@ -1,6 +1,7 @@
 import {guardBrainMessage} from './routing.ts';
 import type {HermesToolPort} from "./hermes-tools.ts";
-import {decideHermesAction,performHermesRead,readAgentRoute,summarizeAgentObservations,type AgentAction,type AgentObservation} from "./hermes-agent-step.ts";
+import {decideHermesAction,performHermesRead,readAgentRoute,summarizeAgentObservations,appendAgentToolTranscript,type AgentAction,type AgentObservation} from "./hermes-agent-step.ts";
+import type {ChatMsg} from "../llm.ts";
 import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.ts";
 import {ownedTask,nextTask,retainTask,taskForWishlistSelection,resetTaskRequested,type AgentTaskState,type TaskScope} from "./task-state.ts";
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
@@ -35,7 +36,7 @@ const State=Annotation.Root({
  reviewSummaryRequest:Annotation<NonNullable<ReturnType<typeof reviewSummaryIntent>>|null>(),
  activeTask:Annotation<AgentTaskState|null>(),
  agentRead:Annotation<boolean>(),agentAction:Annotation<AgentAction|null>(),
- agentObservations:Annotation<AgentObservation[]>(),agentStart:Annotation<number>(),
+ agentObservations:Annotation<AgentObservation[]>(),agentTranscript:Annotation<ChatMsg[]>(),agentStart:Annotation<number>(),
  agentSearched:Annotation<boolean>(),agentStop:Annotation<string|null>(),agentQuestion:Annotation<string|null>(),
  agentDecisionMs:Annotation<number>(),agentToolMs:Annotation<number>(),agentDecisionCount:Annotation<number>()
 });
@@ -74,7 +75,7 @@ export function createPersistentResearchGraph(
    .addNode("prepare",async state=>{
      const prepared=await prepareTurn(state.request,deps);
      await verify();
-     return {prepared,agentRead:false,agentAction:null,agentObservations:[],agentStart:0,
+     return {prepared,agentRead:false,agentAction:null,agentObservations:[],agentTranscript:[],agentStart:0,
        agentSearched:false,agentStop:null,agentQuestion:null,
        agentDecisionMs:0,agentToolMs:0,agentDecisionCount:0};
    })
@@ -211,7 +212,7 @@ export function createPersistentResearchGraph(
        recentTurns:state.prepared.recentTurns,
        observations:state.agentObservations??[],tools:agentPorts(state),
        displayedProducts:deps.agentPlanning&&!state.agentSearched?state.researchResult?.shoppingPlan?.lastDisplayedProducts:(state.shoppingPlan?.lastDisplayedProducts??state.researchResult?.shoppingPlan?.lastDisplayedProducts),
-       agentPlanning:deps.agentPlanning===true&&state.intentRoute.search,
+       agentPlanning:deps.agentPlanning===true,transcript:state.agentTranscript??[],
        offerSearch:state.intentRoute.search,startedAt:startAt,
      });
      const metrics={agentDecisionMs:(state.agentDecisionMs??0)+performance.now()-decisionStarted,
@@ -275,18 +276,21 @@ export function createPersistentResearchGraph(
            }))
          }};
          return {shoppingPlan:plan,researchResult:{...fetched.result,intentKind:state.intentRoute.kind},
-           evidence:fetched.evidence,agentSearched:true,agentObservations:[...observations,observation],agentAction:null,
+           evidence:fetched.evidence,agentSearched:true,agentObservations:[...observations,observation],
+           agentTranscript:deps.agentPlanning?appendAgentToolTranscript(state.agentTranscript??[],action,observation):[],agentAction:null,
            agentToolMs:(state.agentToolMs??0)+performance.now()-toolStarted};
        }catch(error){
          if(!(error instanceof RetrievalUnavailableError))throw error;
          await verify();return {...unavailable(state.request,state.prepared,plan,state.intentRoute,state.activeTask),
            agentSearched:false,agentStop:"RETRIEVAL_UNAVAILABLE",agentAction:null,
            agentObservations:[...observations,{tool:"search_products",ok:false,data:{unavailable:true}}],
+           agentTranscript:deps.agentPlanning?appendAgentToolTranscript(state.agentTranscript??[],action,{tool:"search_products",ok:false,data:{unavailable:true}}):[],
            agentToolMs:(state.agentToolMs??0)+performance.now()-toolStarted};
        }
      }
      const observation=await performHermesRead(action,agentPorts(state));
-     await verify();return {agentObservations:[...observations,observation],agentAction:null,
+     await verify();return {agentObservations:[...observations,observation],
+       agentTranscript:deps.agentPlanning?appendAgentToolTranscript(state.agentTranscript??[],action,observation):[],agentAction:null,
        agentToolMs:(state.agentToolMs??0)+performance.now()-toolStarted};
    })
    .addNode("agent_recover",async state=>{

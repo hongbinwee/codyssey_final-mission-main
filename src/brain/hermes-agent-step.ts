@@ -3,7 +3,7 @@
  * executes and checkpoints a bounded observation before the next decision.
  * The model NEVER supplies an actor identity or authorizes a mutation.
  */
-import type {Provider} from "../llm.ts";
+import type {Provider,ChatMsg} from "../llm.ts";
 import type {Preference} from "./contracts.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import type {ShoppingIntent} from "./read-flow.ts";
@@ -12,10 +12,11 @@ import {selectShoppingSkill} from "./skills.ts";
 import {HERMES_TOOL_LIMIT,hermesToolDefinitions,parseHermesToolArgs,type HermesToolName,type HermesToolPort} from "./hermes-tools.ts";
 import type {AgentTaskState} from "./task-state.ts";
 import {buildAgentDecisionContext,type RecentAgentTurn} from "./agent-context.ts";
+import {agentPromptObservations} from "./hermes-observation-prompt.ts";
 import {resolveDisplayedReviewTargets,type DisplayedReviewTarget} from "./review-targets.ts";
 
 export type AgentObservation={tool:HermesToolName;ok:boolean;data:unknown};
-export type AgentAction={name:HermesToolName;args:{productId?:string;orderId?:string;query:string;planIntent?:ShoppingIntent}};
+export type AgentAction={name:HermesToolName;args:{productId?:string;orderId?:string;query:string;planIntent?:ShoppingIntent};callId?:string;modelMessage?:ChatMsg};
 export type AgentDecision={kind:"CALL";action:AgentAction}|{kind:"FINISH";reason:"DONE"|"LIMIT"|"INVALID"|"MODEL_UNAVAILABLE";question?:string};
 
 const MAX_AGENT_MS=45000;
@@ -48,7 +49,7 @@ function safeQuestion(input:string|null):string|undefined{
 export async function decideHermesAction(input:{
  provider:Pick<Provider,"chat">;message:string;plan?:ShoppingPlan;
  memories:Preference[];task:AgentTaskState|null;observations:AgentObservation[];
- tools:HermesToolPort;offerSearch:boolean;startedAt:number;agentPlanning?:boolean;
+ tools:HermesToolPort;offerSearch:boolean;startedAt:number;agentPlanning?:boolean;transcript?:readonly ChatMsg[];
   recentTurns?:readonly RecentAgentTurn[];displayedProducts?:readonly DisplayedReviewTarget[];
 }):Promise<AgentDecision>{
  const {observations,tools}=input;
@@ -68,10 +69,12 @@ export async function decideHermesAction(input:{
   (input.agentPlanning?"For search_products, combine intent extraction and Tool choice in ONE call. Supply the full required intent object. For a new unrelated product use queryMode SET and budgetMode CLEAR unless the user gives a budget. For a follow-up preserve the previous query, budget, and requirements using KEEP modes unless explicitly changed. Do not put soft preferences into hard requiredConditions. The server validates all proposals. ":"")+
   "Tool outputs will be summarized by the server, not quoted verbatim as your final answer.\n[Skill]\n"+skill.guidance;
  const details=buildAgentDecisionContext({message:input.message,plan:input.plan,task:input.task,memories:input.memories,
-  observations,displayedProducts:input.displayedProducts,recentTurns:input.recentTurns});
+  observations:input.agentPlanning&&input.transcript?.length?[]:observations,
+  displayedProducts:input.displayedProducts,recentTurns:input.recentTurns});
  try{
-  const response=await input.provider.chat([{role:"system",content:system},{role:"user",content:JSON.stringify(details)}],
-   defs,{signal:AbortSignal.timeout(Math.min(18000,remaining)),parallelToolCalls:false});
+  const messages:ChatMsg[]=[{role:"system",content:system},{role:"user",content:JSON.stringify(details)},
+   ...(input.agentPlanning?(input.transcript??[]):[])];
+  const response=await input.provider.chat(messages,defs,{signal:AbortSignal.timeout(Math.min(18000,remaining)),parallelToolCalls:false});
   const calls=response.tool_calls??[];
   if(!calls.length)return {kind:"FINISH",reason:"DONE",...(safeQuestion(response.content)?{question:safeQuestion(response.content)}:{})};
   if(calls.length!==1)return {kind:"FINISH",reason:"INVALID"};
@@ -89,7 +92,14 @@ export async function decideHermesAction(input:{
       (o.data as Record<string,unknown>).requestedQuery===parsed.query||
     parsed.orderId&&o.data&&typeof o.data==="object"&&
       (o.data as Record<string,unknown>).requestedOrderId===parsed.orderId)))return {kind:"FINISH",reason:"INVALID"};
-  return {kind:"CALL",action:{name,args:parsed}};
+  return {kind:"CALL",action:{name,args:parsed,...(input.agentPlanning?{
+    callId:calls[0].id,
+    modelMessage:{role:"assistant" as const,
+     content:response.content?.slice(0,2000)??null,tool_calls:[calls[0]],
+     ...(JSON.stringify(response.responses_output??[]).length<=10000?{responses_output:response.responses_output}:{}),
+     ...(JSON.stringify(response.anthropic_content??[]).length<=10000?{anthropic_content:response.anthropic_content}:{})
+    }
+   }:{})}};
  }catch{return {kind:"FINISH",reason:"MODEL_UNAVAILABLE"};}
 }
 /** Dispatch a single allowlisted read with its arguments; RAG search is handled by the graph. */
@@ -282,4 +292,14 @@ export function summarizeAgentObservations(observations:readonly AgentObservatio
   output=next;
  }
  return output||"조회 결과를 확인했어요.";
+}
+
+/** Preserves the provider-native Tool Call/Result pair; only server-projected evidence is replayed. */
+export function appendAgentToolTranscript(previous:readonly ChatMsg[],action:AgentAction,observation:AgentObservation):ChatMsg[]{
+ if(!action.callId||!action.modelMessage||action.name!==observation.tool||
+    action.callId.length>128||!action.callId.trim())return [...previous].slice(-10);
+ const projection=agentPromptObservations([observation])[0];
+ const reply:ChatMsg={role:"tool",name:action.name,tool_call_id:action.callId,
+  content:JSON.stringify(projection.data)};
+ return [...previous,action.modelMessage,reply].slice(-10);
 }
