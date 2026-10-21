@@ -38,7 +38,7 @@ test("verified prior product can be passed to review Tool without fabricated IDs
  }},
  message:"그중 2번의 통풍 리뷰",plan,task:null,memories:[],observations:[],
  displayedProducts:plan.lastDisplayedProducts,
- tools:{purchases:async()=>[],search:async()=>({products:[]}),reviews:async()=>({totalMatching:0,reviews:[]})},
+ tools:{purchases:async()=>[],search:async()=>({products:[]}),reviews:async(productId:string,query:string)=>({productId,query,totalMatching:0,reviews:[]})},
  offerSearch:true,startedAt:Date.now()
  });
  assert.equal(decision.kind,"CALL");
@@ -49,7 +49,7 @@ test("unknown IDs are rejected even with prior product snapshot",async()=>{
  provider:{chat:async()=>({content:null,tool_calls:[{id:"fake",name:"get_product_reviews",
  arguments:'{"product_id":"other-user-product"}'}]})},
  message:"리뷰",plan,task:null,memories:[],observations:[],displayedProducts:plan.lastDisplayedProducts,
- tools:{purchases:async()=>[],search:async()=>({products:[]}),reviews:async()=>({totalMatching:0,reviews:[]})},
+ tools:{purchases:async()=>[],search:async()=>({products:[]}),reviews:async(productId:string,query:string)=>({productId,query,totalMatching:0,reviews:[]})},
  offerSearch:true,startedAt:Date.now()
  });
  assert.deepEqual(decision,{kind:"FINISH",reason:"INVALID"});
