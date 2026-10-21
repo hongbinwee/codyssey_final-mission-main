@@ -44,6 +44,7 @@ export interface ResearchDeps {
  reviewSummary?:VerifiedReviewSummarySource;
  reviewSummaryProvider?:Pick<Provider,"chat">;
  hermes?:{provider:Pick<Provider,"chat">;history:(actorUserId:string)=>Promise<PurchaseSnapshot[]>;reviewCount:(productId:string)=>Promise<number|null>;
+  mutationPorts?:(actorUserId:string,conversationId:string,clientActionId:string)=>import('./hermes-commerce.ts').CommercePorts;
   toolPorts?:(actorUserId:string)=>Partial<Pick<HermesToolPort,"cart"|"product"|"reviews"|"orders"|"order"|"shipping">>};
  datasetVersion?:string;
  conversations:Pick<PersistentConversations,"assertOwned"|"appendUserMessage">;

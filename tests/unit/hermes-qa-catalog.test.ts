@@ -36,3 +36,19 @@ test('Hermes price refresh returns local version while keeping simulated stock r
 test('Hermes rejects stale DGX versions before any local projection',async()=>{
  const f=fixture();await assert.rejects(()=>f.bridge.ensureVariant('v-qa',9),/external variant version changed/);assert.equal(f.writes.length,0);
 });
+
+test('new QA products and options keep native JSON values through the PostgreSQL JSON serializer',async()=>{
+ const f=fixture();let product:unknown,option:unknown;
+ const q={unsafe:async(query:string,params:unknown[])=>{
+  if(query.startsWith('SELECT id,name'))return product?[product]:[];
+  if(query.startsWith('INSERT INTO products')){assert.ok(Array.isArray(params[5]));assert.equal(typeof params[6],'object');product={...f.product,specs_json:JSON.parse(JSON.stringify(params[6]))};return [];}
+  if(query.startsWith('SELECT product_id,version'))return [];
+  if(query.startsWith('INSERT INTO product_variants')){assert.deepEqual(params[2],f.variant.option_values);assert.deepEqual(params[3],f.variant.effective_specs);option=params[2];return [];}
+  if(query.startsWith('SELECT version'))return [{version:1}];
+  throw Error('unexpected SQL');
+ }};
+ const bridge=createHermesQaCatalog({unsafe:async()=>[{product_id:f.product.id}]} as never,
+  {getProduct:async()=>({ok:true,data:{product:f.product,variants:[f.variant]}})} as never,
+  {begin:async(fn:(q:unknown)=>Promise<unknown>)=>fn(q)} as never);
+ assert.equal(await bridge.ensureVariant(f.variant.variant_id,1),1);assert.deepEqual(option,f.variant.option_values);
+});

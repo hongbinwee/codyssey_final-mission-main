@@ -34,7 +34,7 @@ import {createDecisionsRouter} from "./decisions-route.ts";
 import {createConversationResponder} from "./conversation-response.ts";
 import {createFastIntentPort} from "./fast-intent.ts";
 import {currentDatasetResult} from "./dataset-state.ts";
-import type {ResearchResult} from "./read-flow.ts";
+import type {ResearchResult,ResearchDeps} from "./read-flow.ts";
 
 /** One offline CPU encoder per runtime. Only query vectors, never corpus re-embedding. */
 export async function createLocalQueryEncoder(
@@ -167,6 +167,7 @@ export async function createBrainRuntime(options:{
  catalogSource?:CatalogSource;
  catalog?:ReturnType<typeof createCatalog>;
  qaEnvironment?:string;
+ hermesMutationPorts?:NonNullable<ResearchDeps['hermes']>['mutationPorts'];
  localRagSearch?:LocalRagSearch;
  embedQuery?:(query:string)=>Promise<number[]>
 }) {
@@ -267,6 +268,7 @@ export async function createBrainRuntime(options:{
      },
      reviewSummaryProvider:options.provider,
      ...(options.hermesEnabled?{hermes:{provider:options.hermesProvider??options.provider,
+       ...(ownQaCommerce&&options.hermesMutationPorts?{mutationPorts:options.hermesMutationPorts}:{}),
        history:(actorUserId:string)=>purchaseSnapshots(sql,actorUserId),
        toolPorts:(actorUserId:string)=>createHermesReadPorts({
          actorUserId,catalog,ownedCommerce:ownQaCommerce,

@@ -7,6 +7,7 @@ import {ownedTask,nextTask,retainTask,taskForWishlistSelection,resetTaskRequeste
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
 import {captureDisplayedReviewTargets} from "./review-targets.ts";
 import {isScopedProsConsFollowup,canFinishSimpleDiscovery} from "./agent-v2-flow.ts";
+import {explicitCommerceRequest} from './hermes-commerce.ts';
 import {interviewAnswer,needsInterview,rememberInterview,recommendationBudgetQuestion} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
 import {AsyncLocalStorage} from "node:async_hooks";
@@ -60,6 +61,7 @@ export function createPersistentResearchGraph(
  const agentPorts=(state:{request:GraphRequest;shoppingPlan?:ShoppingPlan;prepared:PreparedTurn}):HermesToolPort=>({
   purchases:()=>deps.hermes!.history(state.request.actorUserId),
   ...(deps.hermes!.toolPorts?.(state.request.actorUserId)??{}),
+  ...(deps.agentPlanning?deps.hermes!.mutationPorts?.(state.request.actorUserId,state.request.conversationId,state.request.clientActionId):{}),
   ...(deps.wishlist?{wishlist:()=>deps.wishlist!(state.request.actorUserId)}:{}),
   search:async()=>{throw Error("search is executed by the fenced graph node");},
  });
@@ -384,8 +386,8 @@ export function createPersistentResearchGraph(
      }
      const observations=state.agentObservations??[];
      const lastOrder=observations.some(o=>o.tool==="get_orders"||o.tool==="get_order"||o.tool==="get_shipping_status");
-     const lastCart=observations.some(o=>o.tool==="get_cart");
-     const lastWish=observations.some(o=>o.tool==="get_wishlist");
+     const lastCart=observations.some(o=>o.tool==="get_cart"||o.tool==='add_to_cart');
+     const lastWish=observations.some(o=>o.tool==="get_wishlist"||o.tool==='save_to_wishlist');
      const reviewRead=observations.some(o=>o.tool==="get_product_reviews"||o.tool==="get_product_detail");
      const taskKind=lastOrder?"ORDER":lastCart?"CART":lastWish?"WISHLIST":
        reviewRead?"REVIEW_SUMMARY":state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY";
@@ -422,6 +424,8 @@ export function createPersistentResearchGraph(
          hermesToolCalls:observations.length,hermesDecisions:state.agentDecisionCount??0,
          hermesDecisionMs:Math.round(state.agentDecisionMs??0),hermesToolMs:Math.round(state.agentToolMs??0),
          hermesFailedTools:observations.filter(o=>!o.ok).length,agentV2:deps.agentPlanning?1:0,
+         hermesWishlistSaved:observations.filter(o=>o.ok&&o.tool==='save_to_wishlist').length,
+         hermesCartAdded:observations.filter(o=>o.ok&&o.tool==='add_to_cart').length,
          agentModelUnavailable:state.agentStop==="MODEL_UNAVAILABLE"?1:0,agentDecisionInvalid:state.agentStop==="INVALID"?1:0,
          responseMs:performance.now()-start,
          totalMs:performance.now()-state.prepared.startedAt}
@@ -533,13 +537,15 @@ export function createPersistentResearchGraph(
    .addConditionalEdges("agent_recover",state=>state.researchResult.explanation?.failure?.code==="RETRIEVAL_UNAVAILABLE"?END:"respond",[END,"respond"])
    .addConditionalEdges("plan",state=>deps.clarifyBeforeSearch&&needsInterview(state.shoppingPlan,state.request.userMessage,state.prepared.memories).length?"clarify":deps.hermes?"agent_decide":"retrieve",["clarify","agent_decide","retrieve"])
    .addConditionalEdges("agent_decide",state=>state.agentAction?"agent_execute":
+     (state.agentObservations??[]).some(o=>o.tool==='save_to_wishlist'||o.tool==='add_to_cart')?"agent_finish":
      state.agentSearched?"respond":!deps.agentPlanning&&state.intentRoute.search&&!state.agentQuestion&&
        (state.agentStop==="MODEL_UNAVAILABLE"||state.agentStop==="DONE")&&
        (state.agentObservations??[]).every(o=>o.tool==="get_purchase_history")?"agent_recover":"agent_finish",
      ["agent_execute","respond","agent_recover","agent_finish"])
    .addConditionalEdges("agent_execute",state=>state.agentStop==="NEEDS_CLARIFICATION"?"clarify":
      state.agentStop==="RETRIEVAL_UNAVAILABLE"?"agent_finish":
-     deps.agentPlanning&&state.agentSearched&&canFinishSimpleDiscovery({
+     deps.agentPlanning&&state.agentSearched&&!explicitCommerceRequest('save_to_wishlist',state.request.userMessage)&&
+     !explicitCommerceRequest('add_to_cart',state.request.userMessage)&&canFinishSimpleDiscovery({
        intentKind:state.intentRoute.kind,ranking:state.researchResult?.ranking,
        plan:state.shoppingPlan,observations:state.agentObservations??[]
      })?"respond":"agent_decide",

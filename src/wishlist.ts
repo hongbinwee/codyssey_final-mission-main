@@ -1,4 +1,4 @@
-// 찜 서비스 — 화면 API 전용(Agent Tool registry에 노출하지 않는다).
+// 찜 서비스 — 화면 API와 명시적 요청을 검증한 Hermes V2 Tool이 공유한다.
 // SET_WISHLIST는 기존 runAction 계약을 최소 재사용한다 [PMQA-070]:
 // saved+PK만으로는 재전송 간 다른 의도(저장↔해제)를 구분할 수 없으므로,
 // action_requests의 kind+idempotency_key+payload_hash 기록으로

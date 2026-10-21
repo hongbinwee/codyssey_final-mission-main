@@ -9,8 +9,11 @@ on:
       - "src/web/**"
       - "src/cart.ts"
       - "src/catalog.ts"
+      - "src/hermes-qa-catalog.ts"
+      - "src/server.ts"
       - "src/orders.ts"
       - "tests/unit/brain-*.test.ts"
+      - "tests/unit/hermes-qa-catalog.test.ts"
       - "tests/unit/search-loader.test.ts"
       - "tests/ui/shopping-progress.test.mjs"
       - "tests/brain-db/brain-hermes-*.test.mjs"
@@ -59,6 +62,8 @@ jobs:
           tests/unit/brain-hermes-h4.test.ts
           tests/unit/brain-agent-context.test.ts
           tests/unit/brain-agent-v2.test.ts
+          tests/unit/brain-hermes-commerce.test.ts
+          tests/unit/hermes-qa-catalog.test.ts
           tests/unit/brain-grounded-llm.test.ts
           tests/unit/brain-hermes-h5.test.ts
           tests/unit/brain-hermes-h5-flow.test.ts

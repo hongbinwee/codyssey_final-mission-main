@@ -12,6 +12,7 @@ import {qaCommerceEnabled, qaCommerceRequestAllowed, qaCommerceIdentity, qaComme
 import { catalogRequestAllowed, catalogSource, createCatalog } from "./catalog.ts";
 import {openExternalCatalog} from './external-catalog.ts';
 import {createHermesQaCatalog} from "./hermes-qa-catalog.ts";
+import {createHermesCommercePorts} from './brain/hermes-commerce.ts';
 import { addToCart, getCart, removeCartItem, updateCartQuantity } from "./cart.ts";
 import { getWishlist, parseWishlistPut, setWishlist } from "./wishlist.ts";
 import { checkoutQuote, confirmCheckout } from "./checkout.ts";
@@ -288,6 +289,7 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         catalogSource: source,
         catalog,
         qaEnvironment: env.QA_ENVIRONMENT,
+        ...(hermesBridge&&env.BRAIN_AGENT_ARCH_V2==='1'?{hermesMutationPorts:(actorUserId:string,conversationId:string,clientActionId:string)=>createHermesCommercePorts({actorUserId,conversationId,clientActionId,bridge:hermesBridge,catalog,db:businessDb})}:{}),
         localRagSearch: deps.localRagSearch,
         embedQuery: deps.embedQuery,
       })
@@ -458,7 +460,7 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         }, ctx, "ui-" + b.idempotency_key));
       }
 
-      // 찜 — UI 전용(Agent Tool registry에 없다). GET은 읽기 전용,
+      // 찜 화면 API — Hermes V2 Tool도 같은 서비스를 사용한다. GET은 읽기 전용,
       // PUT은 saved 엄격 boolean + idempotency_key 필수. actor는 세션뿐.
       if (p === "/api/wishlist" && req.method === "GET")
         return send(res, await getWishlist(ctx));

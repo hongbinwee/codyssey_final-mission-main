@@ -170,7 +170,7 @@ export function AgentPanel({
   if(useBrainPreview&&brain==="shopping"&&onOpenCart&&onOpenCheckout&&onOpenOrders&&onOpenOrder)
     return <BrainPreview onOpenProduct={onOpenProduct} onClose={onClose}
       onOpenCart={onOpenCart} onOpenCheckout={onOpenCheckout} onOpenOrders={onOpenOrders}
-      onOpenOrder={onOpenOrder} checkoutEnabled={checkoutEnabled===true}/>;
+      onOpenOrder={onOpenOrder} checkoutEnabled={checkoutEnabled===true} onCartChanged={onCartChanged}/>;
 
   return (
     <aside className="agent-panel">

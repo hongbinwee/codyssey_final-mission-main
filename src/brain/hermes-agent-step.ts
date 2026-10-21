@@ -14,9 +14,10 @@ import {resetTaskRequested,type AgentTaskState} from "./task-state.ts";
 import {buildAgentDecisionContext,type RecentAgentTurn} from "./agent-context.ts";
 import {agentPromptObservations} from "./hermes-observation-prompt.ts";
 import {resolveDisplayedReviewTargets,type DisplayedReviewTarget} from "./review-targets.ts";
+import {authorizeCommerceAction,explicitCommerceRequest,type CommerceMutationResult} from './hermes-commerce.ts';
 
 export type AgentObservation={tool:HermesToolName;ok:boolean;data:unknown};
-export type AgentAction={name:HermesToolName;args:{productId?:string;orderId?:string;query:string;planIntent?:ShoppingIntent};callId?:string;modelMessage?:ChatMsg};
+export type AgentAction={name:HermesToolName;args:{productId?:string;orderId?:string;query:string;planIntent?:ShoppingIntent;targetText?:string;quantity?:number;quantityText?:string;optionText?:string};callId?:string;modelMessage?:ChatMsg};
 export type AgentDecision=
  |{kind:"CALL";action:AgentAction}
  |{kind:"RESPOND";answer:string;intent?:"GREETING"|"SOCIAL"|"CAPABILITY"|"UNCERTAIN"}
@@ -71,8 +72,8 @@ export async function decideHermesAction(input:{
  const system=SHOPPING_POLICY+"\n[Hermes H4 Agent]\nYou decide the next action after inspecting trusted tool observations. "+
   (input.agentPlanning?
     "You are the FIRST semantic decision-maker for EVERY user message: greeting, capability question, mixed request, shopping, review or authenticated account read. No intent router has interpreted it for you. "+
-    "Choose ONE action: respond_to_user, ask_user, reset_shopping_task (only if user explicitly asks to start over), or ONE allowed read Tool. Use respond_to_user for natural conversation, not a forced product clarification. For a combined request, get needed facts first and then finish. "+
-    "Tools never grant Commerce writes. For cancellation, payment or cart modifications, describe the safe UI approval path; never claim an action was done. "+
+    "Choose ONE action: respond_to_user, ask_user, reset_shopping_task (only if user explicitly asks to start over), or ONE allowed Tool. Use respond_to_user for natural conversation, not a forced product clarification. For a combined request, get needed facts first and then finish. "+
+    "Use save_to_wishlist or add_to_cart when exposed and the CURRENT user explicitly requests that action for a verified product. Quote the exact current target and option/quantity text. Resolve ordinal references using previous_displayed_products; do not search again for an already displayed product. If a target or option is ambiguous, ask ONE question. Never claim success before the mutation Tool succeeds. Cancellation, payment and checkout always remain on the safe UI approval path. "+
     "Only claim retrieved prices, products, orders, reviews or delivery details after the Tool has returned verified facts. "+
     "Avoid a search when the user is only greeting or asking capabilities. ":
     "Choose ONE registered read Tool at a time or stop. ")+
@@ -80,7 +81,7 @@ export async function decideHermesAction(input:{
   "Use only product IDs from trusted prior Tools or the server-verified previous_displayed_products; resolve numbered references by their displayIndex. "+
   "use only order IDs observed from get_orders. Never invent prices, rankings, reviews, purchases, shipping times or permissions. "+
   "Search only when candidate discovery is necessary. Orders, delivery, saved items and cart reads do not require search. "+
-  "Never request writes, cancellation, checkout, payment or account changes. If essential information is missing, ask ONE brief question. "+
+  "Never request unregistered writes, cancellation, checkout, payment or account changes. If essential information is missing, ask ONE brief question. "+
   "A missing budget is UNKNOWN, not unlimited. Do not block a concrete product search solely for an unknown budget. "+
   "Respect SET, UNRESTRICTED and DEFERRED budget states; do not repeatedly ask a resolved or deferred budget. "+
   (input.agentPlanning?"For search_products, combine intent extraction and Tool choice in ONE call. Supply the full required intent object. For a new unrelated product use queryMode SET and budgetMode CLEAR unless the user gives a budget. For a follow-up preserve the previous query, budget, and requirements using KEEP modes unless explicitly changed. Do not put soft preferences into hard requiredConditions. The server validates all proposals. ":"")+
@@ -95,6 +96,8 @@ export async function decideHermesAction(input:{
   const calls=response.tool_calls??[];
   if(!calls.length){
    if(input.agentPlanning){
+    if(!observations.some(o=>o.tool==='save_to_wishlist'||o.tool==='add_to_cart')&&
+      (tools.saveWishlist&&explicitCommerceRequest('save_to_wishlist',input.message)||tools.addCart&&explicitCommerceRequest('add_to_cart',input.message)))return {kind:'FINISH',reason:'INVALID'};
     const answer=safeAnswer(response.content);
     return answer?{kind:"RESPOND",answer}:{kind:"FINISH",reason:"INVALID"};
    }
@@ -110,6 +113,8 @@ export async function decideHermesAction(input:{
     const value:unknown=JSON.parse(calls[0].arguments),v=value as Record<string,unknown>;
     if(!v||typeof v!=="object"||Array.isArray(v))return {kind:"FINISH",reason:"INVALID"};
     if(name==="respond_to_user"){
+     if(!observations.some(o=>o.tool==='save_to_wishlist'||o.tool==='add_to_cart')&&
+       (tools.saveWishlist&&explicitCommerceRequest('save_to_wishlist',input.message)||tools.addCart&&explicitCommerceRequest('add_to_cart',input.message)))return {kind:'FINISH',reason:'INVALID'};
      if(Object.keys(v).some(k=>!["text","intent_kind"].includes(k)))return {kind:"FINISH",reason:"INVALID"};
      const answer=safeAnswer(v.text);
      if(!answer)return {kind:"FINISH",reason:"INVALID"};
@@ -128,6 +133,10 @@ export async function decideHermesAction(input:{
   const ids=observedIds(observations);
   for(const p of resolveDisplayedReviewTargets(input.displayedProducts,undefined,true)??[])ids.products.add(p.productId);
   if(parsed.productId&&!ids.products.has(parsed.productId)||parsed.orderId&&!ids.orders.has(parsed.orderId))return {kind:"FINISH",reason:"INVALID"};
+  if((name==='save_to_wishlist'||name==='add_to_cart')&&
+    (!input.agentPlanning||!authorizeCommerceAction(name,parsed,input.message,input.displayedProducts,observations)||
+     parsed.optionText!==undefined&&!input.message.includes(parsed.optionText)))
+   return {kind:'ASK_USER',question:'어떤 상품과 옵션을 찜하거나 장바구니에 담을까요?'};
   if(observations.some(o=>o.tool===name&&
     (name!=="get_product_detail"&&name!=="get_product_reviews"&&name!=="get_order"&&name!=="get_shipping_status"||
     parsed.productId&&o.data&&typeof o.data==="object"&&
@@ -145,10 +154,15 @@ export async function decideHermesAction(input:{
    }:{})}};
  }catch{return {kind:"FINISH",reason:"MODEL_UNAVAILABLE"};}
 }
-/** Dispatch a single allowlisted read with its arguments; RAG search is handled by the graph. */
+/** Dispatch one allowlisted Tool. V2 mutations have already passed the current-user/target guard; RAG remains in the graph. */
 export async function performHermesRead(action:AgentAction,tools:HermesToolPort):Promise<AgentObservation>{
  const {name,args}=action;
  try{
+  if((name==='save_to_wishlist'&&tools.saveWishlist)||(name==='add_to_cart'&&tools.addCart)){
+   const mutate=name==='save_to_wishlist'?tools.saveWishlist!:tools.addCart!;
+   const result=await mutate({productId:args.productId!,quantity:args.quantity,optionText:args.optionText});
+   return {tool:name,ok:result.status==='SUCCEEDED',data:{mutation:result}};
+  }
   if(name==="get_purchase_history")return {tool:name,ok:true,data:{purchases:(await tools.purchases()).slice(0,20)}};
   if(name==="get_wishlist"&&tools.wishlist)return {tool:name,ok:true,data:{saved_products:(await tools.wishlist()).slice(0,20)}};
   if(name==="get_cart"&&tools.cart)return {tool:name,ok:true,data:{cart:await tools.cart()}};
@@ -186,6 +200,13 @@ export function readAgentRoute(message:string):boolean{
 }
 /** Canonical messages originate exclusively from verified Tool observations. */
 export function summarizeAgentObservations(observations:readonly AgentObservation[],question?:string):string{
+ const mutations=observations.filter(o=>o.tool==='save_to_wishlist'||o.tool==='add_to_cart');
+ if(mutations.length)return mutations.map(o=>{
+  const m=(o.data as {mutation?:CommerceMutationResult})?.mutation;
+  if(!m||m.status!=='SUCCEEDED')return m?.message??'처리 결과를 확인하지 못했어요. 같은 요청으로 다시 확인해 주세요.';
+  const name=(m.productName??'선택한 상품').replace(/[\u0000-\u001f]/g,' ').slice(0,160);
+  return o.tool==='save_to_wishlist'?`${name}을(를) 찜에 저장했어요.`:`${name} ${m.quantity??1}개를 장바구니에 담았어요. 결제는 진행하지 않았어요.`;
+ }).join('\n\n');
  const valid=observations.filter(x=>x.ok).slice(0,HERMES_TOOL_LIMIT);
  if(!valid.length)return question??"지금은 확인된 조회 결과가 없어요. 확인할 상품이나 주문 정보를 조금 더 알려주세요.";
  const label=(value:unknown,limit=140):string=>typeof value==="string"?value.replace(/\s+/g," ").trim().slice(0,limit):"";

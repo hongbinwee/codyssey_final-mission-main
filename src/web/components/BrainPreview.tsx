@@ -2,6 +2,8 @@ import {useEffect,useRef,useState} from "react";
 import {apiSafe,newActionKey,fmtWon} from "../api.ts";
 import {resolveBrainInterviewState} from "../brain-interview-state.ts";
 import {BrainAnswer} from './BrainAnswer.tsx';
+import {refreshWishlist} from '../wishlist.ts';
+import {pendingScope} from '../pending.ts';
 import type {WishlistView} from "../../brain/wishlist-task.ts";
 import type {ShoppingHandoff} from "../../brain/shopping-handoff.ts";
 
@@ -23,7 +25,7 @@ type BrainReply={
   citations:{sourceId:string;quote:string;sourceKind:"REAL"|"SYNTHETIC";sourceVariantId:string|null}[]}|null;
  explanation?:{text:string;kind:string;items:{productId:string;variantId?:string;evidenceIds:string[];reason?:string}[];clarification?:{questions:{key:string;text:string;choices:string[]}[]};limitations:string[];
    failure?:{code:string;httpStatus?:number}}|null;
- ranking:BrainRankingResult;trace:{totalMs:number;graphWallMs?:number};
+ ranking:BrainRankingResult;trace:{totalMs:number;graphWallMs?:number;hermesWishlistSaved?:number;hermesCartAdded?:number};
 };
 type MemoryItem={key:string;value:string;updatedAt:string};
 type Entry={text:string;clientActionId?:string;conversationId?:string;reply?:BrainReply;status?:"sending"|"failed"|"completed";failure?:string};
@@ -109,9 +111,10 @@ export function BrainRanking({ranking,explanation,onOpenProduct}:{explanation?:B
  </section>;
 }
 
-export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,onOpenOrders,onOpenOrder,checkoutEnabled}:{
+export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,onOpenOrders,onOpenOrder,checkoutEnabled,onCartChanged}:{
  onClose:()=>void;onOpenProduct:(id:string,variantId?:string)=>void;onOpenCart:()=>void;
  onOpenCheckout:()=>void;onOpenOrders:()=>void;onOpenOrder:(orderId:string)=>void;checkoutEnabled:boolean;
+ onCartChanged?:()=>void;
 }){
  const [input,setInput]=useState("");
  const [conversation,setConversation]=useState<string|null>(null);
@@ -185,11 +188,16 @@ export function BrainPreview({onClose,onOpenProduct,onOpenCart,onOpenCheckout,on
        if(generation!==epoch.current)return;
        initialCreation.current=null;id=created.data.id;setConversation(id);update({conversationId:id});
      }
+     const actor=pendingScope();
      const r=await apiSafe<BrainReply>("/api/brain/conversations/"+encodeURIComponent(id)+"/turn",
        {method:"POST",body:JSON.stringify({user_message:entry.text,client_action_id:entry.clientActionId})});
      if(generation!==epoch.current)return;
      if(!r.ok){update({status:"failed",failure:friendlyFailure(r.error.code)});return;}
      if(r.data.conversation_id!==id){update({status:"failed",failure:"대화 결과를 확인하지 못했어요. 다시 시도해 주세요."});return;}
+     if(actor&&actor===pendingScope()){
+       if((r.data.trace.hermesWishlistSaved??0)>0)void refreshWishlist(actor);
+       if((r.data.trace.hermesCartAdded??0)>0)onCartChanged?.();
+     }
      update({reply:r.data,status:"completed",failure:undefined,conversationId:id});setSourceMessage(r.data.message_id);
      await listConversations(generation);
    }finally{if(generation===epoch.current){lock.current=false;setBusy(false);}}

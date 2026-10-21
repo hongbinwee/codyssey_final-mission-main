@@ -32,7 +32,7 @@ export function createHermesQaCatalog(reader:Reader,catalog:Catalog,local:Sql){
    if(!existing.length){
     const specs={...product.specs,_hermes_qa_source:SOURCE};
     await q.unsafe("INSERT INTO products (id,name,brand,category,description,image_urls,specs_json,active,version) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9) ON CONFLICT (id) DO NOTHING",
-      [product.id,product.name,product.brand,product.category,product.description,JSON.stringify(product.images),JSON.stringify(specs),product.active,product.version]);
+      [product.id,product.name,product.brand,product.category,product.description,product.images,specs,product.active,product.version]);
     const [owned]=await q.unsafe<Array<LocalProduct>>("SELECT id,name,brand,category,specs_json FROM products WHERE id=$1 FOR UPDATE",[product.id]);
     if(!owned||!ownsLocalProduct(owned,product))throw Error("local catalog collision");
    }
@@ -47,7 +47,7 @@ export function createHermesQaCatalog(reader:Reader,catalog:Catalog,local:Sql){
      throw Error("local variant collision");
    if(!old){
     await q.unsafe("INSERT INTO product_variants (id,product_id,option_values_json,spec_overrides_json,unit_price_won,stock_qty,active,version) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING",
-      [variant.variant_id,product.id,JSON.stringify(variant.option_values),JSON.stringify(variant.effective_specs),variant.unit_price_won,variant.stock_qty,active,variant.version]);
+      [variant.variant_id,product.id,variant.option_values,variant.effective_specs,variant.unit_price_won,variant.stock_qty,active,variant.version]);
    }else if(old.unit_price_won!==variant.unit_price_won||old.active!==active||old.stock_qty>variant.stock_qty){
     // A local simulated purchase reduces local stock; never replenish it from DGX.
     await q.unsafe("UPDATE product_variants SET unit_price_won=$2,stock_qty=LEAST(stock_qty,$3),active=$4,version=version+1 WHERE id=$1",

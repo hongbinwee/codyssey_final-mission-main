@@ -12,6 +12,9 @@ const num=(v:unknown)=>typeof v==="number"&&Number.isFinite(v)?v:null;
 const bool=(v:unknown)=>v===true;
 const id=(v:unknown)=>clip(v,128);
 const projection=(o:AgentObservation):unknown=>{
+ if(o.tool==='save_to_wishlist'||o.tool==='add_to_cart'){
+  const m=row(row(o.data).mutation);return {mutation:{status:clip(m.status,24),productId:id(m.productId),productName:clip(m.productName),quantity:num(m.quantity),message:clip(m.message,180)}};
+ }
  if(!o.ok)return {unavailable:true};
  const v=row(o.data);
  switch(o.tool){
