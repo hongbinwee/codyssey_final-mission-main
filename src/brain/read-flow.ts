@@ -168,12 +168,17 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
      ...(plan.category?{category:plan.category}:{}),
      ...(plan.reviewSortAspect?{reviewSortAspect:plan.reviewSortAspect}:{})};
    fetched=await deps.retriever.search(request);
-   // An inferred category can miss a cross-category product. Retry once only when
-   // the verified v4 backend supports global search and the user did not scope a category.
-   if(!fetched.candidates.length&&plan.category&&deps.retriever.supportsGlobalCategorySearch&&
+   // Inferred categories may return unrelated hits that fail every hard condition.
+   // Retry at most once, only when global search is supported and category was not explicit.
+   const noEligibleMatches=!fetched.candidates.length||
+     plan.requiredConditions.length>0&&
+     rankProducts(fetched.candidates,fetched.evidence,plan,prepared.memories).ranked.length===0;
+   if(noEligibleMatches&&plan.category&&deps.retriever.supportsGlobalCategorySearch&&
      !expresslyScopedCategory(req.userMessage,plan.category)){
      const global=await deps.retriever.search({...request,category:""});
-     if(global.candidates.length)fetched=global;
+     // Never replace the first result with more unqualified cross-category hits.
+     if(global.candidates.length&&rankProducts(global.candidates,global.evidence,plan,prepared.memories).ranked.length>0)
+       fetched=global;
    }
  }catch{throw new RetrievalUnavailableError();}
  if(!fetched||!Array.isArray(fetched.candidates)||!Array.isArray(fetched.evidence)||

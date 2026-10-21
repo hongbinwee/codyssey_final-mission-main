@@ -29,3 +29,37 @@ test("empty inferred category retries only once in verified multi-category RAG",
  await retrieveTurn(input("남성용 니플패치 찾아줘"),prepared,basePlan,single);
  assert.deepEqual(categories,["beauty"]);
 });
+
+test("unqualified category hits trigger bounded global retry, but only verified male products survive",async()=>{
+ const categories:string[]=[];
+ const candidate=(productId:string,conditions:Record<string,string[]>={})=>({
+   productId,variantId:`v-${productId}`,unitPriceWon:12000,shippingFeeWon:0,
+   rating:null,ratingScale:null,wholeReviewCount:null,wholeReviewCountVerified:false,
+   conditions,facets:{},sourceKind:"REAL" as const,commerceVerified:true
+ });
+ const male=candidate("male-underwear",{"남성용":["male-taxonomy"]});
+ const female=candidate("female-underwear");
+ const proof={id:"male-taxonomy",productId:"male-underwear",variantId:"v-male-underwear",
+   kind:"SPEC" as const,sourceKind:"REAL" as const,verified:true,text:"남성 속옷"};
+ const deps={retriever:{supportsGlobalCategorySearch:true,search:async({category}:{category?:string})=>{
+   categories.push(category??"omitted");
+   return category==="beauty"?{candidates:[female],evidence:[]}:
+     {candidates:[female,male],evidence:[proof]};
+ }}} as unknown as ResearchDeps;
+ const plan={...basePlan,query:"남성용 팬티"};
+ const result=await retrieveTurn(input("남성용 팬티 찾아줘"),prepared,plan,deps);
+ assert.deepEqual(categories,["beauty",""]);
+ assert.deepEqual(result.result.ranking.ranked.map(p=>p.candidate.productId),["male-underwear"]);
+
+ categories.length=0;
+ await retrieveTurn(input("뷰티 카테고리에서 남성용 팬티 찾아줘"),prepared,plan,deps);
+ assert.deepEqual(categories,["beauty"],"explicitly requested category must never expand");
+
+ categories.length=0;
+ const good={retriever:{supportsGlobalCategorySearch:true,search:async({category}:{category?:string})=>{
+   categories.push(category??"omitted");
+   return {candidates:[male],evidence:[proof]};
+ }}} as unknown as ResearchDeps;
+ await retrieveTurn(input("남성용 팬티 찾아줘"),prepared,plan,good);
+ assert.deepEqual(categories,["beauty"],"qualified first result must not trigger fallback");
+});
