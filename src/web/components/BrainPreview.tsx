@@ -64,11 +64,20 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
  if(!rows.length)return null;
  return <section className="brain-products" aria-label="상품 비교 결과">
    <p className="muted sm">{rows.length}개 상품 표시</p>
-   {rows.map(({candidate:p,reference,recommendationRole,personalizationSignals},index)=><article key={p.productId} className="brain-product-card">
-     <div className="brain-product-image">{!reference&&<span className="brain-rank">{index+1}순위</span>}<span aria-hidden="true">상품 이미지</span>
+   {rows.map(({candidate:p,reference,recommendationRole,personalizationSignals},index)=>{
+    const reason=explanation?.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))?.reason;
+    const verifiedRating=recommendationRole==="REVIEW_VERIFIED"&&p.ratingScale===5&&typeof p.rating==="number"&&p.wholeReviewCountVerified===true&&typeof p.wholeReviewCount==="number";
+    const hasExplanation=!!reason||!!personalizationSignals?.length||recommendationRole==="PERSONALIZED"||verifiedRating||reference||p.commerceVerified!==true;
+    return <article key={p.productId} className="brain-recommendation" aria-label={reference?"참고 상품":`${index+1}순위 추천`}>
+     <div className="brain-product-card">
+      {!reference&&<header className="brain-product-card-header"><span className="brain-rank">{index+1}순위</span>
+       {recommendationLabel(recommendationRole)&&<span className="muted sm">{recommendationLabel(recommendationRole)}</span>}
+      </header>}
+      <div className="brain-product-main">
+     <div className="brain-product-image"><span aria-hidden="true">상품 이미지</span>
        {safeImage(p.productImage)&&<img src={safeImage(p.productImage)} alt={p.productName??"상품"} loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.hidden=true;}}/>}</div>
      <div className="brain-product-info"><div className="brain-product-heading"><div className="brain-product-summary">
-       {!reference&&recommendationLabel(recommendationRole)&&<p className="muted sm">{recommendationLabel(recommendationRole)}</p>}<b className="brain-product-name">{p.productName??"상품명 확인 중"}</b>
+       <b className="brain-product-name">{p.productName??"상품명 확인 중"}</b>
        <dl className="brain-price-breakdown" aria-label="상품 가격 구성">
          <div><dt>상품가</dt><dd>{p.commerceVerified===true&&money(p.unitPriceWon)?fmtWon(p.unitPriceWon):"확인 전"}</dd></div>
          <div><dt>배송비</dt><dd>{p.commerceVerified===true&&money(p.shippingFeeWon)?fmtWon(p.shippingFeeWon):"확인 전"}</dd></div>
@@ -80,20 +89,24 @@ export function BrainRanking({ranking,explanation,onOpenProduct,onExcludeProduct
        </dl></div>
        {p.commerceVerified===true&&<button className="link brain-product-open" aria-label="상품 보기" onClick={()=>onOpenProduct(p.productId,p.variantId)}>상품 보기<svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg></button>}
        </div>
-       {!!personalizationSignals?.length&&<p className="muted sm">맞춤 근거: {personalizationSignals.map(signal=>signal==="CART"?"장바구니":signal==="WISHLIST"?"찜":"구매 기록").join(" · ")}</p>}
-       {recommendationRole==="REVIEW_VERIFIED"&&p.ratingScale===5&&typeof p.rating==="number"&&p.wholeReviewCountVerified===true&&typeof p.wholeReviewCount==="number"&&<p className="muted sm">평점 {p.rating.toFixed(1)}/5 · 상품 전체 리뷰 {p.wholeReviewCount}개 (3.5점 초과 · 10개 이상 기준)</p>}
-       {recommendationRole==="PERSONALIZED"&&!personalizationSignals?.length&&<p className="muted sm">현재 조건과 검증된 상품 근거로 비교한 후보예요.</p>}
-       {explanation?.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))?.reason&&<div className="brain-product-reason"><BrainAnswer text={explanation.items.find(i=>i.productId===p.productId&&(!i.variantId||i.variantId===p.variantId))!.reason!}/></div>}
        {(p.keywords??[]).filter(k=>!/(?:type|sub_category|source_kind|[a-z]+_[a-z]+)/.test(k)).slice(0,3).map((keyword,i)=><span key={i} className="chip">{keyword}</span>)}
-       {reference&&<p className="muted sm">{
+     </div>
+      </div>
+      {!reference&&onExcludeProduct&&<div className="brain-product-footer"><button className="link brain-product-exclude" onClick={()=>onExcludeProduct(p.productId)}>이 상품은 빼주세요</button></div>}
+     </div>
+     {hasExplanation&&<div className="brain-assistant-message brain-product-explanation"><span className="brain-avatar" aria-hidden="true">✦</span><div className="msg ai">
+       {!!personalizationSignals?.length&&<p>맞춤 근거: {personalizationSignals.map(signal=>signal==="CART"?"장바구니":signal==="WISHLIST"?"찜":"구매 기록").join(" · ")}</p>}
+       {verifiedRating&&<p>평점 {p.rating!.toFixed(1)}/5 · 상품 전체 리뷰 {p.wholeReviewCount}개 (3.5점 초과 · 10개 이상 기준)</p>}
+       {recommendationRole==="PERSONALIZED"&&!personalizationSignals?.length&&<p>현재 조건과 검증된 상품 근거로 비교한 후보예요.</p>}
+       {reason&&<div className="brain-product-reason"><BrainAnswer text={reason.replace(/([.!?。！？]) +/g,"$1\n\n")}/></div>}
+       {reference&&<p>{
         ranking.referenceOnly.some(row=>row.candidate.productId===p.productId&&row.reasons.includes("review_sort_evidence_insufficient"))?
         "확인된 리뷰가 부족해 요청하신 순위는 정하지 않았어요.":
         "말씀하신 조건에 맞는지 더 확인이 필요한 상품이에요."
        }</p>}
-       {p.commerceVerified!==true&&<p className="muted sm">상품 확인 전 · 상세보기 준비 중</p>}
-       {!reference&&onExcludeProduct&&<div className="brain-product-footer"><button className="link brain-product-exclude" onClick={()=>onExcludeProduct(p.productId)}>이 상품은 빼주세요</button></div>}
-     </div>
-   </article>)}
+       {p.commerceVerified!==true&&<p>상품 확인 전 · 상세보기 준비 중</p>}
+     </div></div>}
+   </article>;})}
  </section>;
 }
 

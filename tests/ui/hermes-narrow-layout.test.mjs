@@ -31,10 +31,12 @@ const markup = `
       <div class="brain-assistant-message"><span class="brain-avatar" aria-hidden="true">✦</span><div class="msg ai"><p>조건에 맞는 상품을 비교했어요.</p></div></div>
       <section class="brain-products" aria-label="상품 비교 결과">
         <p class="muted sm">1개 상품 표시</p>
-        <article class="brain-product-card">
-          <div class="brain-product-image"><span class="brain-rank">1순위</span><span>상품 이미지</span></div>
-          <div class="brain-product-info"><div class="brain-product-heading"><div class="brain-product-summary"><p class="muted sm">나에게 맞춤</p><b class="brain-product-name">가벼운 무선 이어폰 추천 상품</b><dl class="brain-price-breakdown" aria-label="상품 가격 구성"><div><dt>상품가</dt><dd>119,000원</dd></div><div><dt>배송비</dt><dd>무료</dd></div><div class="brain-price-total"><dt>배송비 포함 합계</dt><dd>119,000원</dd></div></dl></div><button class="link brain-product-open">상품 보기<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"></svg></button></div><p class="brain-product-reason">확인한 상품 정보와 요청 조건을 기준으로 정리했어요.</p></div>
-        </article>
+        <article class="brain-recommendation"><div class="brain-product-card">
+          <header class="brain-product-card-header"><span class="brain-rank">1순위</span><span class="muted sm">나에게 맞춤</span></header>
+          <div class="brain-product-main"><div class="brain-product-image"><span>상품 이미지</span></div>
+          <div class="brain-product-info"><div class="brain-product-heading"><div class="brain-product-summary"><b class="brain-product-name">가벼운 무선 이어폰 추천 상품</b><dl class="brain-price-breakdown" aria-label="상품 가격 구성"><div><dt>상품가</dt><dd>119,000원</dd></div><div><dt>배송비</dt><dd>무료</dd></div><div class="brain-price-total"><dt>배송비 포함 합계</dt><dd>119,000원</dd></div></dl></div><button class="link brain-product-open">상품 보기<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"></svg></button></div></div></div>
+          <div class="brain-product-footer"><button class="link brain-product-exclude">이 상품은 빼주세요</button></div>
+        </div><div class="brain-assistant-message brain-product-explanation"><span class="brain-avatar" aria-hidden="true">✦</span><div class="msg ai"><div class="brain-product-reason">확인한 상품 정보와 요청 조건을 기준으로 정리했어요.</div></div></div></article>
       </section>
       <section class="brain-review-summary state-box" aria-label="해당 상품 리뷰 요약"><div class="brain-review-summary-header"><b>무선 이어폰 사용 후기 요약</b><p class="muted sm">확인한 리뷰 3건</p></div><details class="brain-review-citations"><summary>확인한 리뷰 근거 보기 (3건)</summary><ul><li>착용감이 편하고 오래 사용해도 부담이 적어요.<small>구매 후기 · 2026</small></li></ul></details></section>
       <section class="brain-preference-save state-box"><div class="brain-preference-intro"><h3>가격 선호 저장</h3><p>다음 추천부터 반영할 가격 기준을 선택하세요.</p></div><div class="brain-preference-field"><label for="price-priority">가격 기준</label><select id="price-priority"><option>가성비 중심</option></select></div><div class="brain-preference-actions"><button class="btn primary">저장하기</button><button class="btn">취소</button></div><button class="link brain-preference-retry">저장된 선호 다시 확인</button><p class="brain-preference-note">원할 때 저장하고, 나중에 바꿀 수 있어요.</p></section>
@@ -153,7 +155,7 @@ test('actual React app shell keeps header and Brain results within narrow viewpo
         productId: 'fixture-product',
         variantId: 'fixture-variant',
         evidenceIds: ['fixture-review-1'],
-        reason: '가볍고 착용감이 편하다는 후기가 확인됐어요.',
+        reason: '배송비 포함 119,000원으로 말씀하신 예산 안에서 고를 수 있어요. 표시한 상품 중 배송비 포함 가격이 가장 낮아요. 구성: 1개',
       }],
       limitations: [],
     },
@@ -182,6 +184,11 @@ test('actual React app shell keeps header and Brain results within narrow viewpo
     },
     trace: { totalMs: 12 },
   };
+  reply.ranking.ranked.push({
+    ...reply.ranking.ranked[0],
+    candidate: { ...reply.ranking.ranked[0].candidate, productId: 'fixture-product-2', variantId: 'fixture-variant-2', productName: '두 번째 비교 상품', unitPriceWon: 129000 },
+  });
+  reply.explanation.items.push({ productId: 'fixture-product-2', variantId: 'fixture-variant-2', evidenceIds: [], reason: '배송비 포함 129,000원이에요. 구성: 1개' });
   const historyPayload = {
     ok: true,
     data: {
@@ -260,8 +267,8 @@ test('actual React app shell keeps header and Brain results within narrow viewpo
   let failure = null;
   try {
     browser = await chromium.launch({ headless: true });
-    for (const width of widths) {
-      const page = await browser.newPage({ viewport: { width, height: 960 }, isMobile: true, hasTouch: true });
+    for (const width of widths) for (const colorScheme of ['light', 'dark']) {
+      const page = await browser.newPage({ viewport: { width, height: 960 }, colorScheme, isMobile: true, hasTouch: true });
       page.on('pageerror', error => pageErrors.push(String(error)));
       await page.route('**/*', route => {
         if (new URL(route.request().url()).origin === origin) return route.continue();
@@ -271,9 +278,22 @@ test('actual React app shell keeps header and Brain results within narrow viewpo
       await page.locator('.top .search-field').waitFor({ state: 'visible' });
       await page.locator('.bottom-nav button[title="AI 쇼핑 도우미"]').click();
       await page.locator('.brain-panel').waitFor({ state: 'visible' });
-      await page.locator('.brain-product-card').waitFor({ state: 'visible' });
+      await page.locator('.brain-product-card').first().waitFor({ state: 'visible' });
       await page.locator('.brain-review-summary').waitFor({ state: 'visible' });
       await page.locator('.brain-preference-save').waitFor({ state: 'visible' });
+      const groups = page.locator('.brain-recommendation');
+      assert.equal(await groups.count(), 2, 'each product and explanation form one ordered recommendation');
+      assert.deepEqual(await groups.locator('.brain-product-card-header .brain-rank').allTextContents(), ['1순위', '2순위']);
+      assert.equal(await page.locator('.brain-product-image .brain-rank').count(), 0, 'rank must not cover the product image');
+      assert.equal(await groups.first().locator('.brain-product-card .brain-product-reason').count(), 0);
+      assert.equal(await groups.first().locator('.brain-product-explanation .brain-product-reason .brain-answer p').count(), 3, 'budget, comparison and composition use separate paragraphs');
+      assert.equal(await groups.first().locator('.brain-product-card .brain-product-exclude').count(), 1, 'exclude stays in the product card');
+      const separation = await groups.first().evaluate(group => {
+        const card=group.querySelector('.brain-product-card'), header=group.querySelector('.brain-product-card-header'), image=group.querySelector('.brain-product-image');
+        return { badgeAboveImage: header.getBoundingClientRect().bottom <= image.getBoundingClientRect().top,
+          explanationBelowCard: card.getBoundingClientRect().bottom <= group.querySelector('.brain-product-explanation').getBoundingClientRect().top };
+      });
+      assert.ok(separation.badgeAboveImage && separation.explanationBelowCard, 'rank, product and explanation occupy separate vertical regions');
 
       const metrics = await page.evaluate(() => {
         const rect = selector => {
@@ -284,7 +304,7 @@ test('actual React app shell keeps header and Brain results within narrow viewpo
         };
         const root = document.documentElement;
         const controls = [...document.querySelectorAll(
-          '.brain-preference-field select, .brain-preference-actions .btn, .brain-send'
+          '.brain-preference-field select, .brain-preference-actions .btn, .brain-send, .brain-product-open, .brain-product-exclude'
         )].map(element => ({
           selector: element.id || element.className || element.tagName.toLowerCase(),
           width: element.getBoundingClientRect().width,
@@ -304,8 +324,8 @@ test('actual React app shell keeps header and Brain results within narrow viewpo
           controls,
         };
       });
-      measurements.push({ width, ...metrics });
-      await page.screenshot({ path: artifactBase + '-' + width + '.png', fullPage: true });
+      measurements.push({ width, colorScheme, ...metrics });
+      await page.screenshot({ path: artifactBase + '-' + width + '-' + colorScheme + '.png', fullPage: true });
       await page.close();
     }
 
