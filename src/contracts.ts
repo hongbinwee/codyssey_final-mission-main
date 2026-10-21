@@ -84,6 +84,12 @@ export interface SearchResult {
   shipping_fee_won: number;
   next_cursor: string | null;
   has_more: boolean;
+  browse_summary?: {
+    total_count: number;
+    group_counts: Record<string, number>;
+    subcategory_counts: Record<string, Record<string, number>>;
+    max_discount_rate: number;
+  };
 }
 
 export interface ProductDetail {

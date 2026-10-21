@@ -3,10 +3,19 @@
 // 쇼핑 홈/뷰티/식품/카테고리/특가/시즌 추천. 디지털·패션·리빙은 카테고리 탭과
 // 숏컷으로 진입하는 리스팅 뷰. 가격·재고·평점은 API가 정본이고
 // 정가·배송 라벨·섹션 태그는 display-meta의 표시용 메타다.
-import { useEffect, useRef, useState, type ComponentType } from "react";
-import { apiSafe, fmtWon, type ApiResult } from "../api.ts";
-import type { ProductSummary, SearchResult } from "../../contracts.ts";
-import { loadSearchPages } from "../search-loader.ts";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
+import { apiSafe, fmtWon } from "../api.ts";
+import type { ProductSummary } from "../../contracts.ts";
+import {
+  applyBrowsePage,
+  browseKey,
+  browsePageUrl,
+  claimBrowseRequest,
+  createBrowsePagerState,
+  type BrowsePage,
+  type BrowsePagerState,
+  type BrowseSummary,
+} from "../shopping-pager.ts";
 import { ProductCard } from "../components/ProductCard.tsx";
 import { WishProductCard } from "../components/WishProductCard.tsx";
 import { WishButton } from "../components/WishButton.tsx";
@@ -128,18 +137,20 @@ function SubcatItem({
   subId,
   square,
   items,
+  totalCount,
   onNav,
 }: {
   groupId: string;
   subId: string;
   square?: boolean;
   items: ProductSummary[];
+  totalCount?: number;
   onNav: (cat: string, sub?: string) => void;
 }) {
   const s = subcatOf(groupId, subId);
   const [imgErr, setImgErr] = useState(false);
   const rep = s ? items.find((item) => s.matches(item)) : undefined;
-  const count = s ? items.filter((item) => s.matches(item)).length : 0;
+  const count = totalCount ?? (s ? items.filter((item) => s.matches(item)).length : 0);
   useEffect(() => setImgErr(false), [rep?.product_id]);
   if (!s) return null;
   return (
@@ -172,6 +183,7 @@ function SubcatItem({
 
 function HomeView({
   items,
+  browseSummary,
   userName,
   onNav,
   onOpen,
@@ -182,6 +194,7 @@ function HomeView({
   commerceEnabled,
 }: {
   items: ProductSummary[];
+  browseSummary?: BrowseSummary;
   userName: string;
   onNav: (cat: string, sub?: string) => void;
   onOpen: (id: string) => void;
@@ -193,7 +206,7 @@ function HomeView({
 }) {
   const byId = new Map(items.map((i) => [i.product_id, i]));
   const hero = HOME_HERO.map((id) => byId.get(id)).filter(Boolean) as ProductSummary[];
-  const maxRate = Math.max(0, ...items.map(rateOf));
+  const maxRate = browseSummary?.max_discount_rate ?? Math.max(0, ...items.map(rateOf));
   // 정적 추천 — 그룹별 recommended 우선 정렬 후 카테고리 라운드로빈.
   // 홈 첫 화면이 디지털 등 한 카테고리로 치우치지 않게 섞는다 [Observed: 원본은 식품·생활 중심 혼합].
   const GROUP_ORDER = ["food", "beauty", "living", "digital", "fashion"];
@@ -278,6 +291,7 @@ function HomeView({
 function GroupHome({
   cat,
   items,
+  browseSummary,
   userName,
   onNav,
   onOpen,
@@ -287,6 +301,7 @@ function GroupHome({
 }: {
   cat: string;
   items: ProductSummary[];
+  browseSummary?: BrowseSummary;
   userName: string;
   onNav: (cat: string, sub?: string) => void;
   onOpen: (id: string) => void;
@@ -299,7 +314,8 @@ function GroupHome({
     .map((id) => byId.get(id))
     .filter(Boolean) as ProductSummary[];
   const subs = SUBCATS[cat] ?? [];
-  const gItems = items.filter((i) => groupOf(i.category) === cat);
+  const gItems = items;
+  const groupCount = browseSummary?.group_counts[cat] ?? gItems.length;
   return (
     <>
       {/* 뷰티=정사각 커버 [Observed 26], 식품=카드형 가로 히어로 [Observed 27] */}
@@ -307,12 +323,21 @@ function GroupHome({
       {subs.length > 0 && (
         <div className="icon-rail">
           {subs.map((s) => (
-            <SubcatItem key={s.id} groupId={cat} subId={s.id} square items={items} onNav={onNav} />
+            <SubcatItem
+              key={s.id}
+              groupId={cat}
+              subId={s.id}
+              square
+              items={items}
+              totalCount={browseSummary?.subcategory_counts[cat]?.[s.id]}
+              onNav={onNav}
+            />
           ))}
         </div>
       )}
       <h3 className="section-h rec-h">
         {userName}님을 위한 {groupLabel(cat)} 추천
+        <span className="muted cnt">{groupCount}</span>
         <span className="demo-chip" title="카드의 조회수·최저가 표시는 시연용 합성 지표입니다">
           데모 지표
         </span>
@@ -358,9 +383,11 @@ function GroupHome({
 
 function CategoryBrowser({
   items,
+  browseSummary,
   onNav,
 }: {
   items: ProductSummary[];
+  browseSummary?: BrowseSummary;
   onNav: (cat: string, sub?: string) => void;
 }) {
   // [Observed 28~31] Reference 고정 순서 식품→리빙(생활용품)→패션→뷰티(+디지털).
@@ -428,7 +455,12 @@ function CategoryBrowser({
             }}
           >
             <div className="cat-pane-head">
-              <b>{groupLabel(grp.id)}</b>
+              <b>
+                {groupLabel(grp.id)}
+                <span className="muted cnt">
+                  {browseSummary?.group_counts[grp.id] ?? items.filter((item) => groupOf(item.category) === grp.id).length}
+                </span>
+              </b>
               <button className="cat-all" onClick={() => onNav(grp.id)}>
                 전체보기 <IcChevronRight size={14} />
               </button>
@@ -440,6 +472,7 @@ function CategoryBrowser({
                   groupId={grp.id}
                   subId={s.id}
                   items={items}
+                  totalCount={browseSummary?.subcategory_counts[grp.id]?.[s.id]}
                   onNav={onNav}
                 />
               ))}
@@ -685,6 +718,7 @@ function ListView({
   cat,
   sub,
   items,
+  browseSummary,
   onNav,
   onOpen,
   userId,
@@ -694,6 +728,7 @@ function ListView({
   cat: string;
   sub: string;
   items: ProductSummary[];
+  browseSummary?: BrowseSummary;
   onNav: (cat: string, sub?: string) => void;
   onOpen: (id: string) => void;
   userId: string | null;
@@ -701,9 +736,7 @@ function ListView({
   commerceEnabled: boolean;
 }) {
   const sc = sub ? subcatOf(cat, sub) : undefined;
-  const list = sc
-    ? items.filter((i) => sc.matches(i))
-    : items.filter((i) => groupOf(i.category) === cat);
+  const list = sc ? items : [...items];
   // 첫 로컬탭 '추천'은 그룹 전체 목록에서 recommended 태그 상품을 앞에 둔다
   // [Observed 100 첫 탭 / Project 정렬]. 실제 랭킹·개인화 주장은 없다.
   if (!sc) {
@@ -738,7 +771,7 @@ function ListView({
       )}
       <h3 className="section-h list-h">
         {sc ? sc.label : groupLabel(cat)}
-        <span className="muted cnt">{list.length}</span>
+        <span className="muted cnt">{browseSummary?.total_count ?? list.length}</span>
       </h3>
       {list.length === 0 ? (
         <Empty text="조건에 맞는 상품이 없어요" />
@@ -783,33 +816,127 @@ export function Shopping({
   onOpenWish: () => void;
   commerceEnabled: boolean;
 }) {
-  const [res, setRes] = useState<ApiResult<SearchResult> | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [tick, setTick] = useState(0);
+  const queryKey = browseKey(category, sub, userId);
+  const queryKeyRef = useRef(queryKey);
+  const requestSeq = useRef(0);
+  useLayoutEffect(() => {
+    queryKeyRef.current = queryKey;
+    requestSeq.current += 1;
+  }, [queryKey]);
+  const [pager, setPager] = useState<BrowsePagerState>(() => createBrowsePagerState(""));
+  const pagerRef = useRef(pager);
+  const inFlight = useRef(new Set<string>());
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadNextRef = useRef<() => void>(() => {});
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialError, setInitialError] = useState<string | null>(null);
+  const [appendLoading, setAppendLoading] = useState(false);
+  const [appendError, setAppendError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    void (async () => {
-      const result = await loadSearchPages(
-        "/api/products?limit=50",
-        (url) => apiSafe<SearchResult>(url),
-        () => !active,
-      );
-      if (!active || "stale" in result) return;
-      setRes(
-        result.ok
-          ? { ok: true, data: result.data }
-          : { ok: false, error: result.error },
-      );
-      setLoading(false);
-    })();
+    const controller = new AbortController();
+    const sequence = ++requestSeq.current;
+    const fresh = createBrowsePagerState(queryKey);
+    pagerRef.current = fresh;
+    setPager(fresh);
+    setInitialLoading(true);
+    setInitialError(null);
+    setAppendLoading(false);
+    setAppendError(null);
+
+    const loadPage = async (cursor: string | null, append: boolean) => {
+      if (!active || queryKeyRef.current !== queryKey || requestSeq.current !== sequence) return;
+      // Include the sequence in the lock key so a stale A request cannot block a new A
+      // after a quick A → B → A route change.
+      const release = claimBrowseRequest(inFlight.current, `${queryKey}:${sequence}`, cursor);
+      if (!release) return;
+      if (append) {
+        setAppendLoading(true);
+        setAppendError(null);
+      } else {
+        setInitialLoading(true);
+        setInitialError(null);
+      }
+      try {
+        const result = await apiSafe<BrowsePage>(
+          browsePageUrl(category, sub, cursor),
+          { signal: controller.signal },
+        );
+        if (!active || controller.signal.aborted || queryKeyRef.current !== queryKey ||
+          requestSeq.current !== sequence) return;
+        if (!result.ok) {
+          if (append) setAppendError(result.error.code);
+          else setInitialError(result.error.code);
+          return;
+        }
+        const applied = applyBrowsePage(pagerRef.current, queryKey, cursor, result.data);
+        if (applied.stale) return;
+        if (applied.error) {
+          if (append) setAppendError("BAD_PAGE");
+          else setInitialError("BAD_PAGE");
+          return;
+        }
+        pagerRef.current = applied.state;
+        setPager(applied.state);
+      } finally {
+        release();
+        if (active && queryKeyRef.current === queryKey && requestSeq.current === sequence) {
+          if (append) setAppendLoading(false);
+          else setInitialLoading(false);
+        }
+      }
+    };
+    const loadNext = () => {
+      const current = pagerRef.current;
+      if (!current.hasMore || current.nextCursor === null) return;
+      void loadPage(current.nextCursor, true);
+    };
+    loadNextRef.current = loadNext;
+    void loadPage(null, false);
     return () => {
       active = false;
+      controller.abort();
+      if (loadNextRef.current === loadNext) loadNextRef.current = () => {};
     };
-  }, [tick]);
+  }, [category, sub, queryKey, retryTick]);
 
-  const items = res?.ok ? res.data.items : [];
+  const isCurrent = pager.key === queryKey;
+  const activePager = isCurrent ? pager : createBrowsePagerState(queryKey);
+  const loading = !isCurrent || initialLoading;
+  const error = isCurrent ? initialError : null;
+  const items = activePager.items;
+
+  useEffect(() => {
+    const manualOnly = category === "category" ||
+      (groupOf(category) === "food" && !sub) ||
+      (category === "sale" && sub === "campaign");
+    if (manualOnly || !isCurrent || loading || error || appendError || appendLoading || !activePager.hasMore) return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadNextRef.current();
+      },
+      { rootMargin: "320px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [
+    queryKey,
+    category,
+    sub,
+    isCurrent,
+    loading,
+    error,
+    appendError,
+    appendLoading,
+    activePager.hasMore,
+    activePager.items.length,
+  ]);
+
+  const browseSummary = activePager.browseSummary;
 
   // 상단 탭 활성 상태 — 그룹 리스팅 진입 시 해당 콘텐츠 탭을 유지한다.
   const grp = groupOf(category);
@@ -876,14 +1003,15 @@ export function Shopping({
             </div>
           ))}
         </div>
-      ) : !res ? null : !res.ok ? (
+      ) : error ? (
         <ErrorState
-          text={"조회에 실패했어요 (" + res.error.code + ")"}
-          onRetry={() => setTick((t) => t + 1)}
+          text={"조회에 실패했어요 (" + error + ")"}
+          onRetry={() => setRetryTick((t) => t + 1)}
         />
       ) : view === "home" ? (
         <HomeView
           items={items}
+          browseSummary={browseSummary}
           userName={userName}
           onNav={onNav}
           onOpen={onOpenProduct}
@@ -897,6 +1025,7 @@ export function Shopping({
         <GroupHome
           cat={grp}
           items={items}
+          browseSummary={browseSummary}
           userName={userName}
           onNav={onNav}
           onOpen={onOpenProduct}
@@ -905,7 +1034,7 @@ export function Shopping({
           commerceEnabled={commerceEnabled}
         />
       ) : view === "category" ? (
-        <CategoryBrowser items={items} onNav={onNav} />
+        <CategoryBrowser items={items} browseSummary={browseSummary} onNav={onNav} />
       ) : view === "sale" ? (
         <SaleView
           items={items}
@@ -930,12 +1059,32 @@ export function Shopping({
           cat={grp}
           sub={sub}
           items={items}
+          browseSummary={browseSummary}
           onNav={onNav}
           onOpen={onOpenProduct}
           userId={userId}
           onGoWish={onOpenWish}
           commerceEnabled={commerceEnabled}
         />
+      )}
+      {!loading && !error && activePager.hasMore && (
+        <div className="browse-pager">
+          <div ref={sentinelRef} className="browse-sentinel" aria-hidden="true" />
+          {appendError && (
+            <p className="browse-pager-error" role="alert">
+              다음 상품을 불러오지 못했어요 ({appendError})
+            </p>
+          )}
+          {appendLoading && <p className="browse-pager-loading" role="status">상품을 더 불러오는 중이에요</p>}
+          <button
+            type="button"
+            className="browse-page-more"
+            onClick={() => loadNextRef.current()}
+            disabled={appendLoading}
+          >
+            {appendError ? "다시 시도" : appendLoading ? "불러오는 중..." : "더 보기"}
+          </button>
+        </div>
       )}
     </div>
   );

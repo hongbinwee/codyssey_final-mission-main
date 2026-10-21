@@ -273,6 +273,16 @@ main { flex: 1; padding: 0 var(--pad) 110px; }
   background: none; color: var(--text);
   font-size: 14px; font-weight: 600; padding: 13px 0; cursor: pointer;
 }
+.browse-page-more {
+  display: block; width: 100%; margin: 12px 0 20px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: none; color: var(--text);
+  font-size: 14px; font-weight: 600; padding: 13px 0; cursor: pointer;
+}
+.browse-page-more:disabled { opacity: .6; cursor: default; }
+.browse-pager-error, .browse-pager-loading { margin: 8px 0; text-align: center; font-size: 13px; }
+.browse-pager-error { color: var(--danger, var(--text-2)); }
+.browse-pager-loading { color: var(--muted); }
 
 /* 히어로 캐러셀 — 카드형(좌 텍스트+우 이미지), 다크에서도 크림 카드 유지 [Observed] */
 .hero-track {

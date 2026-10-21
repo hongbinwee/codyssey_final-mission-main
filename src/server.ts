@@ -393,6 +393,9 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
 
       if (p === "/api/products" && req.method === "GET") {
         return send(res, await catalog.searchProducts({
+          browse: url.searchParams.get("browse") === "1",
+          browse_group: url.searchParams.get("browse_group") ?? undefined,
+          browse_sub: url.searchParams.get("browse_sub") ?? undefined,
           query: url.searchParams.get("query") ?? undefined,
           category: url.searchParams.get("category") ?? undefined,
           max_unit_price_won: url.searchParams.get("max_unit_price_won") ? Number(url.searchParams.get("max_unit_price_won")) : undefined,
