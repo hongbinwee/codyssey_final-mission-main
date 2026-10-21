@@ -385,7 +385,10 @@ export function createPersistentResearchGraph(
        clientActionId:state.request.clientActionId,
        intentKind:state.agentAnswerIntent??
          (lastOrder?"CS_REQUEST":lastCart||lastWish?"SHOPPING_FOLLOWUP":reviewRead?"REVIEW_SUMMARY":state.intentRoute.kind),
-       ...(state.intentRoute.search&&state.shoppingPlan?{shoppingPlan:state.shoppingPlan}:state.researchResult?.shoppingPlan?{shoppingPlan:state.researchResult.shoppingPlan}:{}),
+       ...(deps.agentPlanning&&!state.agentSearched&&state.researchResult?.shoppingPlan?
+         {shoppingPlan:state.researchResult.shoppingPlan}:
+         state.intentRoute.search&&state.shoppingPlan?{shoppingPlan:state.shoppingPlan}:
+         state.researchResult?.shoppingPlan?{shoppingPlan:state.researchResult.shoppingPlan}:{}),
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},datasetVersion:deps.datasetVersion,
        shoppingHandoffs:validatedShoppingHandoffs({observations}),
        taskState:noTools&&!state.agentQuestion?
