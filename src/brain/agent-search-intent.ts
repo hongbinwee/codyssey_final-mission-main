@@ -41,7 +41,7 @@ export function parseAgentSearchIntent(raw:unknown,message:string,previous?:Shop
    if(intent.budgetMode==="CLEAR"&&previous.maxTotalWon!==null&&
       !/(예산|가격|금액).{0,15}(?:상관없|제한없|없애|취소|초기화|해제)/.test(message))return null;
    if(["CLEAR","REPLACE"].includes(intent.requirementsMode??"")&&
-       !/(조건|필수|제외|빼|말고|취소|없애|바꿔|새로|다른|이번에는)/.test(message))return null;
+       !/(?:조건|필수).{0,20}(?:해제|취소|빼|없애|상관없|제외)|(?:남성|남자|여성|여자).{0,10}(?:아닌|말고|제외)/.test(message))return null;
   }
   const stated=(s:string)=>message.includes(s)||(gender(s)!==null&&gender(message)===gender(s));
   const prior=new Set(changed?[]:previous?.requiredConditions??[]);

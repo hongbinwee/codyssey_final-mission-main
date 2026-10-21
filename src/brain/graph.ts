@@ -206,11 +206,11 @@ export function createPersistentResearchGraph(
      const decisionStarted=performance.now();
      const decision=await decideHermesAction({
        provider:deps.hermes.provider,message:state.request.userMessage,
-       plan:state.intentRoute.search?(state.shoppingPlan??state.researchResult?.shoppingPlan):undefined,
+       plan:state.intentRoute.search?(deps.agentPlanning&&!state.agentSearched?state.researchResult?.shoppingPlan:(state.shoppingPlan??state.researchResult?.shoppingPlan)):undefined,
        memories:state.prepared.memories,task:state.activeTask,
        recentTurns:state.prepared.recentTurns,
        observations:state.agentObservations??[],tools:agentPorts(state),
-       displayedProducts:state.shoppingPlan?.lastDisplayedProducts??state.researchResult?.shoppingPlan?.lastDisplayedProducts,
+       displayedProducts:deps.agentPlanning&&!state.agentSearched?state.researchResult?.shoppingPlan?.lastDisplayedProducts:(state.shoppingPlan?.lastDisplayedProducts??state.researchResult?.shoppingPlan?.lastDisplayedProducts),
        agentPlanning:deps.agentPlanning===true&&state.intentRoute.search,
        offerSearch:state.intentRoute.search,startedAt:startAt,
      });

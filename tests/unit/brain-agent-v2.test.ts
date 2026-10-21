@@ -74,3 +74,25 @@ test("V2 does not search on malformed model Tool arguments",async()=>{
  assert.equal(audit.counts().intentCalls,0);
  assert.deepEqual(result.ranking.ranked,[]);
 });
+
+test("V2 will not invent a numeric budget without a price stated by the user",()=>{
+ const proposal=searchIntent({maxTotalWon:30000,budgetMode:"SET"});
+ assert.equal(parseAgentSearchIntent(proposal,"세럼 추천해줘"),null);
+ assert.equal(parseAgentSearchIntent(proposal,"세럼 3만원 이하로 추천해줘")?.context.maxTotalWon,30000);
+});
+test("V2 retains verified previous hard requirements on price-preference follow-ups",()=>{
+ const previous={query:"남성용 팬티",maxTotalWon:30000,revision:1,
+  requiredConditions:["남성용"],category:"fashion",attributePreferences:["breathability"],currentPreferences:{}} as const;
+ const proposal=searchIntent({query:"남성용 팬티",queryMode:"KEEP",budgetMode:"KEEP",
+  requirementsMode:"KEEP",requiredConditions:[],category:"fashion",currentPreferences:{price_priority:"value"}});
+ const intent=parseAgentSearchIntent(proposal,"그럼 더 저렴한 걸로",previous as never);
+ assert.ok(intent);
+ assert.equal(intent?.queryMode,"KEEP");
+ assert.equal(intent?.requirementsMode,"KEEP");
+ assert.equal(intent?.context.currentPreferences.price_priority,"value");
+});
+test("V2 rejects guessed numeric budgets on follow-ups",()=>{
+ const previous={query:"세럼",maxTotalWon:50000,revision:1,requiredConditions:[],currentPreferences:{}} as const;
+ const proposal=searchIntent({query:"세럼",queryMode:"KEEP",maxTotalWon:20000,budgetMode:"SET"});
+ assert.equal(parseAgentSearchIntent(proposal,"그냥 다른 걸로",previous as never),null);
+});
