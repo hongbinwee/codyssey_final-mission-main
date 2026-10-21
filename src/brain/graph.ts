@@ -209,6 +209,7 @@ export function createPersistentResearchGraph(
        plan:state.intentRoute.search?state.shoppingPlan:undefined,
        memories:state.prepared.memories,task:state.activeTask,
        observations:state.agentObservations??[],tools:agentPorts(state),
+       displayedProducts:state.intentRoute.search?state.shoppingPlan?.lastDisplayedProducts:state.researchResult?.shoppingPlan?.lastDisplayedProducts,
        offerSearch:state.intentRoute.search,startedAt:startAt,
      });
      const metrics={agentDecisionMs:(state.agentDecisionMs??0)+performance.now()-decisionStarted,

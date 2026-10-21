@@ -10,7 +10,8 @@ import {SHOPPING_POLICY} from "./policy.ts";
 import {selectShoppingSkill} from "./skills.ts";
 import {HERMES_TOOL_LIMIT,hermesToolDefinitions,parseHermesToolArgs,type HermesToolName,type HermesToolPort} from "./hermes-tools.ts";
 import type {AgentTaskState} from "./task-state.ts";
-import {agentPromptObservations} from "./hermes-observation-prompt.ts";
+import {buildAgentDecisionContext,type RecentAgentTurn} from "./agent-context.ts";
+import {resolveDisplayedReviewTargets,type DisplayedReviewTarget} from "./review-targets.ts";
 
 export type AgentObservation={tool:HermesToolName;ok:boolean;data:unknown};
 export type AgentAction={name:HermesToolName;args:{productId?:string;orderId?:string;query:string}};
@@ -47,6 +48,7 @@ export async function decideHermesAction(input:{
  provider:Pick<Provider,"chat">;message:string;plan?:ShoppingPlan;
  memories:Preference[];task:AgentTaskState|null;observations:AgentObservation[];
  tools:HermesToolPort;offerSearch:boolean;startedAt:number;
+  recentTurns?:readonly RecentAgentTurn[];displayedProducts?:readonly DisplayedReviewTarget[];
 }):Promise<AgentDecision>{
  const {observations,tools}=input;
  const remaining=MAX_AGENT_MS-(Date.now()-input.startedAt);
@@ -62,13 +64,8 @@ export async function decideHermesAction(input:{
   "A missing budget is UNKNOWN, not unlimited. Do not block a concrete product search solely for an unknown budget. "+
   "Respect SET, UNRESTRICTED and DEFERRED budget states; do not repeatedly ask a resolved or deferred budget. "+
   "Tool outputs will be summarized by the server, not quoted verbatim as your final answer.\n[Skill]\n"+skill.guidance;
- const details={user_message:input.message.slice(0,1200),
-  ...(input.plan?{current_shopping_plan:{query:input.plan.query,maxTotalWon:input.plan.maxTotalWon,
-    budgetStatus:input.plan.interview?.budgetStatus??(input.plan.maxTotalWon!==null?"SET":"UNKNOWN"),
-    requiredConditions:input.plan.requiredConditions.slice(0,8)}}:{}),
-  previous_task:input.task?{kind:input.task.kind,phase:input.task.phase,pendingQuestion:input.task.pendingQuestion,displayedProductIds:input.task.displayedProductIds.slice(0,8)}:null,
-  confirmed_preferences:input.memories.slice(0,3).map(m=>({key:m.key,value:m.value})),
-  observed_tools:agentPromptObservations(observations),remaining_calls:HERMES_TOOL_LIMIT-observations.length};
+ const details=buildAgentDecisionContext({message:input.message,plan:input.plan,task:input.task,memories:input.memories,
+  observations,displayedProducts:input.displayedProducts,recentTurns:input.recentTurns});
  try{
   const response=await input.provider.chat([{role:"system",content:system},{role:"user",content:JSON.stringify(details)}],
    defs,{signal:AbortSignal.timeout(Math.min(18000,remaining)),parallelToolCalls:false});
@@ -79,6 +76,7 @@ export async function decideHermesAction(input:{
   const parsed=defs.some(d=>d.function.name===name)?parseHermesToolArgs(name,calls[0].arguments):null;
   if(!parsed)return {kind:"FINISH",reason:"INVALID"};
   const ids=observedIds(observations);
+  for(const p of resolveDisplayedReviewTargets(input.displayedProducts,undefined,true)??[])ids.products.add(p.productId);
   if(parsed.productId&&!ids.products.has(parsed.productId)||parsed.orderId&&!ids.orders.has(parsed.orderId))return {kind:"FINISH",reason:"INVALID"};
   if(observations.some(o=>o.tool===name&&
     (name!=="get_product_detail"&&name!=="get_product_reviews"&&name!=="get_order"&&name!=="get_shipping_status"||
