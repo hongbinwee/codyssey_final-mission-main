@@ -193,6 +193,19 @@ test("read flow forwards the trace id and unmodified question separately from th
   assert.equal(observed?.requestId, "trace-request-42");
   assert.equal(observed?.originalQuestion, "원문 질문: 민감 피부용 보습 크림을 찾아줘");
   assert.equal(observed?.query, "보습 크림");
+  assert.equal(Object.hasOwn(observed??{},"productIds"),false,"new searches must not inherit an earlier review scope");
+});
+
+test("read flow scopes a review-ranked follow-up to the previous server-displayed products",async()=>{
+ let observed:Record<string,unknown>|undefined;
+ await retrieveTurn({actorUserId:"user-1",conversationId:"00000000-0000-4000-8000-000000000001",requestId:"review-request",
+  userMessage:"이전 추천 중 촉촉한 리뷰 순서",clientActionId:"review-action"},
+  {messageId:"message-1",memories:[],startedAt:performance.now(),memoryMs:0} as never,
+  {query:"마스크팩",maxTotalWon:null,requiredConditions:[],currentPreferences:{},revision:2,
+   reviewSortAspect:"moisturizing",lastDisplayedProductIds:["p-v4-1","p-v4-2"]},
+  {retriever:{search:async(input:Record<string,unknown>)=>{observed=input;return{candidates:[],evidence:[]};}}} as never);
+ assert.deepEqual(observed?.productIds,["p-v4-1","p-v4-2"]);
+ assert.equal(observed?.reviewSortAspect,"moisturizing");
 });
 
 test("read-flow exposes only condition-unverified synthetic references and keeps budget failures rejected", async () => {
@@ -326,6 +339,24 @@ test("v4 request follows the fixed contract and only verified Commerce data beco
   assert.equal(result.evidence[0].verified, true);
   assert.equal(result.evidence[0].sourceKind, "SYNTHETIC");
   assert.equal(result.evidence[0].datasetVersion, DATASET_VERSION);
+});
+
+test("review-ranked follow-ups send only trusted displayed product IDs to remote v4 RAG",async()=>{
+ let requestBody:Record<string,unknown>|undefined;
+ const factory=(rag as unknown as {verifiedRagRetriever:(...args:unknown[])=>{
+  search(input:Record<string,unknown>):Promise<{candidates:Array<Record<string,unknown>>;evidence:Array<Record<string,unknown>>}>;
+ }}).verifiedRagRetriever;
+ const retriever=factory({endpoint:"http://127.0.0.1:7888/rag",mode:"remote",contract:"v4",datasetVersion:DATASET_VERSION,
+  category:"beauty",catalogSource:"test_items2",timeoutMs:1000},
+  async({product_id}:{product_id:string})=>productDetail(product_id),
+  async(_url:unknown,init?:RequestInit)=>{
+   requestBody=JSON.parse(String(init?.body)) as Record<string,unknown>;
+   return new Response(JSON.stringify(v4Response()),{status:200,headers:{"content-type":"application/json"}});
+  },async({product_id,review_ids}:{product_id:string;review_ids:string[]})=>[review({product_id,id:review_ids[0]??"r-v4-1"})]);
+ await retriever.search({requestId:"review-followup",originalQuestion:"이전 상품의 촉촉 리뷰 순서",query:"촉촉",maxTotalWon:null,
+  requiredConditions:[],reviewSortAspect:"moisturizing",productIds:["p-v4-1"]});
+ assert.deepEqual(requestBody?.product_ids,["p-v4-1"]);
+ assert.deepEqual(requestBody?.filters,{in_stock:true});
 });
 
 test("QA v4 maps only verified Commerce conditions and uses exact retrieved ratings as a synthetic facet", async () => {

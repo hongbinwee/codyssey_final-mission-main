@@ -10,9 +10,21 @@ const SYSTEM_PROMPT_IDENTITY = {
   brainRole: "brain_prompt_qa",
 } as const;
 
+const HERMES_V2_LOCAL_IDENTITY = {
+  port: 15443,
+  database: "toss_hermes_v2_qa_20261022",
+  role: "commerce_hermes_v2_qa",
+  brainDatabase: "brain_hermes_v2_qa_20261022",
+  brainRole: "brain_hermes_v2_qa",
+} as const;
+
 export function qaCommerceIdentity(env:Record<string,string|undefined>) {
   const profile=env.QA_ENVIRONMENT;
-  if(profile!==undefined&&profile!=="system-prompt"&&profile!=="hermes-h6")throw Error("invalid QA_ENVIRONMENT");
+  if(profile!==undefined&&profile!=="system-prompt"&&profile!=="hermes-h6"&&profile!=="hermes-v2-local")throw Error("invalid QA_ENVIRONMENT");
+  if(profile==="hermes-v2-local"){
+    if(env.COMMERCE_CATALOG_SOURCE!=="test_items2")throw Error("invalid Hermes V2 local QA profile");
+    return HERMES_V2_LOCAL_IDENTITY;
+  }
   if(profile==="hermes-h6"){
     if(env.COMMERCE_CATALOG_SOURCE!=="test_items2")throw Error("invalid Hermes H6 QA profile");
     return {port:15442,database:"toss_hermes_h6_20261020",role:"commerce_hermes_h6",
@@ -58,6 +70,10 @@ export function qaCommerceConnectedIdentityMatches(
 }
 
 export function qaCommerceEnabled(env: Record<string, string | undefined>): boolean {
+  if(env.QA_ENVIRONMENT==="hermes-v2-local"&&
+      (env.QA_AUTH_ENABLED!=="1"||env.QA_COMMERCE_ENABLED!=="1"||env.HERMES_QA_ENABLED!=="1"||
+       env.COMMERCE_CATALOG_SOURCE!=="test_items2"||env.QA_REUSE_EXISTING_BRAIN!==undefined))
+    throw Error("invalid Hermes V2 local QA profile");
   if(env.QA_ENVIRONMENT==="hermes-h6"&&
       (env.QA_AUTH_ENABLED!=="1"||env.QA_COMMERCE_ENABLED!=="1"||env.HERMES_QA_ENABLED!=="1"||
        env.COMMERCE_CATALOG_SOURCE!=="test_items2"||env.QA_REUSE_EXISTING_BRAIN!==undefined))

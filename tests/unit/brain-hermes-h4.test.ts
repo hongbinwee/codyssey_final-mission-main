@@ -120,6 +120,20 @@ test("server responses never invent order details when no Tool ran",()=>{
  assert.match(summarizeAgentObservations([]),/확인된 조회 결과가 없어요/);
 });
 
+test("wishlist summaries compare current available option prices and exclude unavailable products",()=>{
+ const text=summarizeAgentObservations([{tool:"get_wishlist",ok:true,data:{saved_products:[
+  {productId:"wish-a",name:"상품 A",active:true,minPriceWon:29000},
+  {productId:"wish-b",name:"상품 B",active:true,minPriceWon:19000},
+  {productId:"wish-c",name:"판매 중단 상품",active:false,minPriceWon:null},
+  {productId:"wish-d",name:"가격 미확인 상품",active:true,minPriceWon:null}
+ ]}}]);
+ assert.match(text,/상품 B/);
+ assert.match(text,/19,000원/);
+ assert.match(text,/상품가 기준/);
+ assert.match(text,/2개/);
+ assert.doesNotMatch(text,/판매 중단 상품이 가장 저렴/);
+});
+
 test("H4 explicit product discovery recovers with verified retrieval when model stops prematurely",async()=>{
  const {deps,getCounts}=baseDeps({chat:async()=>({content:"완료"})});
  const result=await createPersistentResearchGraph(deps,new MemorySaver() as never)

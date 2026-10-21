@@ -12,6 +12,42 @@ const systemPromptEnv={
   BRAIN_DATABASE_URL:"postgres://brain_prompt_qa:fixture@127.0.0.1:15441/brain_prompt_qa_20261019",
 };
 
+const hermesLocalEnv={
+  QA_ENVIRONMENT:"hermes-v2-local",
+  QA_AUTH_ENABLED:"1",
+  QA_COMMERCE_ENABLED:"1",
+  HERMES_QA_ENABLED:"1",
+  COMMERCE_CATALOG_SOURCE:"test_items2",
+  DATABASE_URL:"postgres://commerce_hermes_v2_qa:fixture@127.0.0.1:15443/toss_hermes_v2_qa_20261022",
+  BRAIN_ENABLED:"1",
+  BRAIN_DATABASE_URL:"postgres://brain_hermes_v2_qa:fixture@127.0.0.1:15443/brain_hermes_v2_qa_20261022",
+};
+
+test("hermes-v2-local accepts only its fixed isolated Commerce and Brain identities",async()=>{
+  assert.deepEqual(qaCommerceIdentity(hermesLocalEnv),{
+    port:15443,
+    database:"toss_hermes_v2_qa_20261022",
+    role:"commerce_hermes_v2_qa",
+    brainDatabase:"brain_hermes_v2_qa_20261022",
+    brainRole:"brain_hermes_v2_qa",
+  });
+  assert.equal(qaCommerceEnabled(hermesLocalEnv),true);
+  const {qaCommerceActivityAllowed}=await import("../../src/brain/runtime.ts");
+  assert.equal(qaCommerceActivityAllowed?.({catalogSource:"test_items2",qaEnvironment:"hermes-v2-local",
+    commerceDatabaseUrl:hermesLocalEnv.DATABASE_URL}),true);
+  for(const patch of [
+    {DATABASE_URL:hermesLocalEnv.DATABASE_URL.replace(":15443/",":15442/")},
+    {DATABASE_URL:hermesLocalEnv.DATABASE_URL.replace("127.0.0.1","remote.example")},
+    {DATABASE_URL:hermesLocalEnv.DATABASE_URL.replace("commerce_hermes_v2_qa","commerce_t2_qa")},
+    {DATABASE_URL:hermesLocalEnv.DATABASE_URL+"?sslmode=disable"},
+    {QA_AUTH_ENABLED:"0"},
+    {QA_COMMERCE_ENABLED:"0"},
+    {HERMES_QA_ENABLED:"0"},
+    {COMMERCE_CATALOG_SOURCE:"test_items"},
+    {QA_REUSE_EXISTING_BRAIN:"1"},
+  ]) assert.throws(()=>qaCommerceEnabled({...hermesLocalEnv,...patch}));
+});
+
 test("system-prompt QA uses its dedicated Commerce and Brain identities on port 15441",()=>{
   assert.deepEqual(qaCommerceIdentity(systemPromptEnv),{
     port:15441,

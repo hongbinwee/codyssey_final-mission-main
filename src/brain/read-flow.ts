@@ -182,7 +182,8 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
      ...(plan.minTotalWon!==undefined?{minTotalWon:plan.minTotalWon}:{}),
      requiredConditions:plan.requiredConditions,preferences:searchPreferences,requestId:req.requestId,originalQuestion:req.userMessage,
      ...(plan.category?{category:plan.category}:{}),
-     ...(plan.reviewSortAspect?{reviewSortAspect:plan.reviewSortAspect}:{})};
+     ...(plan.reviewSortAspect?{reviewSortAspect:plan.reviewSortAspect,
+       ...(plan.lastDisplayedProductIds?.length?{productIds:[...new Set(plan.lastDisplayedProductIds)].slice(0,20)}:{})}:{})};
    fetched=await deps.retriever.search(request);
    // Inferred categories may return unrelated hits that fail every hard condition.
    // Retry at most once, only when global search is supported and category was not explicit.

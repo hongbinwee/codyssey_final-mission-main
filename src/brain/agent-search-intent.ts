@@ -33,7 +33,15 @@ export function parseAgentSearchIntent(raw:unknown,message:string,previous?:Shop
   if(!raw||typeof raw!=="object"||Array.isArray(raw))return null;
   const x=raw as Record<string,unknown>;
   if(Object.keys(x).length!==1||!("intent" in x)||!x.intent||typeof x.intent!=="object"||Array.isArray(x.intent))return null;
-  const intent=parseShoppingIntent(JSON.stringify(x.intent));
+  const proposal={...(x.intent as Record<string,unknown>)};
+  // Attribute keys are category-scoped. If the model omits a category, keep
+  // the original query (which still carries the user's words) and discard only
+  // those unsupported structured attributes instead of rejecting the action.
+  if(typeof proposal.category!=="string"){
+   delete proposal.attributePreferences;
+   delete proposal.attributeSources;
+  }
+  const intent=parseShoppingIntent(JSON.stringify(proposal));
   if(!intent.queryMode||!intent.budgetMode)return null;
   if(!previous&&intent.queryMode!=="SET")return null;
   // An identical product query in a follow-up is not a fresh task simply because the
@@ -69,6 +77,15 @@ export function parseAgentSearchIntent(raw:unknown,message:string,previous?:Shop
    const sources=intent.attributeSources??{};
    intent.context.attributePreferences=intent.context.attributePreferences.filter(k=>
     typeof sources[k]==="string"&&sources[k].length>=2&&message.includes(sources[k]));
+  }
+  // Gender explicitly stated in the current request is a hard product
+  // constraint, even when the model places it among soft attributes or omits it.
+  const wantsMale=/(남성|남자|맨즈)/.test(message),wantsFemale=/(여성|여자|우먼)/.test(message);
+  if(wantsMale!==wantsFemale){
+   const requestedGender=wantsMale?"M":"F";
+   if(intent.context.requiredConditions.some(c=>gender(c)!==null&&gender(c)!==requestedGender))return null;
+   if(!intent.context.requiredConditions.some(c=>gender(c)===requestedGender))
+    intent.context.requiredConditions=[...intent.context.requiredConditions,requestedGender==="M"?"남성용":"여성용"].slice(0,12);
   }
   if(previous&&!changed&&intent.preferencesMode!=="CLEAR"&&
      (!intent.context.attributePreferences||intent.context.attributePreferences.length===0)){

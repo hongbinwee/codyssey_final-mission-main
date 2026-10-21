@@ -282,10 +282,22 @@ export function summarizeAgentObservations(observations:readonly AgentObservatio
    if(unavailable.length)text+=" 장바구니 상품 상태: "+unavailable.join(", ")+".";
    addFact("cart",text);
   }else if(observation.tool==="get_wishlist"){
-   const list=data.saved_products as Array<{name?:unknown}>|undefined;
-   if(Array.isArray(list))addFact("wishlist",list.length?
-    "찜 목록에서 "+list.slice(0,4).map(x=>label(x?.name,80)).filter(Boolean).join(", ")+"을(를) 확인했어요.":
-    "찜한 상품이 없어요.");
+   const list=data.saved_products as Array<{name?:unknown;active?:unknown;minPriceWon?:unknown}>|undefined;
+   if(Array.isArray(list)){
+    if(!list.length){addFact("wishlist","찜한 상품이 없어요.");continue;}
+    let text="찜 목록에서 "+list.slice(0,4).map(x=>label(x?.name,80)).filter(Boolean).join(", ")+"을(를) 확인했어요.";
+    const priced=list.filter(x=>x?.active===true&&typeof x.minPriceWon==="number"&&
+     Number.isSafeInteger(x.minPriceWon)&&x.minPriceWon>=0);
+    if(priced.length){
+     const lowest=Math.min(...priced.map(x=>x.minPriceWon as number));
+     const winners=priced.filter(x=>x.minPriceWon===lowest).map(x=>label(x.name,80)).filter(Boolean);
+     if(winners.length)text+=" 현재 확인된 활성 옵션의 상품가가 가장 낮은 상품은 "+
+      winners.join(", ")+"이고, 옵션 최저가는 "+money(lowest)+"예요. 상품가 기준이며 배송비는 포함하지 않았어요.";
+    }
+    const unavailable=list.length-priced.length;
+    if(unavailable)text+=" 판매 중단 또는 활성 옵션 가격을 확인하지 못한 "+unavailable+"개 상품은 비교에서 제외했어요.";
+    addFact("wishlist",text);
+   }
   }else if(observation.tool==="get_product_detail"){
    const item=data.product as Record<string,any>|null;
    if(!item){addFact("product:"+observationIndex,"상품 정보를 확인하지 못했어요.");continue;}

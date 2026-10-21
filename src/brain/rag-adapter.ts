@@ -216,6 +216,9 @@ async function retrieveV4(
      input.requiredConditions.length>25||!input.requiredConditions.every(x=>text(x,128)))
     throw new Error("invalid RAG v4 request");
   const preferences=input.preferences??[];
+  const productIds=input.reviewSortAspect&&Array.isArray(input.productIds)?[...new Set(input.productIds)].slice(0,20):[];
+  if(productIds.some(id=>!text(id,128)||!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id)))
+    throw Error("invalid RAG product scope");
   if(!Array.isArray(preferences)||preferences.length>20||!preferences.every(p=>text(p,128))||
     input.maxTotalWon!==null&&(!Number.isSafeInteger(input.maxTotalWon)||input.maxTotalWon<0)||
      input.minTotalWon!==undefined&&(!Number.isSafeInteger(input.minTotalWon)||input.minTotalWon<0||
@@ -233,6 +236,7 @@ async function retrieveV4(
       // Ranking enforce the original hard requirements and shipping-inclusive budget.
       query:connection.mode==='local'?[input.query,...preferences].join(' ').slice(0,250):input.query,
       ...(category||connection.mode==='local'?{category}:{}),
+      ...(connection.mode==='remote'&&productIds.length?{product_ids:productIds}:{}),
       filters:connection.mode==='remote'?{in_stock:true,...(input.maxTotalWon!==null?{price_max:input.maxTotalWon,currency:'KRW'}:{})}:{},
       required_conditions:input.requiredConditions,preferences:connection.mode==='local'?[]:preferences,top_k:input.reviewSortAspect||input.minTotalWon!==undefined?10:5})
   });
