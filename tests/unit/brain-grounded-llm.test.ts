@@ -401,3 +401,23 @@ test('model-selected recommendation facts never include internal catalog identif
  ],mode:'RECOMMEND'});
  assert.equal(result.kind,'LLM_GROUNDED');assert.match(result.items[0].reason??'',/구성: 1매/);assert.doesNotMatch(JSON.stringify(facts),/package_label_from_name/);
 });
+
+test("recommendation explanation carries purpose and aspects, not unsolicited cheapest claims",async()=>{
+ const candidates=[product("p-1","v-blue"),product("p-2","v-green",{unitPriceWon:80000})];
+ const goal={...plan,query:"무선 헤드폰",category:"audio",attributePreferences:["comfort"],
+  interview:{purpose:"장시간 통근용",answered:["purpose"],pending:[]}};
+ const base={...ask(...candidates),plan:goal,originalQuestion:"귀가 편안한 헤드폰 알려줘"};
+ const neutral=create("{broken");
+ await neutral.respond(base);
+ assert.equal(neutral.calls.length,1);
+ const prompt=JSON.parse(neutral.calls[0].messages[1].content??"{}");
+ assert.equal(prompt.shoppingPlan.purpose,"장시간 통근용");
+ assert.deepEqual(prompt.shoppingPlan.attributePreferences,["comfort"]);
+ assert.equal(prompt.candidates.some((c:{facts:Array<{id:string}>})=>
+  c.facts.some(f=>f.id==="lower_cost")),false);
+ const explicit=create("{broken");
+ await explicit.respond({...base,originalQuestion:"더 저렴한 헤드폰 추천해줘"});
+ const priced=JSON.parse(explicit.calls[0].messages[1].content??"{}");
+ assert.equal(priced.candidates.some((c:{facts:Array<{id:string}>})=>
+  c.facts.some(f=>f.id==="lower_cost")),true);
+});

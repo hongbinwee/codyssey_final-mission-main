@@ -238,13 +238,15 @@ async function recommend(input:GroundedResponseInput,provider:Pick<Provider,"cha
  const base=buildGroundedExplanation(ranking,input.evidence,input.plan);
  if(!base.items.length)return base;
  const facts=new Map<string,Map<string,string>>();
+ const priceRequested=!!input.plan.priceSortOrder||input.plan.currentPreferences.price_priority==="value"||
+  /(?:가성비|저렴|싼\s*제품|더\s*싸|가격.*(?:낮|순|중요))/.test(input.originalQuestion);
  const cheapest=Math.min(...prepared.map(row=>row.prompt.totalPriceWon));
  for(const row of prepared){
    const p=row.prompt,f=new Map<string,string>();
    f.set('price',`배송비 포함 ${p.totalPriceWon.toLocaleString('ko-KR')}원이에요.`);
    if(input.plan.maxTotalWon!==null&&p.totalPriceWon<=input.plan.maxTotalWon)
      f.set('budget',`배송비 포함 ${p.totalPriceWon.toLocaleString('ko-KR')}원으로 말씀하신 예산 안에서 고를 수 있어요.`);
-   if(prepared.length>1&&p.totalPriceWon===cheapest)
+   if(priceRequested&&prepared.length>1&&p.totalPriceWon===cheapest)
      f.set('lower_cost','표시한 상품 중 배송비 포함 가격이 가장 낮아요.');
    if(p.shippingFeeWon===0)f.set('shipping','확인된 배송비가 0원이에요.');
    const verified=input.ranking.ranked.find(item=>item.candidate.productId===p.productId&&item.candidate.variantId===p.variantId)?.candidate;
@@ -264,8 +266,6 @@ async function recommend(input:GroundedResponseInput,provider:Pick<Provider,"cha
    facts.set(p.productId,f);
  }
  // Useful recommendations survive a slow/unavailable model or invalid output.
- const priceRequested=!!input.plan.priceSortOrder||input.plan.currentPreferences.price_priority==="value"||
-  /(?:가성비|저렴|싼\s*제품|더\s*싸|가격.*(?:낮|순|중요))/.test(input.originalQuestion);
  const fallback=(failure?:GroundedExplanation['failure']):GroundedExplanation=>({...base,
    items:base.items.map(item=>({...item,reason:[
      facts.get(item.productId)?.get('budget')??facts.get(item.productId)?.get('price'),

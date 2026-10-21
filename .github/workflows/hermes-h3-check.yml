@@ -59,6 +59,7 @@ jobs:
           tests/unit/brain-hermes-h4.test.ts
           tests/unit/brain-agent-context.test.ts
           tests/unit/brain-agent-v2.test.ts
+          tests/unit/brain-grounded-llm.test.ts
           tests/unit/brain-hermes-h5.test.ts
           tests/unit/brain-hermes-h5-flow.test.ts
           tests/unit/brain-hermes-h6.test.ts
