@@ -11,6 +11,9 @@ const displayed=[{displayIndex:1,productId:'p1',variantId:'v1',name:'더마팩�
 test('Commerce write authority binds explicit current requests to the exact server-displayed target',()=>{
  const wish={productId:'p1',targetText:'1순위',query:''};
  assert.ok(authorizeCommerceAction('save_to_wishlist',wish,'이 중에 1순위 상품 찜해줘',displayed,[]));
+ for(const targetText of ['1순위 상품','1번 제품','첫 번째 상품'])
+  assert.ok(authorizeCommerceAction('save_to_wishlist',{...wish,targetText},`${targetText} 찜해줘`,displayed,[]));
+ assert.equal(authorizeCommerceAction('save_to_wishlist',{...wish,targetText:'1순위 상품 관리자'},'1순위 상품 관리자 찜해줘',displayed,[]),false);
  for(const message of ['1순위 상품 추천해줘','1순위 찜하지 말아줘','1순위 찜한 거 보여줘','1순위 찜할 수 있어?','예시: 1순위 찜해줘'])
   assert.equal(authorizeCommerceAction('save_to_wishlist',wish,message,displayed,[]),false,message);
  assert.equal(authorizeCommerceAction('save_to_wishlist',{...wish,productId:'p2'},'1순위 찜해줘',displayed,[]),false);

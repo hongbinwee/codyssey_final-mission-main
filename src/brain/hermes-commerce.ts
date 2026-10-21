@@ -24,7 +24,7 @@ export function authorizeCommerceAction(name:string,args:{productId?:string;targ
  const target=args.targetText?.trim();if(!target||!message.includes(target)||!args.productId)return false;
  if(!explicitCommerceRequest(name,message))return false;
  const rows=(displayed??[]).filter(p=>p.commerceVerified===true);
- const ordinal=/^(?:(\d+)\s*(?:순위|번(?:째)?)|(첫|두|세)\s*번째)$/.exec(target);
+ const ordinal=/^(?:(\d+)\s*(?:순위|번(?:째)?)|(첫|두|세)\s*번째)(?:\s*(?:상품|제품))?$/.exec(target);
  let matches:ReadonlyArray<{productId:string}>;
  if(ordinal){const index=ordinal[1]?Number(ordinal[1]):['첫','두','세'].indexOf(ordinal[2]!)+1;matches=rows.filter(p=>p.displayIndex===index);}
  else{
