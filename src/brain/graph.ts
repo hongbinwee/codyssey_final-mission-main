@@ -302,7 +302,7 @@ export function createPersistentResearchGraph(
            }))
          }};
          const searchKind=deps.agentPlanning?
-           (previous?"SHOPPING_FOLLOWUP" as const:"SHOPPING_SEARCH" as const):state.intentRoute.kind;
+           (state.researchResult?.explanation&&state.researchResult.shoppingPlan?"SHOPPING_FOLLOWUP" as const:"SHOPPING_SEARCH" as const):state.intentRoute.kind;
          return {shoppingPlan:plan,intentRoute:{kind:searchKind,search:true},
            researchResult:{...fetched.result,intentKind:searchKind},
            evidence:fetched.evidence,agentSearched:true,agentObservations:[...observations,observation],
