@@ -406,7 +406,7 @@ test("recommendation explanation carries purpose and aspects, not unsolicited ch
  const candidates=[product("p-1","v-blue"),product("p-2","v-green",{unitPriceWon:80000})];
  const goal:ShoppingPlan={...plan,query:"무선 헤드폰",category:"audio",attributePreferences:["comfort"],
   interview:{purpose:"장시간 통근용",answered:["purpose"],pending:[]}};
- const base={...ask(...candidates),plan:goal,originalQuestion:"귀가 편안한 헤드폰 알려줘"};
+ const base={...ask(...candidates),plan:goal,originalQuestion:"귀가 편안한 헤드폰 알려줘",mode:"RECOMMEND" as const};
  const neutral=create("{broken");
  await neutral.respond(base);
  assert.equal(neutral.calls.length,1);
