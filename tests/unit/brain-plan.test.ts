@@ -135,3 +135,16 @@ test("synthetic review evidence cannot satisfy recommendation ranking",()=>{
  assert.equal(ranking.ranked.length,0);
  assert.ok(ranking.rejected.some(x=>x.reasons.some(r=>r.includes("invalid_or_cross_product_facet"))));
 });
+
+test("preference CLEAR discards past context but preserves explicitly stated new soft attributes",()=>{
+ const old={...oldPlan,category:"display",attributePreferences:["eye_comfort"],currentPreferences:{price_priority:"value" as const}};
+ const next=resolveShoppingPlan(old,intent({query:"남성용 팬티",queryMode:"SET",budgetMode:"CLEAR",preferencesMode:"CLEAR",
+   context:{maxTotalWon:null,requiredConditions:["남성용"],currentPreferences:{price_priority:"performance" as const},
+     category:"fashion",attributePreferences:["moisture_wicking","breathability"]}}));
+ assert.deepEqual(next.currentPreferences,{price_priority:"performance"});
+ assert.deepEqual(next.attributePreferences,["moisture_wicking","breathability"]);
+ assert.deepEqual(old.attributePreferences,["eye_comfort"]);
+ const first=resolveShoppingPlan(null,intent({query:"남성용 팬티",queryMode:"SET",budgetMode:"CLEAR",preferencesMode:"CLEAR",
+   context:{maxTotalWon:null,requiredConditions:[],currentPreferences:{},category:"fashion",attributePreferences:["breathability"]}}));
+ assert.deepEqual(first.attributePreferences,["breathability"]);
+});

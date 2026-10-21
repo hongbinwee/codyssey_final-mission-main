@@ -48,8 +48,8 @@ export function resolveShoppingPlan(previous:ShoppingPlan|null|undefined,extract
     return {query:extracted.query.trim(),maxTotalWon:extracted.budgetMode==="CLEAR"?null:now.maxTotalWon,
       requiredConditions:extracted.requirementsMode==="CLEAR"?[]:[...new Set(now.requiredConditions)],
       ...(now.minTotalWon!==undefined?{minTotalWon:now.minTotalWon}:{}),
-      currentPreferences:extracted.preferencesMode==="CLEAR"?{}:{...now.currentPreferences},revision:1,
-      ...(now.category?{category:now.category,attributePreferences:extracted.preferencesMode==="CLEAR"?[]:[...new Set(now.attributePreferences??[])]}:{})};
+      currentPreferences:{...now.currentPreferences},revision:1,
+      ...(now.category?{category:now.category,attributePreferences:[...new Set(now.attributePreferences??[])]}:{})};
   }
   if(extracted.queryMode==="SET"&&extracted.budgetMode===undefined)
     throw new Error("new task must explicitly decide budget retention");
@@ -71,9 +71,10 @@ export function resolveShoppingPlan(previous:ShoppingPlan|null|undefined,extract
     :mode==="ADD"?(newTask?now.requiredConditions:[...previous.requiredConditions,...now.requiredConditions])
     :newTask?[]:previous.requiredConditions;
   const prefs=extracted.preferencesMode==="CLEAR"||newTask?{}:{...previous.currentPreferences};
-  if(extracted.preferencesMode!=="CLEAR")Object.assign(prefs,now.currentPreferences);
+  // CLEAR removes earlier task preferences, not preferences explicitly stated now.
+  Object.assign(prefs,now.currentPreferences);
   const category=now.category??(newTask?undefined:previous.category);
-  const attributes=extracted.preferencesMode==="CLEAR"?[]:now.attributePreferences??(newTask?[]:previous.attributePreferences??[]);
+  const attributes=now.attributePreferences??(extracted.preferencesMode==="CLEAR"||newTask?[]:previous.attributePreferences??[]);
   const minTotalWon=extracted.budgetMode==="CLEAR"?undefined
     :extracted.budgetMode==="SET"?now.minTotalWon
     :newTask?now.minTotalWon:now.minTotalWon??previous.minTotalWon;

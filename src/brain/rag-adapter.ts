@@ -182,6 +182,16 @@ function matchesCommerceCondition(key:string,value:string,condition:string):bool
   return (normalizeFact(key)===target&&/^(?:true|yes|on|지원|가능|있음|해당)$/i.test(value.trim()))||normalizeFact(value)===target||
     value.split(/[,/;|，、]+/).some(part=>normalizeFact(part)===target);
 }
+/** Only explicit product title or taxonomy gender labels count; a generic fashion category never proves gender. */
+function commerceGenderLabel(value:string):"남성용"|"여성용"|null{
+  const male=/(?:남성|남자|맨즈|\bmen(?:s|'s)?\b)/i.test(value);
+  const female=/(?:여성|여자|우먼|\bwomen(?:s|'s)?\b)/i.test(value);
+  return male===female?null:male?"남성용":"여성용";
+}
+function requestedGender(condition:string):"남성용"|"여성용"|null{
+  return /^(?:남성용|남성|남자용|남자|맨즈)$/.test(condition)?"남성용":
+    /^(?:여성용|여성|여자용|여자|우먼)$/.test(condition)?"여성용":null;
+}
 function verifiedCommerceImage(images:string[]):string|undefined{
   for(const image of images){
     if(!text(image,2048))continue;
@@ -278,7 +288,22 @@ async function retrieveV4(
       const conditions:Record<string,string[]>={};
       for(const condition of input.requiredConditions){
         const ids=specFacts.filter(row=>matchesCommerceCondition(row.key,row.value,condition)).map(row=>row.id);
-        if(ids.length)conditions[condition]=ids;
+        const gender=requestedGender(condition);
+        if(gender){
+          const labeled=specFacts.filter(row=>/(?:카테고리|분류|성별|gender|product_type|상품\s*유형|제품\s*유형)/i.test(row.key));
+          // Contradictory or unclassified evidence cannot silently satisfy a mandatory gender requirement.
+          const labels=labeled.map(row=>commerceGenderLabel(row.value)).filter(Boolean);
+          if(labels.some(label=>label!==gender))continue;
+          const matching=labeled.filter(row=>commerceGenderLabel(row.value)===gender).map(row=>row.id);
+          ids.push(...matching);
+          if(!ids.length&&commerceGenderLabel(got.data.product.name)===gender){
+            const id=`commerce-title:${item.productId}:${variantId}`;
+            evidence.push({id,productId:item.productId,variantId,kind:"SPEC",sourceKind:specSourceKind,
+              sourceRef:"상품명",text:got.data.product.name,verified:true,datasetVersion:parsed.datasetVersion});
+            ids.push(id);
+          }
+        }
+        if(ids.length)conditions[condition]=[...new Set(ids)];
       }
       const ratingRows=entries.map(entry=>reviews.get(entry.sourceId)).filter((row):row is ReviewItem=>
         !!row&&row.product_id===item.productId&&(row.variant_id===null||row.variant_id===variantId)&&
@@ -389,7 +414,8 @@ export function verifiedRagRetriever(
   if(contract==="v4"&&!reviewLookup)throw new Error("RAG v4 ReviewLookup required");
   const timeout=connection.timeoutMs??8000;
   if(!Number.isSafeInteger(timeout)||timeout<100||timeout>20000)throw new Error("invalid RAG timeout");
-  return {async search(input){
+  return {supportsGlobalCategorySearch:contract==="v4"&&!!connection.categories&&connection.categories.length>1,
+    async search(input){
     if(contract==="v4")return retrieveV4(connection,input,target,timeout,getProduct,fetcher,reviewLookup!);
     if(!text(input.query,250))throw new Error("invalid RAG query");
     const response=await fetcher(target.toString(),{

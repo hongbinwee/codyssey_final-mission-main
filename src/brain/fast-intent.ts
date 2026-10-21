@@ -42,7 +42,10 @@ export function createFastIntentPort(fallback:IntentPort):IntentPort{
    return {...intent,context:{...intent.context,currentPreferences:current,
      ...(intent.context.attributePreferences?{attributePreferences:intent.context.attributePreferences.filter(key=>{
        const source=intent.attributeSources?.[key];
-       return message.toLowerCase().includes(key)||!!source&&message.includes(source)&&/중요|우선|선호|맞는|적합|좋겠|원해|원하|편한/.test(source);
+       return message.toLowerCase().includes(key)||!!source&&source.length>=4&&message.includes(source)&&
+         (/중요|우선|선호|맞는|적합|좋겠|원해|원하|편한/.test(source)||
+          /(?:안\s*차|않|덜|적게|가벼|시원|잘\s*되는|부드러)/.test(source));
+
      })}:{})}};
  }};
 }

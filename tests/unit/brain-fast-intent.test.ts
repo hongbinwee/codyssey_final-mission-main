@@ -44,3 +44,13 @@ test("same product retains constraints; complex requests and negations never use
   await port.extract(message,[],previous);
  assert.equal(calls,3);
 });
+
+test("explicit breathability and sweat-wicking preference phrases survive the model source audit",async()=>{
+ const port=createFastIntentPort({async extract(){return {query:"남성용 팬티",
+   queryMode:"SET",budgetMode:"CLEAR",preferencesMode:"CLEAR",
+   context:{maxTotalWon:null,requiredConditions:["남성용"],currentPreferences:{},
+     category:"fashion",attributePreferences:["moisture_wicking","breathability"]},
+   attributeSources:{moisture_wicking:"땀 잘 안 차고",breathability:"시원하면 좋겠어"}};}});
+ const result=await port.extract("남성용 팬티 찾아줘. 땀 잘 안 차고 시원하면 좋겠어",[]);
+ assert.deepEqual(result.context.attributePreferences,["moisture_wicking","breathability"]);
+});

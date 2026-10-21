@@ -106,6 +106,22 @@ function resolveSortPlan(message:string,plan:ShoppingPlan,previous:ShoppingPlan|
  return {...plan,priceSortOrder:price??(!aspect&&!cancelled&&!newTask?previous?.priceSortOrder:undefined),
   reviewSortAspect:price?undefined:aspect??(!cancelled&&!newTask?previous?.reviewSortAspect:undefined)};
 }
+/** Explicit audience is a hard constraint even if intent extraction omits it. */
+function statedGender(message:string):"남성용"|"여성용"|null{
+  const male=/(?:남성(?:용)?|남자(?:용)?|맨즈)/.test(message);
+  const female=/(?:여성(?:용)?|여자(?:용)?|우먼)/.test(message);
+  if(male===female||/(?:남성|남자|맨즈|여성|여자|우먼)(?:용)?\s*(?:아닌|제외|말고)/.test(message))return null;
+  return male?"남성용":"여성용";
+}
+function expresslyScopedCategory(message:string,category:string):boolean{
+  const names:Record<string,RegExp>={
+    beauty:/(?:뷰티|화장품|미용)\s*(?:카테고리|분류|상품|제품|중에서|에서)/,
+    fashion:/(?:패션|의류)\s*(?:카테고리|분류|상품|제품|중에서|에서)/,
+    food:/(?:식품|음식)\s*(?:카테고리|분류|상품|제품|중에서|에서)/,
+    living:/(?:리빙|생활용품)\s*(?:카테고리|분류|상품|제품|중에서|에서)/
+  };
+  return new RegExp(`(?:^|\\W)${category}(?:$|\\W)`,"i").test(message)||!!names[category]?.test(message);
+}
 export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous:ShoppingPlan|null|undefined,deps:ResearchDeps):Promise<ShoppingPlan>{
  const trimmed=req.userMessage.trim();
  if(previous&&isSortCancellationOnly(trimmed))return {...previous,revision:previous.revision+1,priceSortOrder:undefined,reviewSortAspect:undefined};
@@ -120,6 +136,9 @@ export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous
  }
  const intent=await deps.intent.extract(req.userMessage,prepared.memories,previous??undefined);
  let plan=resolveShoppingPlan(previous,intent);
+ const gender=statedGender(req.userMessage);
+ if(gender&&!plan.requiredConditions.some(condition=>statedGender(condition)===gender))
+   plan={...plan,requiredConditions:[...plan.requiredConditions,gender].slice(0,12)};
  const explicitBand=parseKrwTenThousandBand(req.userMessage);
  if(explicitBand)plan={...plan,...explicitBand};
  else if(intent.budgetMode==="SET")plan={...plan,minTotalWon:undefined};
@@ -142,11 +161,21 @@ export async function retrieveTurn(req:Request,prepared:PreparedTurn,plan:Shoppi
  const searchPreferences=[...new Set([...Object.entries(preferences).flatMap(([key,value])=>labels[key]?.[value]?[labels[key][value]]:[]),
    ...(plan.attributePreferences??[]),...(plan.interview?.purpose?[plan.interview.purpose]:[])])].slice(0,20);
  let fetched:Awaited<ReturnType<RetrieverPort['search']>>;
- try{fetched=await deps.retriever.search({query:[plan.query,plan.interview?.purpose].filter(Boolean).join(" ").slice(0,250),maxTotalWon:plan.maxTotalWon,
-   ...(plan.minTotalWon!==undefined?{minTotalWon:plan.minTotalWon}:{}),
-   requiredConditions:plan.requiredConditions,preferences:searchPreferences,requestId:req.requestId,originalQuestion:req.userMessage,
-   ...(plan.category?{category:plan.category}:{}),
-   ...(plan.reviewSortAspect?{reviewSortAspect:plan.reviewSortAspect}:{})});}catch{throw new RetrievalUnavailableError();}
+ try{
+   const request={query:[plan.query,plan.interview?.purpose].filter(Boolean).join(" ").slice(0,250),maxTotalWon:plan.maxTotalWon,
+     ...(plan.minTotalWon!==undefined?{minTotalWon:plan.minTotalWon}:{}),
+     requiredConditions:plan.requiredConditions,preferences:searchPreferences,requestId:req.requestId,originalQuestion:req.userMessage,
+     ...(plan.category?{category:plan.category}:{}),
+     ...(plan.reviewSortAspect?{reviewSortAspect:plan.reviewSortAspect}:{})};
+   fetched=await deps.retriever.search(request);
+   // An inferred category can miss a cross-category product. Retry once only when
+   // the verified v4 backend supports global search and the user did not scope a category.
+   if(!fetched.candidates.length&&plan.category&&deps.retriever.supportsGlobalCategorySearch&&
+     !expresslyScopedCategory(req.userMessage,plan.category)){
+     const global=await deps.retriever.search({...request,category:""});
+     if(global.candidates.length)fetched=global;
+   }
+ }catch{throw new RetrievalUnavailableError();}
  if(!fetched||!Array.isArray(fetched.candidates)||!Array.isArray(fetched.evidence)||
     fetched.candidates.length>100||fetched.evidence.length>2500)throw new Error("invalid retrieval result");
  if(deps.hermes&&/(리뷰.?많|후기.?많|리뷰 수|후기 수)/.test(req.userMessage)){

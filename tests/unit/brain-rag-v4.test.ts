@@ -30,14 +30,15 @@ function v4Response() {
 
 function productDetail(productId = "p-v4-1", variantId = "v-v4-1", options: {
   simulatedCatalog?: boolean; images?: string[]; effectiveSpecs?: Record<string, string>;
+  productName?:string; productSpecs?:Record<string,string>;
 } = {}) {
   return ok({
     ...(options.simulatedCatalog ? { catalog_context: {
       source: "test_items" as const, read_only: true as const, is_simulated: true as const,
     } } : {}),
     product: {
-      id: productId, name: "Commerce product", brand: "Brand", category: "beauty",
-      description: "", images: options.images ?? [], specs: {}, active: true, version: 3,
+      id: productId, name: options.productName??"Commerce product", brand: "Brand", category: "beauty",
+      description: "", images: options.images ?? [], specs: options.productSpecs??{}, active: true, version: 3,
       availability: "AVAILABLE" as const,
     },
     variants: [{
@@ -624,4 +625,18 @@ test("getReviewsByIds rejects more than its bounded ID batch before querying", a
     review_ids: Array.from({ length: 301 }, (_, i) => "r-" + i),
   }, { unsafe: async () => { queried = true; return []; } }), /limit|maximum/i);
   assert.equal(queried, false);
+});
+
+test("QA category-independent gender requirement uses only verified product taxonomy or title, not fashion alone",async()=>{
+ const find=async(name:string,specs:Record<string,string>={})=>{
+   const retriever=makeV4Retriever({getProduct:async()=>productDetail("p-v4-1","v-v4-1",
+     {productName:name,effectiveSpecs:specs})});
+   return (await retriever.search({...searchInput,requiredConditions:["남성용"]})).candidates[0].conditions["남성용"];
+ };
+ assert.ok((await find("남성 어위크 드로즈 팬티"))?.length);
+ assert.ok((await find("다슈 맨즈 에어핏 니플 밴드"))?.length);
+ assert.ok((await find("드로즈 팬티",{"원본 목록 세부 카테고리":"속옷/홈웨어 > 남성 속옷"}))?.length);
+ assert.equal(await find("여성용 팬티"),undefined);
+ assert.equal(await find("팬티"),undefined);
+ assert.equal(await find("남녀 공용 팬티",{"원본 목록 세부 카테고리":"여성 속옷"}),undefined);
 });
