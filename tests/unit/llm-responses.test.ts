@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { afterEach, mock, test } from "node:test";
 import type { ChatMsg } from "../../src/llm.ts";
@@ -388,4 +390,54 @@ test("scripted and read-only stub providers keep the chat contract without fetch
   assert.deepEqual(await scriptedProvider([{ content: "scripted" }]).chat([], []), { content: "scripted" });
   const stub = await stubProvider().chat([{ role: "user", content: "apple" }], []);
   assert.equal(stub.tool_calls?.[0].name, "search_products");
+});
+
+test("diagnostics persist response receipt and parsing without prompts, replies or secrets", async () => {
+  const dir = fs.mkdtempSync(join(tmpdir(), "llm-diagnostics-"));
+  const file = join(dir, "events.jsonl");
+  config.llmDiagnosticsFile = file;
+  try {
+    capture([reply([{ type: "message", content: [{ type: "output_text", text: "private-reply" }] }])]);
+    await liveProvider().chat([{ role: "user", content: "private-question" }], [],
+      { requestId: "test-request", operation: "recommendation" });
+    const log = fs.readFileSync(file, "utf8");
+    const events = log.trim().split("\n").map(line => JSON.parse(line));
+    assert.deepEqual(events.map(e => e.event), ["request_started", "response_headers", "response_body", "response_parsed"]);
+    assert.ok(events.every(e => e.requestId === "test-request" && e.operation === "recommendation" && e.elapsedMs >= 0));
+    assert.equal(events.at(-1).httpStatus, 200);
+    assert.equal(events.at(-1).contentChars, 13);
+    assert.doesNotMatch(log, /private-question|private-reply|fake-test-key|authorization/);
+  } finally {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    fs.rmdirSync(dir);
+  }
+});
+
+test("diagnostics distinguish HTTP failure, timeout and invalid successful responses without retries", async () => {
+  const dir = fs.mkdtempSync(join(tmpdir(), "llm-diagnostics-"));
+  const file = join(dir, "events.jsonl");
+  config.llmDiagnosticsFile = file;
+  try {
+    capture([new Response("private-error", { status: 429 }), new Response("private-error", { status: 504 }),
+      new Response("private-invalid-json", { status: 200 })]);
+    for (const message of ["LLM http 429", "LLM http 504", "LLM invalid response"])
+      await assert.rejects(liveProvider().chat([], []), { message });
+    mock.method(globalThis, "fetch", async () => { throw new Error("private-transport"); });
+    const deadline = new AbortController();
+    deadline.abort();
+    await assert.rejects(liveProvider().chat([], [], { signal: deadline.signal }), { message: "LLM timeout" });
+    const log = fs.readFileSync(file, "utf8");
+    const failures = log.trim().split("\n").map(line => JSON.parse(line)).filter(e => e.event === "request_failed");
+    assert.deepEqual(failures.map(e => [e.failureCode, e.httpStatus ?? null]), [
+      ["MODEL_RATE_LIMIT", 429], ["MODEL_HTTP_ERROR", 504], ["MODEL_INVALID_RESPONSE", 200], ["MODEL_TIMEOUT", null],
+    ]);
+    assert.doesNotMatch(log, /private-|fake-test-key/);
+    // A failed diagnostic sink must not turn a valid model reply into a failure.
+    config.llmDiagnosticsFile = join(dir, "missing", "events.jsonl");
+    capture([reply(textOutput)]);
+    assert.equal((await liveProvider().chat([], [])).content, "Hello");
+  } finally {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    fs.rmdirSync(dir);
+  }
 });

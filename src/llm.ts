@@ -1,6 +1,33 @@
 // LLM Provider Adapter. Supports Responses, Chat Completions and Anthropic Messages.
 // 모델/SDK를 이 한 파일에 격리한다. live 키가 없으면 read-only stub을 쓴다.
 import { config } from "./config.ts";
+import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
+
+type LlmDiagnostic = {
+  requestId: string;
+  operation: "chat" | "recommendation";
+  event: "request_started" | "response_headers" | "response_body" | "response_parsed" |
+    "request_failed" | "recommendation_used" | "recommendation_fallback";
+  elapsedMs: number;
+  httpStatus?: number;
+  responseReceived?: boolean;
+  contentChars?: number;
+  toolCallCount?: number;
+  failureCode?: "MODEL_TIMEOUT" | "MODEL_RATE_LIMIT" | "MODEL_HTTP_ERROR" | "MODEL_UNAVAILABLE" |
+    "MODEL_INVALID_RESPONSE" | "RETRIEVAL_UNAVAILABLE" | "OUTPUT_REJECTED";
+};
+
+/** Persist only diagnostic metadata. Logging failure must never break an AI request. */
+export function recordLlmDiagnostic(entry: LlmDiagnostic): void {
+  if (!config.llmDiagnosticsFile) return;
+  const { requestId, operation, event, elapsedMs, httpStatus, responseReceived, contentChars, toolCallCount, failureCode } = entry;
+  try {
+    appendFileSync(config.llmDiagnosticsFile, JSON.stringify({ time: new Date().toISOString(),
+      requestId, operation, event, elapsedMs, httpStatus, responseReceived, contentChars, toolCallCount, failureCode }) + "\n",
+      { encoding: "utf8", mode: 0o600 });
+  } catch { console.error("LLM diagnostic write failed"); }
+}
 
 export type ToolCallReq = { id: string; name: string; arguments: string };
 // Keep opaque reasoning/encrypted content and every output field intact.
@@ -23,7 +50,9 @@ export type ChatResponse = {
 };
 export interface Provider {
   name: string;
-  chat(messages: ChatMsg[], tools: unknown[], options?: { signal?: AbortSignal }): Promise<ChatResponse>;
+  chat(messages: ChatMsg[], tools: unknown[], options?: {
+    signal?: AbortSignal; requestId?: string; operation?: "recommendation";
+  }): Promise<ChatResponse>;
 }
 
 function responsesInput(messages: ChatMsg[]): unknown[] {
@@ -239,12 +268,19 @@ export function liveProvider(): Provider {
   return {
     name: "live:" + config.llmModel,
     async chat(messages, tools, options) {
+      const startedAt = performance.now(), requestId = options?.requestId ?? randomUUID();
+      let httpStatus: number | undefined;
+      const diagnostic = (event: LlmDiagnostic["event"], extra: Partial<LlmDiagnostic> = {}) => recordLlmDiagnostic({
+        requestId, operation: options?.operation ?? "chat", event, elapsedMs: Math.round(performance.now() - startedAt),
+        httpStatus, responseReceived: httpStatus !== undefined, ...extra,
+      });
       const controller = new AbortController();
       const signal = options?.signal
         ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
       const timeoutMs = Number.isFinite(config.llmApiTimeoutMs) && config.llmApiTimeoutMs > 0
         ? config.llmApiTimeoutMs : 180000;
       const timer = setTimeout(() => controller.abort(), timeoutMs);
+      diagnostic("request_started");
       try {
         const chatCompletions = config.llmApiFormat === "chat_completions";
         const anthropic = config.llmApiFormat === "anthropic_messages";
@@ -299,6 +335,8 @@ export function liveProvider(): Provider {
         } catch {
           throw new Error(signal.aborted ? "LLM timeout" : "LLM request failed");
         }
+        httpStatus = res.status;
+        diagnostic("response_headers");
         // Never read or echo error bodies: they may contain credentials or PII.
         if (!res.ok) throw new Error("LLM http " + res.status);
         let value: unknown;
@@ -307,8 +345,17 @@ export function liveProvider(): Provider {
         } catch {
           throw new Error(signal.aborted ? "LLM timeout" : "LLM invalid response");
         }
-        return anthropic ? parseAnthropicMessage(value)
+        diagnostic("response_body");
+        const response = anthropic ? parseAnthropicMessage(value)
           : chatCompletions ? parseChatCompletion(value) : parseResponse(value);
+        diagnostic("response_parsed", { contentChars: response.content?.length ?? 0, toolCallCount: response.tool_calls?.length ?? 0 });
+        return response;
+      } catch (error) {
+        const failureCode = signal.aborted ? "MODEL_TIMEOUT" : httpStatus === 429 ? "MODEL_RATE_LIMIT" :
+          httpStatus && (httpStatus < 200 || httpStatus >= 300) ? "MODEL_HTTP_ERROR" :
+          httpStatus !== undefined ? "MODEL_INVALID_RESPONSE" : "MODEL_UNAVAILABLE";
+        diagnostic("request_failed", { failureCode });
+        throw error;
       } finally {
         clearTimeout(timer);
       }

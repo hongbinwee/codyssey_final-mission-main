@@ -1,5 +1,9 @@
-import test from 'node:test';
+import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
+import {config} from '../../src/config.ts';
+import {mkdtempSync,readFileSync,unlinkSync,rmdirSync,existsSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {rankProducts} from '../../src/brain/personalization.ts';
 import {buildGroundedExplanation,createLlmGroundedResponder} from '../../src/brain/grounded-response.ts';
 import {retrieveTurn} from '../../src/brain/read-flow.ts';
@@ -104,6 +108,25 @@ test('applied sort gives a sampled zero-positive review a reason but no-sample c
  assert.match(result.text,/일부 상품은 후기 수 근거를 확인하지 못했어요/);
 });
 
+test('recommendation explanation defaults to a configurable 120 second deadline',async()=>{
+ const original=config.brainRecommendationTimeoutMs;
+ const deadlines:number[]=[];
+ const timeout=mock.method(AbortSignal,'timeout',(ms:number)=>{deadlines.push(ms);return new AbortController().signal;});
+ try{
+   assert.equal(config.brainRecommendationTimeoutMs,120000);
+   const respond=createLlmGroundedResponder({async chat(_messages,_tools,options){
+     assert.ok(options?.signal instanceof AbortSignal);
+     assert.equal(options?.operation,'recommendation');
+     assert.match(options?.requestId??'',/^[a-f0-9-]{36}$/);
+     return {content:JSON.stringify({recommendations:[{productId:'p-mask',variantId:'v-mask',factIds:['price'],reviewClaims:[]}]})};
+   }});
+   await respond({originalQuestion:'마스크팩 추천',ranking:ranking(),evidence:[],plan,mode:'RECOMMEND'});
+   config.brainRecommendationTimeoutMs=45000;
+   await respond({originalQuestion:'마스크팩 추천',ranking:ranking(),evidence:[],plan,mode:'RECOMMEND'});
+   assert.deepEqual(deadlines,[120000,45000]);
+ }finally{config.brainRecommendationTimeoutMs=original;timeout.mock.restore();}
+});
+
 test('normal recommendations use one LLM call, stay ranked and cannot fabricate catalog reasons',async()=>{
  let calls=0;
  const respond=createLlmGroundedResponder({async chat(messages,tools){calls++;assert.deepEqual(tools,[]);
@@ -127,6 +150,23 @@ test('504, malformed output and invented product/fact IDs fall back to validated
    if(output instanceof Error)assert.equal(result.failure?.httpStatus,504);
    assert.doesNotMatch(JSON.stringify(result),/invented|cures-acne/);
  }
+});
+
+test('recommendation diagnostics distinguish accepted explanations from received but rejected output',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'recommendation-diagnostics-')),file=join(dir,'events.jsonl');
+ const original=config.llmDiagnosticsFile;config.llmDiagnosticsFile=file;
+ try{
+   const outputs=[JSON.stringify({recommendations:[{productId:'p-mask',variantId:'v-mask',factIds:['price'],reviewClaims:[]}]}),'private-invalid-reply'];
+   const requestIds:string[]=[];
+   const respond=createLlmGroundedResponder({async chat(_messages,_tools,options){requestIds.push(options!.requestId!);return {content:outputs.shift()!};}});
+   for(let i=0;i<2;i++)await respond({originalQuestion:'private-question',ranking:ranking(),evidence:[],plan,mode:'RECOMMEND'});
+   const log=readFileSync(file,'utf8'),events=log.trim().split('\n').map(line=>JSON.parse(line));
+   assert.deepEqual(events.map(e=>[e.event,e.failureCode??null,e.responseReceived]),[
+     ['recommendation_used',null,true],['recommendation_fallback','OUTPUT_REJECTED',true],
+   ]);
+   assert.deepEqual(events.map(e=>e.requestId),requestIds);
+   assert.doesNotMatch(log,/private-question|private-invalid-reply|p-mask|v-mask/);
+ }finally{config.llmDiagnosticsFile=original;if(existsSync(file))unlinkSync(file);rmdirSync(dir);}
 });
 
 test('recommendation review summaries require exact product, variant, version and quotation',async()=>{
