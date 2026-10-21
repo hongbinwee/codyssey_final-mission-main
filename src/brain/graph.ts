@@ -4,6 +4,7 @@ import {decideHermesAction,performHermesRead,readAgentRoute,summarizeAgentObserv
 import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.ts";
 import {ownedTask,nextTask,retainTask,taskForWishlistSelection,resetTaskRequested,type AgentTaskState,type TaskScope} from "./task-state.ts";
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
+import {captureDisplayedReviewTargets} from "./review-targets.ts";
 import {interviewAnswer,needsInterview,rememberInterview} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
 import {AsyncLocalStorage} from "node:async_hooks";
@@ -329,7 +330,7 @@ export function createPersistentResearchGraph(
      const result:ResearchResult={
        conversationId:state.request.conversationId,messageId:state.prepared.messageId,
        clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,
-       ...(state.intentRoute.search&&state.shoppingPlan?{shoppingPlan:state.shoppingPlan}:{}),
+       ...(state.intentRoute.search&&state.shoppingPlan?{shoppingPlan:state.shoppingPlan}:state.researchResult?.shoppingPlan?{shoppingPlan:state.researchResult.shoppingPlan}:{}),
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},datasetVersion:deps.datasetVersion,
        shoppingHandoffs:validatedShoppingHandoffs({observations}),
        taskState:nextTask(taskScope(state.request),taskKind,state.activeTask,{
@@ -415,8 +416,9 @@ export function createPersistentResearchGraph(
        researchResult.explanation={...researchResult.explanation,text:notice+"\\n\\n"+researchResult.explanation.text};
      }
      if(researchResult.shoppingPlan){
-       const selected=researchResult.ranking.ranked.filter(row=>row.candidate.commerceVerified===true&&(researchResult.explanation.failure||researchResult.explanation.items.some(item=>item.productId===row.candidate.productId&&item.variantId===row.candidate.variantId)));
-       researchResult.shoppingPlan={...researchResult.shoppingPlan,lastDisplayedProductIds:[...new Set([...selected,...researchResult.ranking.referenceOnly].map(row=>row.candidate.productId))].slice(0,3)};
+
+       const displayed=captureDisplayedReviewTargets(researchResult.ranking,researchResult.explanation);
+        researchResult.shoppingPlan={...researchResult.shoppingPlan,lastDisplayedProductIds:displayed.map(row=>row.productId),lastDisplayedProducts:displayed};
      }
      researchResult.shoppingHandoffs=validatedShoppingHandoffs({ranking:researchResult.ranking,
        displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});

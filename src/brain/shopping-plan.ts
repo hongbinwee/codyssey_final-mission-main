@@ -1,8 +1,9 @@
 import type {InterviewState} from './interview.ts';
+import type {DisplayedReviewTarget} from './review-targets.ts';
 import type {PreferenceKey,PreferenceValue,ShoppingContext} from "./contracts.ts";
 
 /** Task-local context, separate from confirmed cross-session user memories. */
-export interface ShoppingPlan extends ShoppingContext { query:string; revision:number;interview?:InterviewState; excludedProductIds?:string[];lastDisplayedProductIds?:string[];reviewSortAspect?:string;priceSortOrder?:"ASC"|"DESC" }
+export interface ShoppingPlan extends ShoppingContext { query:string; revision:number;interview?:InterviewState; excludedProductIds?:string[];lastDisplayedProductIds?:string[];lastDisplayedProducts?:DisplayedReviewTarget[];reviewSortAspect?:string;priceSortOrder?:"ASC"|"DESC" }
 export interface PlanOperations {
   queryMode?:"KEEP"|"SET";
   budgetMode?:"KEEP"|"SET"|"CLEAR";
@@ -77,7 +78,7 @@ export function resolveShoppingPlan(previous:ShoppingPlan|null|undefined,extract
     :extracted.budgetMode==="SET"?now.minTotalWon
     :newTask?now.minTotalWon:now.minTotalWon??previous.minTotalWon;
   return {query,maxTotalWon:budget,...(minTotalWon!==undefined?{minTotalWon}:{}),
-    ...(!newTask?{interview:previous.interview,excludedProductIds:previous.excludedProductIds,lastDisplayedProductIds:previous.lastDisplayedProductIds}:{}),requiredConditions:[...new Set(requirements)].slice(0,12),
+    ...(!newTask?{interview:previous.interview,excludedProductIds:previous.excludedProductIds,lastDisplayedProductIds:previous.lastDisplayedProductIds,lastDisplayedProducts:previous.lastDisplayedProducts}:{}),requiredConditions:[...new Set(requirements)].slice(0,12),
     currentPreferences:prefs,revision:previous.revision+1,
     ...(category?{category,attributePreferences:[...new Set(attributes)]}:{})};
 }
