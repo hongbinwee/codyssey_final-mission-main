@@ -1,4 +1,5 @@
 import {interviewAnswer} from './interview.ts';
+import type {RecentAgentTurn} from "./agent-context.ts";
 import type {Provider} from "../llm.ts";
 import type {HermesToolPort} from "./hermes-tools.ts";
 import type {PurchaseSnapshot} from "./purchase-history.ts";
@@ -38,6 +39,7 @@ export interface ResearchResult {
 }
 export interface ResearchDeps {
  clarifyBeforeSearch?:boolean;
+ recentTurns?:(actorUserId:string,conversationId:string)=>Promise<RecentAgentTurn[]>;
  reviewSummary?:VerifiedReviewSummarySource;
  reviewSummaryProvider?:Pick<Provider,"chat">;
  hermes?:{provider:Pick<Provider,"chat">;history:(actorUserId:string)=>Promise<PurchaseSnapshot[]>;reviewCount:(productId:string)=>Promise<number|null>;
@@ -52,7 +54,8 @@ export interface ResearchDeps {
  fastResponses?:boolean;
 }
 export interface PreparedTurn {
- messageId:string;memories:Preference[];startedAt:number;memoryMs:number
+ messageId:string;memories:Preference[];startedAt:number;memoryMs:number;
+ recentTurns?:RecentAgentTurn[];historyMs?:number
 }
 export interface RetrievedTurn {
  result:ResearchResult;evidence:EvidenceRecord[]
@@ -95,7 +98,15 @@ export async function prepareTurn(req:Request,deps:ResearchDeps):Promise<Prepare
  const messageId=await deps.conversations.appendUserMessage(req.actorUserId,req.conversationId,req.clientActionId,req.userMessage);
  const memories=await deps.memory.list(req.actorUserId);
  if(memories.some(m=>m.userId!==req.actorUserId))throw new Error("cross-tenant memory response");
- return {messageId,memories,startedAt:t0,memoryMs:performance.now()-t0};
+ const memoryMs=performance.now()-t0;
+ const historyStarted=performance.now();
+ // Optional, bounded and actor-scoped. A history outage cannot block a live shopping turn.
+ let recentTurns:RecentAgentTurn[]=[];
+ if(deps.hermes&&deps.recentTurns){
+  try{recentTurns=(await deps.recentTurns(req.actorUserId,req.conversationId)).slice(-4);}
+  catch{recentTurns=[];}
+ }
+ return {messageId,memories,startedAt:t0,memoryMs,recentTurns,historyMs:performance.now()-historyStarted};
 }
 function resolveSortPlan(message:string,plan:ShoppingPlan,previous:ShoppingPlan|null|undefined,newTask=false):ShoppingPlan{
  const price=requestedPriceSort(message),aspect=requestedPositiveReviewSort(message);

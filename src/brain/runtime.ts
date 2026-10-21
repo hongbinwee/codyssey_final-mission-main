@@ -233,6 +233,19 @@ export async function createBrainRuntime(options:{
      commerceDatabaseUrl:options.commerceDatabaseUrl,qaEnvironment:options.qaEnvironment});
    const graph=createPersistentResearchGraph({
      conversations,memory:preferences,route,converse,clarifyBeforeSearch:true,fastResponses:options.rag?.contract!=="v4",datasetVersion:options.rag?.datasetVersion,
+     ...(options.hermesEnabled?{recentTurns:async(actorUserId:string,conversationId:string)=>{
+       // Actor-owned completed receipts only. No raw checkpoints, payment data or Tool payloads.
+       const rows=await db.unsafe<Array<{user_message:string;assistant_summary:string|null}>>(
+         `SELECT LEFT(m.content,280) AS user_message,
+            LEFT(COALESCE(r.completed_result #>> '{explanation,text}',''),320) AS assistant_summary
+          FROM shopping_brain.messages m
+          JOIN shopping_brain.conversations c ON c.id=m.conversation_id AND c.actor_user_id=m.actor_user_id
+          JOIN shopping_brain.turn_receipts r ON r.conversation_id=c.id AND r.client_action_id=m.client_action_id
+          WHERE c.id=$1 AND c.actor_user_id=$2 AND m.actor_user_id=$2
+            AND c.closed_at IS NULL AND m.role='user' AND r.status='COMPLETED'
+          ORDER BY m.created_at DESC,m.id DESC LIMIT 4`,[conversationId,actorUserId]);
+       return rows.reverse().map(row=>({userMessage:row.user_message,assistantSummary:row.assistant_summary??""}));
+     }}:{}),
      // QA10: direct Commerce review reads bypass the in-stock RAG recommendation filter.
      // Resolve named products with the existing catalogue search; exact identity
      // and review source checks happen again inside the dedicated graph node.

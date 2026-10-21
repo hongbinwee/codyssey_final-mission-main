@@ -208,6 +208,7 @@ export function createPersistentResearchGraph(
        provider:deps.hermes.provider,message:state.request.userMessage,
        plan:state.intentRoute.search?state.shoppingPlan:undefined,
        memories:state.prepared.memories,task:state.activeTask,
+       recentTurns:state.prepared.recentTurns,
        observations:state.agentObservations??[],tools:agentPorts(state),
        displayedProducts:state.intentRoute.search?state.shoppingPlan?.lastDisplayedProducts:state.researchResult?.shoppingPlan?.lastDisplayedProducts,
        offerSearch:state.intentRoute.search,startedAt:startAt,
