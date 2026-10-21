@@ -124,6 +124,10 @@ function expresslyScopedCategory(message:string,category:string):boolean{
 }
 export async function resolveTurnPlan(req:Request,prepared:PreparedTurn,previous:ShoppingPlan|null|undefined,deps:ResearchDeps):Promise<ShoppingPlan>{
  const trimmed=req.userMessage.trim();
+ if(deps.clarifyBeforeSearch&&previous?.interview?.pending[0]==='budget'){
+   const answered=interviewAnswer(trimmed,previous);
+   if(answered)return resolveSortPlan(req.userMessage,answered,previous);
+ }
  if(previous&&isSortCancellationOnly(trimmed))return {...previous,revision:previous.revision+1,priceSortOrder:undefined,reviewSortAspect:undefined};
  if(previous&&isPriceSortOnly(trimmed))return resolveSortPlan(trimmed,{...previous,revision:previous.revision+1},previous);
  if(deps.clarifyBeforeSearch&&!requestedPriceSort(trimmed)&&!requestedPositiveReviewSort(trimmed)){const answered=interviewAnswer(trimmed,previous??undefined);if(answered)return resolveSortPlan(req.userMessage,answered,previous,answered.query!==previous?.query);}

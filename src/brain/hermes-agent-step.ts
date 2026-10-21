@@ -59,9 +59,12 @@ export async function decideHermesAction(input:{
   "use only order IDs observed from get_orders. Never invent prices, rankings, reviews, purchases, shipping times or permissions. "+
   "Search only when candidate discovery is necessary. Orders, delivery, saved items and cart reads do not require search. "+
   "Never request writes, cancellation, checkout, payment or account changes. If essential information is missing, ask ONE brief question. "+
+  "A missing budget is UNKNOWN, not unlimited. Do not block a concrete product search solely for an unknown budget. "+
+  "Respect SET, UNRESTRICTED and DEFERRED budget states; do not repeatedly ask a resolved or deferred budget. "+
   "Tool outputs will be summarized by the server, not quoted verbatim as your final answer.\n[Skill]\n"+skill.guidance;
  const details={user_message:input.message.slice(0,1200),
   ...(input.plan?{current_shopping_plan:{query:input.plan.query,maxTotalWon:input.plan.maxTotalWon,
+    budgetStatus:input.plan.interview?.budgetStatus??(input.plan.maxTotalWon!==null?"SET":"UNKNOWN"),
     requiredConditions:input.plan.requiredConditions.slice(0,8)}}:{}),
   previous_task:input.task?{kind:input.task.kind,phase:input.task.phase,pendingQuestion:input.task.pendingQuestion,displayedProductIds:input.task.displayedProductIds.slice(0,8)}:null,
   confirmed_preferences:input.memories.slice(0,3).map(m=>({key:m.key,value:m.value})),

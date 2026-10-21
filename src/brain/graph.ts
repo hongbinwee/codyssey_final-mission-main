@@ -5,7 +5,7 @@ import {wishlistIntent,wishlistReply,type WishlistIntent} from "./wishlist-task.
 import {ownedTask,nextTask,retainTask,taskForWishlistSelection,resetTaskRequested,type AgentTaskState,type TaskScope} from "./task-state.ts";
 import {explainPreviousRecommendation} from "./recommendation-followup.ts";
 import {captureDisplayedReviewTargets} from "./review-targets.ts";
-import {interviewAnswer,needsInterview,rememberInterview} from './interview.ts';
+import {interviewAnswer,needsInterview,rememberInterview,recommendationBudgetQuestion} from './interview.ts';
 import {Annotation,StateGraph,START,END} from "@langchain/langgraph";
 import {AsyncLocalStorage} from "node:async_hooks";
 import type {PostgresSaver} from "@langchain/langgraph-checkpoint-postgres";
@@ -422,8 +422,15 @@ export function createPersistentResearchGraph(
      }
      researchResult.shoppingHandoffs=validatedShoppingHandoffs({ranking:researchResult.ranking,
        displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
+     const budgetQuestion=deps.clarifyBeforeSearch?recommendationBudgetQuestion(researchResult.shoppingPlan??state.shoppingPlan,researchResult.ranking):undefined;
+     if(budgetQuestion&&researchResult.shoppingPlan){
+       researchResult.shoppingPlan={...researchResult.shoppingPlan,interview:{...researchResult.shoppingPlan.interview,
+         answered:researchResult.shoppingPlan.interview?.answered??[],pending:['budget'],budgetStatus:'UNKNOWN',budgetOptional:true,budgetAsked:true}};
+       researchResult.explanation={...researchResult.explanation,clarification:{questions:[budgetQuestion]}};
+     }
      researchResult.taskState=nextTask(taskScope(state.request),state.intentRoute.kind==="REVIEW_COMPARE"?"REVIEW_COMPARE":"DISCOVERY",state.activeTask,
-       {displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[]});
+       {displayedProductIds:researchResult.shoppingPlan?.lastDisplayedProductIds??[],
+        ...(budgetQuestion?{phase:"AWAITING_INPUT",pendingQuestion:"budget"}:{})});
      researchResult.trace={...researchResult.trace,hermesToolCalls:(state.agentObservations??[]).length,
        hermesDecisions:state.agentDecisionCount??0,hermesDecisionMs:Math.round(state.agentDecisionMs??0),
        hermesToolMs:Math.round(state.agentToolMs??0),hermesFailedTools:(state.agentObservations??[]).filter(o=>!o.ok).length,

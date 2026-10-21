@@ -68,6 +68,9 @@ jobs:
           tests/unit/brain-hermes-qa11-token.test.ts
           tests/unit/brain-hermes-qa10.test.ts
           tests/unit/brain-hermes-qa11.test.ts
+          tests/unit/brain-budget-clarification.test.ts
+          tests/unit/brain-interview-policy.test.ts
+          tests/unit/brain-interview-state.test.ts
           tests/unit/brain-hermes-category-conditions.test.ts
           tests/unit/brain-fast-intent.test.ts
           tests/unit/brain-plan.test.ts
