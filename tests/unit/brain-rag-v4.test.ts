@@ -631,7 +631,9 @@ test("QA category-independent gender requirement uses only verified product taxo
  const find=async(name:string,specs:Record<string,string>={})=>{
    const retriever=makeV4Retriever({getProduct:async()=>productDetail("p-v4-1","v-v4-1",
      {productName:name,effectiveSpecs:specs})});
-   return (await retriever.search({...searchInput,requiredConditions:["남성용"]})).candidates[0].conditions["남성용"];
+   const candidate=(await retriever.search({...searchInput,requiredConditions:["남성용"]})).candidates[0];
+   const conditions=candidate.conditions as Record<string,string[]>;
+   return conditions?.["남성용"];
  };
  assert.ok((await find("남성 어위크 드로즈 팬티"))?.length);
  assert.ok((await find("다슈 맨즈 에어핏 니플 밴드"))?.length);

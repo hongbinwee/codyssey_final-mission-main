@@ -68,6 +68,10 @@ jobs:
           tests/unit/brain-hermes-qa11-token.test.ts
           tests/unit/brain-hermes-qa10.test.ts
           tests/unit/brain-hermes-qa11.test.ts
+          tests/unit/brain-hermes-category-conditions.test.ts
+          tests/unit/brain-fast-intent.test.ts
+          tests/unit/brain-plan.test.ts
+          tests/unit/brain-rag-v4.test.ts
           tests/unit/brain-price-band.test.ts
           tests/unit/brain-recommendation-strategies.test.ts
           tests/unit/brain-wishlist-task.test.ts
