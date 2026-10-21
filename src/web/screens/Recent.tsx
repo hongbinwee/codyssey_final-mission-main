@@ -49,6 +49,8 @@ export function Recent({
   onOpenCart,
   onOpenProduct,
   onOpenShop,
+  commerceEnabled,
+  catalogReadOnly,
 }: {
   userId: string | null;
   // route 소유 탭 — 클릭은 setState가 아니라 부모의 route 갱신을 부른다.
@@ -58,6 +60,8 @@ export function Recent({
   onOpenCart: () => void;
   onOpenProduct: (id: string) => void;
   onOpenShop: () => void;
+  commerceEnabled: boolean;
+  catalogReadOnly: boolean;
 }) {
   // 기록 id는 호출 시점의 명시 actor로 읽는다 — 전역 scope가 없어 계정 전환/
   // 복원 타이밍에 다른 버킷을 읽을 경로가 없다 [C/069 선제 검수].
@@ -68,7 +72,7 @@ export function Recent({
   const [wishMsg, setWishMsg] = useState<string | null>(null);
   const [pendings, setPendings] = useState<PendingWrite[]>(() => listWishlistPending());
   const persistence = recentPersistence(userId);
-  const wish = useWishlist(userId);
+  const wish = useWishlist(commerceEnabled ? userId : null);
 
   async function load() {
     const live = gate.begin();
@@ -85,8 +89,8 @@ export function Recent({
 
   // 찜 탭 진입·계정 확정 시 서버 목록을 적재한다(명시 userId 버킷).
   useEffect(() => {
-    if (tab === "wish") void ensureWishlist(userId);
-  }, [tab, userId]);
+    if (commerceEnabled && tab === "wish") void ensureWishlist(userId);
+  }, [tab, userId, commerceEnabled]);
 
   // 찜 pending 변경 구독 — 복구 표면 노출용.
   useEffect(() => {
@@ -157,9 +161,11 @@ export function Recent({
       {/* Ref45 상단 3탭 — '최근 본' 라벨 [Observed]. 장바구니는 별도 화면 진입,
           최근 본/찜 전환은 route 소유 상태로 URL과 일치시킨다 */}
       <div className="cart-tabs" role="tablist">
-        <button role="tab" aria-selected="false" onClick={onOpenCart}>
-          장바구니 {cartCount}
-        </button>
+        {(
+          <button role="tab" aria-selected="false" onClick={onOpenCart}>
+            장바구니 {cartCount}
+          </button>
+        )}
         <button
           role="tab"
           className={tab === "recent" ? "on" : ""}
@@ -168,17 +174,26 @@ export function Recent({
         >
           최근 본
         </button>
-        <button
-          role="tab"
-          className={tab === "wish" ? "on" : ""}
-          aria-selected={tab === "wish"}
-          onClick={() => onSelectTab("wish")}
-        >
-          찜
-        </button>
+        {(
+          <button
+            role="tab"
+            className={tab === "wish" ? "on" : ""}
+            aria-selected={tab === "wish"}
+            onClick={() => onSelectTab("wish")}
+          >
+            찜
+          </button>
+        )}
       </div>
 
-      {tab === "wish" ? (
+      {tab === "wish" && !commerceEnabled ? (
+        <div className="state-box" role="status">
+          {catalogReadOnly
+            ? "읽기 전용 시연에서는 찜을 사용할 수 없어요."
+            : "쇼핑 기능을 확인하고 있어요."}
+          <button className="btn primary" onClick={onOpenShop}>쇼핑 홈</button>
+        </div>
+      ) : tab === "wish" ? (
         <>
           {/* 미해결 intent 복구는 목록 GET 실패 상태에서도 접근 가능해야 한다 [PM070] */}
           {pendings.length > 0 && (
@@ -320,7 +335,10 @@ export function Recent({
           <div className="product-grid">
             {found.map((p) => (
               <div key={p.product_id} className="recent-cell">
-                <ProductCard p={p} onOpen={() => onOpenProduct(p.product_id)} />
+                <ProductCard
+                  p={p}
+                  onOpen={() => onOpenProduct(p.product_id)}
+                />
                 <button
                   className="recent-x"
                   aria-label={p.name + " 최근 본 상품에서 삭제"}

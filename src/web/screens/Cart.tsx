@@ -4,6 +4,7 @@
 // 확정 거절(VERSION_CONFLICT 등)이면 자동 재실행 없이 최신 상태 재확인을 요구한다.
 // 미확정 intent가 하나라도 있으면 수량·삭제·주문 버튼을 잠근다.
 import { useEffect, useRef, useState } from "react";
+import { stockSafeErrorMessage } from "../commerce-ui.ts";
 import {
   apiSafe, fmtWon, newActionKey, AMBIGUOUS_CODES, type ApiResult,
 } from "../api.ts";
@@ -24,6 +25,10 @@ export function Cart({
   onOpenProduct,
   onOpenRecent,
   onOpenWish,
+  commerceEnabled,
+  catalogReadOnly,
+  checkoutEnabled = commerceEnabled,
+  onOpenShop,
 }: {
   cart: CartView | null;
   onCartLoaded: (v: CartView) => void;
@@ -33,6 +38,10 @@ export function Cart({
   onOpenProduct: (id: string) => void;
   onOpenRecent: () => void;
   onOpenWish: () => void;
+  commerceEnabled: boolean;
+  catalogReadOnly: boolean;
+  checkoutEnabled?: boolean;
+  onOpenShop: () => void;
 }) {
   const [res, setRes] = useState<ApiResult<CartView> | null>(
     cart ? { ok: true, data: cart } : null,
@@ -94,11 +103,12 @@ export function Cart({
     );
   }
   useEffect(() => {
+    if (!commerceEnabled) return;
     const g = readGate.current;
     reload(); // 적용되는 최신 응답이 loading을 해제한다 — gen은 내부 배정
     return () => g.kill(); // 언마운트 — 진행 중 조회의 적용을 차단한다 [MAJOR069-07]
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [commerceEnabled]);
 
   // 선택은 카트 항목 id에 고정한다. 새 항목은 선택 상태로 들어오고,
   // 삭제된 항목은 선택 집합에서도 제거한다.
@@ -175,7 +185,7 @@ export function Cart({
     // VERSION_CONFLICT 외 확정 거절(OUT_OF_STOCK·UNAVAILABLE·NOT_FOUND)도
     // 최신 CartView를 회수한다 — 재고/판매 상태가 바뀐 거절에서 stale
     // can_checkout·수량 버튼이 남지 않도록(retryPending과 동일 기준).
-    setNotice("변경 실패: " + r.error.message);
+    setNotice("변경 실패: " + stockSafeErrorMessage(r.error.code, r.error.message));
     await reload();
     return { status: "rejected" };
   }
@@ -337,10 +347,21 @@ export function Cart({
       await reload();
       return;
     }
-    setNotice("변경 실패: " + r.error.message);
+    setNotice("변경 실패: " + stockSafeErrorMessage(r.error.code, r.error.message));
     await reload();
   }
 
+  if (!commerceEnabled)
+    return (
+      <div className="screen">
+        <div className="state-box" role="status">
+          {catalogReadOnly
+            ? "읽기 전용 시연에서는 장바구니를 사용할 수 없어요."
+            : "쇼핑 기능을 확인하고 있어요."}
+        </div>
+        <button className="btn primary" onClick={onOpenShop}>쇼핑 홈</button>
+      </div>
+    );
   if (loading) return <Loading />;
   if (!res) return null;
   if (!res.ok)
@@ -586,6 +607,7 @@ export function Cart({
               </div>
             </div>
             <div className="cart-checkout-action">
+              {!checkoutEnabled && <div className="muted sm" role="note">시연 상품 · 장바구니 저장만 가능하며 주문·결제는 지원하지 않아요</div>}
               {selectedCount === 0 && pendings.length === 0 && (
                 <div className="muted sm">주문할 상품을 선택해 주세요</div>
               )}
@@ -598,7 +620,7 @@ export function Cart({
               <button
                 className="btn primary"
                 aria-label={selectedCount + "건 · " + fmtWon(selectedTotal) + " 주문하기"}
-                disabled={!canSubmit}
+                disabled={!checkoutEnabled || !canSubmit}
                 onClick={() =>
                   onCheckout(
                     allSelected

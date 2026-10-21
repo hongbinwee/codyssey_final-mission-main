@@ -68,6 +68,7 @@ export function Search({
   onOpenCart,
   userId,
   onOpenWish,
+  commerceEnabled,
 }: {
   query: string;
   onBack: () => void;
@@ -77,6 +78,7 @@ export function Search({
   onOpenCart?: () => void;
   userId: string | null;
   onOpenWish: () => void;
+  commerceEnabled: boolean;
 }) {
   const [text, setText] = useState(query);
   const [submitted, setSubmitted] = useState(query);
@@ -241,10 +243,12 @@ export function Search({
             </button>
           )}
         </div>
-        <button type="button" className="icon-btn" aria-label="장바구니" onClick={onOpenCart}>
-          <IcCart size={23} />
-          {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
-        </button>
+        {(
+          <button type="button" className="icon-btn" aria-label="장바구니" onClick={onOpenCart}>
+            <IcCart size={23} />
+            {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
+          </button>
+        )}
       </form>
 
       {mode === "recents" && (
@@ -366,6 +370,7 @@ export function Search({
                     key={p.product_id}
                     p={p}
                     userId={userId}
+                    commerceEnabled={commerceEnabled}
                     onOpen={() => onOpenProduct(p.product_id)}
                     onGoWish={onOpenWish}
                     variant="search"

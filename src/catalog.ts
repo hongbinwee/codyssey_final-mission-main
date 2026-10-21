@@ -4,12 +4,60 @@ import {
   ok, fail, err,
   type Availability, type MatchedVariant, type ProductDetail,
   type ProductSummary, type ReviewsResult, type SearchResult,
-  type ReviewSort,
+  type ReviewItem, type ReviewSort,
   type ToolResult,
 } from "./contracts.ts";
 import type { RequestContext } from "./session.ts";
+import {
+  CAMPAIGN_GROUPS, CATEGORY_GROUPS, PRODUCT_META, SEASONAL, SUBCATS,
+  groupOf, rateOf, subcatOf,
+} from "./web/display-meta.ts";
 
 export const FLAT_SHIPPING_FEE_WON = 3000;
+
+export type CatalogSource = "public" | "test_items" | "test_items2";
+const BROWSE_SNAPSHOT_TTL_MS = 15_000; // ponytail: 15s listing cache only; purchase validation stays fresh.
+export function catalogSource(value: unknown): CatalogSource {
+  if (value === undefined || value === "" || value === "public") return "public";
+  if (value === "test_items" || value === "test_items2") return value;
+  throw new Error("unsupported catalog source");
+}
+const catalogContext = (source: CatalogSource) => source !== "public"
+  ? { catalog_context: { source: source as "test_items"|"test_items2", read_only: true as const, is_simulated: true as const } }
+  : {};
+
+// Fixed identifiers, not request input or a global search_path change.
+export function createCatalog(source: CatalogSource, db: Pick<typeof sql, "unsafe"> = sql) {
+  source = catalogSource(source);
+  let cachedBrowse: { expiresAt: number; promise: Promise<BrowseSnapshot> } | undefined;
+  const getBrowseSnapshot = source === "public"
+    ? () => loadBrowseSnapshot(db, source)
+    : () => {
+      if (cachedBrowse && cachedBrowse.expiresAt > Date.now()) return cachedBrowse.promise;
+      const entry = { expiresAt: Number.POSITIVE_INFINITY, promise: loadBrowseSnapshot(db, source) };
+      cachedBrowse = entry;
+      void entry.promise.then(
+        () => { if (cachedBrowse === entry) entry.expiresAt = Date.now() + BROWSE_SNAPSHOT_TTL_MS; },
+        () => { if (cachedBrowse === entry) cachedBrowse = undefined; },
+      );
+      return entry.promise;
+    };
+  return {
+    searchProducts: (input: SearchProductsInput) => searchProducts(
+      input, db, source, input.browse ? getBrowseSnapshot : undefined,
+    ),
+    getProduct: (input: {product_id: string}) => getProduct(input, db, source),
+    getReviews: (input: Parameters<typeof getReviews>[0]) => getReviews(input, db, source),
+    getReviewsByIds: (input: {product_id: string; review_ids: string[]}) => getReviewsByIds(input, db, source),
+  };
+}
+
+export function catalogRequestAllowed(source: CatalogSource, method: string, path: string): boolean {
+  if (source === "public") return true;
+  if (path.startsWith("/api/brain/")) return true; // separately authenticated AI-only storage
+  return method === "GET" && (path === "/api/catalog/context" ||
+    /^\/api\/products(?:\/[^/]+(?:\/reviews)?)?$/.test(path));
+}
 
 export function variantAvailability(
   productActive: boolean,
@@ -84,21 +132,144 @@ const toVariant = (p: { active: boolean; specs_json: Record<string, string> }, v
   version: v.version,
 });
 
+type BrowseSnapshot = {
+  items: ProductSummary[];
+  group_counts: Record<string, number>;
+  subcategory_counts: Record<string, Record<string, number>>;
+  max_discount_rate: number;
+};
+
+async function loadBrowseSnapshot(
+  db: Pick<typeof sql, "unsafe">,
+  source: CatalogSource,
+): Promise<BrowseSnapshot> {
+  const [products, variants, ratings] = await Promise.all([
+    db.unsafe<ProductRow[]>(`SELECT * FROM ${source}.products WHERE active = true ORDER BY id`),
+    db.unsafe<VariantRow[]>(`SELECT * FROM ${source}.product_variants WHERE active = true ORDER BY id`),
+    db.unsafe<{ product_id: string; avg: number; count: number }[]>(
+      `SELECT product_id, avg(rating)::float AS avg, count(*)::int AS count FROM ${source}.reviews GROUP BY product_id`,
+    ),
+  ]);
+  const variantsByPid = new Map<string, VariantRow[]>();
+  for (const variant of variants) {
+    const productVariants = variantsByPid.get(variant.product_id);
+    if (productVariants) productVariants.push(variant);
+    else variantsByPid.set(variant.product_id, [variant]);
+  }
+  const ratingByPid = new Map(ratings.map((rating) => [rating.product_id, rating]));
+  const items: ProductSummary[] = products.map((product) => {
+    const matched_variants = (variantsByPid.get(product.id) ?? []).map((variant) => toVariant(product, variant));
+    const rating = ratingByPid.get(product.id);
+    return {
+      product_id: product.id,
+      name: product.name,
+      brand: product.brand,
+      category: product.category,
+      image: product.image_urls?.[0] ?? null,
+      matched_variants,
+      rating_summary: rating
+        ? { avg: Math.round(rating.avg * 10) / 10, count: rating.count }
+        : { avg: null, count: 0 },
+      availability: productAvailability(matched_variants),
+    };
+  });
+  items.sort(
+    (a, b) =>
+      (b.rating_summary.avg ?? 0) - (a.rating_summary.avg ?? 0) ||
+      a.product_id.localeCompare(b.product_id),
+  );
+
+  const group_counts = Object.create(null) as Record<string, number>;
+  const subcategory_counts = Object.create(null) as Record<string, Record<string, number>>;
+  for (const group of CATEGORY_GROUPS) group_counts[group.id] = 0;
+  for (const [group, subcategories] of Object.entries(SUBCATS)) {
+    subcategory_counts[group] = Object.create(null) as Record<string, number>;
+    for (const subcategory of subcategories) subcategory_counts[group][subcategory.id] = 0;
+  }
+  let max_discount_rate = 0;
+  for (const item of items) {
+    const group = groupOf(item.category);
+    group_counts[group] = (group_counts[group] ?? 0) + 1;
+    for (const subcategory of SUBCATS[group] ?? []) {
+      if (subcategory.matches(item)) subcategory_counts[group][subcategory.id]++;
+    }
+    max_discount_rate = Math.max(max_discount_rate, rateOf(item));
+  }
+  return { items, group_counts, subcategory_counts, max_discount_rate };
+}
+
+function selectBrowseItems(
+  items: ProductSummary[],
+  requestedGroup?: string,
+  requestedSub?: string,
+): ProductSummary[] | undefined {
+  const rawGroup = requestedGroup?.trim() ?? "";
+  const group = rawGroup && !["category", "sale", "season"].includes(rawGroup)
+    ? groupOf(rawGroup)
+    : rawGroup;
+  const sub = requestedSub?.trim() ?? "";
+  if (!group || group === "category") {
+    return !sub || sub === "all" ? items : undefined;
+  }
+  if (group === "sale") {
+    if (!sub || sub === "all") {
+      return items.filter((item) => item.availability !== "SOLD_OUT" &&
+        PRODUCT_META[item.product_id]?.sections?.includes("flash-sale"));
+    }
+    if (sub !== "campaign") return undefined;
+    const campaignIds = new Set(CAMPAIGN_GROUPS.flatMap((campaign) => campaign.productIds ?? []));
+    const campaignGroups = new Set(CAMPAIGN_GROUPS.flatMap((campaign) => campaign.group ? [campaign.group] : []));
+    return items.filter((item) => campaignIds.has(item.product_id) || campaignGroups.has(groupOf(item.category)));
+  }
+  if (group === "season") {
+    if (sub && sub !== "all") return undefined;
+    const seasonalIds = new Set(SEASONAL);
+    return items.filter((item) => seasonalIds.has(item.product_id) ||
+      PRODUCT_META[item.product_id]?.sections?.includes("flash-sale"));
+  }
+  if (!sub || sub === "all") {
+    const groupItems = items.filter((item) => groupOf(item.category) === group);
+    const recommended = (item: ProductSummary) =>
+      PRODUCT_META[item.product_id]?.sections?.includes("recommended") ? 1 : 0;
+    return groupItems.sort((a, b) => recommended(b) - recommended(a));
+  }
+  const subcategory = subcatOf(group, sub);
+  if (!subcategory) return undefined;
+  return items.filter((item) => groupOf(item.category) === group && subcategory.matches(item));
+}
+
+const browsePage = (input: SearchProductsInput) => {
+  if (input.limit !== undefined && (!Number.isFinite(input.limit) || !Number.isInteger(input.limit))) return undefined;
+  const offset = decCursor(input.cursor);
+  if (!Number.isSafeInteger(offset) || offset < 0) return undefined;
+  return { limit: Math.min(Math.max(input.limit ?? 20, 1), 50), offset };
+};
+
 export type SearchProductsInput = {
   query?: string;
   category?: string;
   max_unit_price_won?: number;
   required_specs?: Record<string, string>;
   sort?: "RELEVANCE" | "PRICE_ASC";
+  browse?: boolean;
+  browse_group?: string;
+  browse_sub?: string;
   cursor?: string;
   limit?: number;
 };
 
 export async function searchProducts(
   input: SearchProductsInput,
+  db: Pick<typeof sql, "unsafe"> = sql,
+  source: CatalogSource = "public",
+  browseSnapshot?: () => Promise<BrowseSnapshot>,
 ): Promise<ToolResult<SearchResult>> {
+  source = catalogSource(source);
   const trace_id = crypto.randomUUID();
-  const { limit, offset } = page(input);
+  const browsePageData = input.browse ? browsePage(input) : undefined;
+  if (input.browse && !browsePageData)
+    return fail(err("VALIDATION", "invalid browse cursor or limit"), trace_id);
+  const { limit, offset } = browsePageData ?? page(input);
   if (offset < 0) return fail(err("VALIDATION", "invalid cursor"), trace_id);
   if (input.sort && !["RELEVANCE", "PRICE_ASC"].includes(input.sort))
     return fail(err("VALIDATION", "invalid sort"), trace_id);
@@ -115,16 +286,47 @@ export async function searchProducts(
   )
     return fail(err("VALIDATION", "invalid max_unit_price_won"), trace_id);
 
+  if (input.browse) {
+    if (
+      input.query?.trim() || input.category?.trim() ||
+      input.max_unit_price_won !== undefined ||
+      (input.required_specs && Object.keys(input.required_specs).length > 0) ||
+      input.sort !== undefined
+    )
+      return fail(err("VALIDATION", "browse cannot be combined with search filters"), trace_id);
+    const snapshot = await (browseSnapshot ?? (() => loadBrowseSnapshot(db, source)))();
+    const browseItems = selectBrowseItems(snapshot.items, input.browse_group, input.browse_sub);
+    if (!browseItems) return fail(err("VALIDATION", "invalid browse group or subcategory"), trace_id);
+    const sliced = browseItems.slice(offset, offset + limit);
+    const has_more = offset + limit < browseItems.length;
+    return ok(
+      {
+        items: sliced,
+        ...catalogContext(source),
+        shipping_fee_won: FLAT_SHIPPING_FEE_WON,
+        next_cursor: has_more ? encCursor(offset + limit) : null,
+        has_more,
+        browse_summary: {
+          total_count: browseItems.length,
+          group_counts: snapshot.group_counts,
+          subcategory_counts: snapshot.subcategory_counts,
+          max_discount_rate: snapshot.max_discount_rate,
+        },
+      },
+      trace_id,
+    );
+  }
+
   const q = (input.query ?? "").trim();
-  const products = await sql.unsafe<ProductRow[]>(
-    `SELECT * FROM products WHERE active = true
+  const products = await db.unsafe<ProductRow[]>(
+    `SELECT * FROM ${source}.products WHERE active = true
       AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR brand ILIKE '%' || $1 || '%' OR description ILIKE '%' || $1 || '%')
       AND ($2::text IS NULL OR category = $2)
       ORDER BY id`,
     [q, input.category ?? null],
   );
-  const variants = await sql.unsafe<VariantRow[]>("SELECT * FROM product_variants WHERE active = true ORDER BY id");
-  const ratings = await sql.unsafe<{ product_id: string; avg: number; count: number }[]>("SELECT product_id, avg(rating)::float AS avg, count(*)::int AS count FROM reviews GROUP BY product_id");
+  const variants = await db.unsafe<VariantRow[]>(`SELECT * FROM ${source}.product_variants WHERE active = true ORDER BY id`);
+  const ratings = await db.unsafe<{ product_id: string; avg: number; count: number }[]>(`SELECT product_id, avg(rating)::float AS avg, count(*)::int AS count FROM ${source}.reviews GROUP BY product_id`);
   const ratingByPid = new Map(ratings.map((r) => [r.product_id, r]));
 
   let items: ProductSummary[] = [];
@@ -179,6 +381,7 @@ export async function searchProducts(
   return ok(
     {
       items: sliced,
+      ...catalogContext(source),
       shipping_fee_won: FLAT_SHIPPING_FEE_WON,
       next_cursor: has_more ? encCursor(offset + limit) : null,
       has_more,
@@ -189,15 +392,17 @@ export async function searchProducts(
 
 export async function getProduct(input: {
   product_id: string;
-}): Promise<ToolResult<ProductDetail>> {
+}, db: Pick<typeof sql, "unsafe"> = sql, source: CatalogSource = "public"): Promise<ToolResult<ProductDetail>> {
+  source = catalogSource(source);
   const trace_id = crypto.randomUUID();
-  const [p] = await sql.unsafe<ProductRow[]>("SELECT * FROM products WHERE id = $1", [
+  const [p] = await db.unsafe<ProductRow[]>(`SELECT * FROM ${source}.products WHERE id = $1`, [
     input.product_id,
   ]);
   if (!p) return fail(err("NOT_FOUND", "상품을 찾을 수 없습니다"), trace_id);
-  const vs = (await sql.unsafe<VariantRow[]>("SELECT * FROM product_variants WHERE product_id = $1 AND active = true ORDER BY id", [p.id])).map((v) => toVariant(p, v));
+  const vs = (await db.unsafe<VariantRow[]>(`SELECT * FROM ${source}.product_variants WHERE product_id = $1 AND active = true ORDER BY id`, [p.id])).map((v) => toVariant(p, v));
   return ok(
     {
+      ...catalogContext(source),
       product: {
         id: p.id,
         name: p.name,
@@ -236,7 +441,9 @@ export async function getReviews(
     limit?: number;
   },
   db: Pick<typeof sql, "unsafe"> = sql,
+  source: CatalogSource = "public",
 ): Promise<ToolResult<ReviewsResult>> {
+  source = catalogSource(source);
   const trace_id = crypto.randomUUID();
   const { limit, offset } = page(input);
   if (offset < 0) return fail(err("VALIDATION", "invalid cursor"), trace_id);
@@ -249,13 +456,13 @@ export async function getReviews(
       trace_id,
     );
   const orderBy = REVIEW_ORDER[sortKey as ReviewSort];
-  const [p] = await db.unsafe("SELECT id FROM products WHERE id = $1", [
+  const [p] = await db.unsafe(`SELECT id FROM ${source}.products WHERE id = $1`, [
     input.product_id,
   ]);
   if (!p) return fail(err("NOT_FOUND", "상품을 찾을 수 없습니다"), trace_id);
   if (input.variant_id) {
     const [v] = await db.unsafe(
-      "SELECT id FROM product_variants WHERE id = $1 AND product_id = $2",
+      `SELECT id FROM ${source}.product_variants WHERE id = $1 AND product_id = $2`,
       [input.variant_id, input.product_id],
     );
     if (!v)
@@ -266,7 +473,7 @@ export async function getReviews(
   }
   const q = (input.query ?? "").trim();
   const rows = await db.unsafe<ReviewRow[]>(
-    `SELECT * FROM reviews WHERE product_id = $1
+    `SELECT * FROM ${source}.reviews WHERE product_id = $1
       AND ($2::text IS NULL OR variant_id = $2)
       AND ($3 = '' OR body ILIKE '%' || $3 || '%')
       ORDER BY ${orderBy}`,
@@ -276,6 +483,7 @@ export async function getReviews(
   const has_more = offset + limit < rows.length;
   return ok(
     {
+      ...catalogContext(source),
       reviews: sliced.map((r) => ({
         id: r.id,
         product_id: r.product_id,
@@ -294,4 +502,35 @@ export async function getReviews(
     },
     trace_id,
   );
+}
+
+const MAX_REVIEW_LOOKUP_IDS = 300;
+
+export async function getReviewsByIds(
+  input: { product_id: string; review_ids: string[] },
+  db: Pick<typeof sql, "unsafe"> = sql,
+  source: CatalogSource = "public",
+): Promise<ReviewItem[]> {
+  source = catalogSource(source);
+  if (!input.product_id || input.product_id.length > 128 ||
+      !Array.isArray(input.review_ids) || input.review_ids.length > MAX_REVIEW_LOOKUP_IDS ||
+      input.review_ids.some((id) => typeof id !== "string" || !id || id.length > 128) ||
+      new Set(input.review_ids).size !== input.review_ids.length)
+    throw new Error("invalid review lookup IDs or ID limit exceeded");
+  if (input.review_ids.length === 0) return [];
+  const rows = await db.unsafe<ReviewRow[]>(
+    "SELECT id, product_id, variant_id, rating, body, source_kind, source_ref, written_at " +
+      `FROM ${source}.reviews WHERE product_id = $1 AND id = ANY($2) ORDER BY id LIMIT 300`,
+    [input.product_id, input.review_ids],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    product_id: r.product_id,
+    variant_id: r.variant_id,
+    rating: r.rating,
+    body: r.body,
+    source_kind: r.source_kind,
+    source_ref: r.source_ref,
+    written_at: new Date(r.written_at).toISOString(),
+  }));
 }

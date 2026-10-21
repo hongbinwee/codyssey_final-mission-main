@@ -17,19 +17,22 @@ export function WishButton({
   product,
   onGoWish,
   className,
+  commerceEnabled = true,
 }: {
   userId: string | null;
   // 시트 표시용 — 카드/상세가 이미 가진 상품 정보를 그대로 넘긴다.
   product: WishSheetProduct;
   onGoWish: () => void;
   className: string;
+  commerceEnabled?: boolean;
 }) {
-  const t = useWishToggle(userId, product.product_id);
+  const t = useWishToggle(commerceEnabled ? userId : null, product.product_id);
   return (
     <>
       <button
         className={className + (t.saved ? " on" : "")}
-        disabled={t.busy || !userId}
+        disabled={!commerceEnabled || t.busy || !userId}
+        title={!commerceEnabled ? "현재 조회 전용 QA 환경에서는 찜을 저장할 수 없어요" : undefined}
         aria-pressed={t.saved}
         aria-label={t.saved ? product.name + " 찜 해제" : product.name + " 찜하기"}
         onClick={(e) => {

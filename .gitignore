@@ -4,6 +4,8 @@ dist/
 .env.*
 !.env.example
 .secrets/
+/.local-data/
+/test-key.md
 web/app.js
 .pgdata/
 test-results/

@@ -18,15 +18,16 @@ import type { Provider, ChatMsg } from "./llm.ts";
 import type { RequestContext } from "./session.ts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { userMessageWithPageContext } from "./brain/page-context.ts";
+import {SHOPPING_POLICY} from "./brain/policy.ts";
 import {
   adaptShoppingResult, demoToolAllowed, SHOPPING_DEMO_CONTRACT,
 } from "./shopping-adapter.ts";
 
 const liveDemo = () => process.env.AI_LIVE_DEMO === "1";
 function demoSystem(): string {
-  // Keep the supplied v0.6 bytes untouched; add the real tool mapping separately.
-  return readFileSync(new URL("../SHOPPING_BRAIN_SYSTEM_v0.6.txt", import.meta.url), "utf8")
-    + "\n\n" + SHOPPING_DEMO_CONTRACT;
+  // v0.6 stays archived unchanged; live service uses the current three-layer policy.
+  return SHOPPING_POLICY+"\n\n"+SHOPPING_DEMO_CONTRACT;
 }
 
 type ToolRun = (input: Record<string, unknown>, ctx: RequestContext, key: string) => Promise<unknown>;
@@ -287,6 +288,7 @@ export function resetHistory(userId: string) {
 }
 
 const SHOPPING_SYSTEM = [
+  SHOPPING_POLICY,
   "당신은 커머스 환경의 Shopping Brain이다. 아래 규칙을 지킨다.",
   "- 상품·옵션·리뷰·카트 정보는 반드시 등록된 Tool로 조회한 실제 데이터만 사용한다. 조회하지 않은 가격·재고·리뷰 내용을 만들어내지 않는다.",
   "- 비교/추천은 최대 3개 후보로 하고, 주장에는 실제 조회된 product_id·variant_id·review_id를 근거로 붙인다.",
@@ -426,8 +428,8 @@ function buildCompare(calls: { resultJson?: string }[], demo = false): CompareCa
   if (products.length < (demo ? 1 : 2)) return undefined;
   const limitations: string[] = [];
   if (demo) limitations.push(
-    "reference_only: 추천 기준 미충족 상품의 참고 정보(최대 3개)",
-    "상품 전체 리뷰 수 미확인: rating_summary.count는 저장된 리뷰 수이며 전체 리뷰 10개 이상 기준 충족을 확인할 수 없습니다.",
+    "catalog_read_only: 실제 조회한 상품 정보(최대 3개), 사용자 필수 조건은 별도 확인",
+    "상품 전체 리뷰 수 미확인: rating_summary.count는 저장된 리뷰 수이며 전체 리뷰 수로 대체하지 않습니다.",
     "평점은 저장된 리뷰의 5점 만점 평균이며 상품 전체 평가로 일반화할 수 없습니다.",
   );
   const shown = products.slice(0, 3);
@@ -466,18 +468,15 @@ export async function runAgentTurn(
   };
   const histKey = ctx.actorUserId + ":" + brain + (demo ? ":live-demo" : "");
   const history = histories.get(histKey) ?? [];
-  const pageNote = req.page_context
-    ? "\n현재 사용자 화면: " + JSON.stringify(req.page_context)
-    : "";
   const calls: (ToolCallRecord & { resultJson?: string })[] = [];
   const started = Date.now();
   const timeout = demo ? LIVE_TIMEOUT_MS : TIMEOUT_MS;
   const deadline = started + timeout;
   try {
     const messages: ChatMsg[] = [
-      { role: "system", content: demo ? demoSystem() : (brain === "cs" ? CS_SYSTEM : SHOPPING_SYSTEM) + pageNote },
+      { role: "system", content: demo ? demoSystem() : (brain === "cs" ? CS_SYSTEM : SHOPPING_SYSTEM) },
       ...history,
-      { role: "user", content: req.user_message + (demo && pageNote ? "\n[untrusted_data: 화면 문맥]" + pageNote : "") },
+      { role: "user", content: userMessageWithPageContext(req.user_message, req.page_context) },
     ];
     for (;;) {
       if (Date.now() - started >= timeout || calls.length >= MAX_CALLS) {
@@ -501,6 +500,7 @@ export async function runAgentTurn(
           content: resp.content ?? null,
           tool_calls: resp.tool_calls,
           responses_output: resp.responses_output,
+          anthropic_content: resp.anthropic_content,
         });
         for (const tc of resp.tool_calls) {
           if (demo && (Date.now() >= deadline || calls.length >= MAX_CALLS)) break;

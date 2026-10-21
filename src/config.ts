@@ -36,15 +36,29 @@ const configuredSessionSecret = process.env.SESSION_SECRET?.trim();
 if (process.env.NODE_ENV === "production" && !configuredSessionSecret)
   throw new Error("SESSION_SECRET is required in production");
 
+const llmApiFormat = process.env.LLM_API_FORMAT ?? "responses";
+if (llmApiFormat !== "responses" && llmApiFormat !== "chat_completions" && llmApiFormat !== "anthropic_messages")
+  throw new Error("LLM_API_FORMAT must be responses, chat_completions or anthropic_messages");
+const llmAnthropicThinking = process.env.LLM_ANTHROPIC_THINKING ?? "";
+const llmAnthropicEffort = process.env.LLM_ANTHROPIC_EFFORT ?? "";
+if ((llmAnthropicThinking || llmAnthropicEffort) &&
+    (llmAnthropicThinking !== "adaptive" || llmAnthropicEffort !== "high"))
+  throw new Error("Anthropic thinking requires LLM_ANTHROPIC_THINKING=adaptive and LLM_ANTHROPIC_EFFORT=high");
+
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   // 개발용 fallback은 프로세스마다 달라 예측 가능한 고정 키를 쓰지 않는다.
   sessionSecret: configuredSessionSecret || randomBytes(32).toString("base64url"),
   llmBaseUrl: process.env.LLM_BASE_URL ?? "https://api.openai.com/v1",
+  llmApiFormat,
+  llmAnthropicThinking,
+  llmAnthropicEffort,
   llmApiKey: process.env.LLM_API_KEY ?? "",
   llmModel: process.env.LLM_MODEL ?? "",
   llmReasoningEffort: process.env.LLM_REASONING_EFFORT ?? "xhigh",
   llmApiTimeoutMs: Number(process.env.LLM_API_TIMEOUT_MS ?? 180000),
+  brainRecommendationTimeoutMs: Number(process.env.BRAIN_RECOMMENDATION_TIMEOUT_MS ?? 120000),
+  llmDiagnosticsFile: process.env.LLM_DIAGNOSTICS_FILE ?? "",
   // "code=auth_subject" 쌍, 콤마 구분. 코드는 서버 비밀 설정이다.
   testUserCodes: Object.fromEntries(
     (process.env.TEST_USER_CODES ?? "")

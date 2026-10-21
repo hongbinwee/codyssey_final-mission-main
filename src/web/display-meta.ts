@@ -117,31 +117,77 @@ export const CAMPAIGN_GROUPS: CampaignGroup[] = [
 ];
 
 // 카테고리 브라우저의 서브카테고리 원형 아이콘 그리드 [Project].
-// productIds는 대표 이미지와 ?sub= 필터링에 쓰인다.
-export interface Subcat { id: string; label: string; productIds: string[] }
+// matches는 대표 이미지와 ?sub= 필터링에 쓰인다. Raw source detail categories are
+// mapped only for display taxonomy; unverified product-title type/volume hints are not claims.
+export interface Subcat {
+  id: string;
+  label: string;
+  matches: (product: ProductSummary) => boolean;
+}
+
+const hasSpecs = (product: ProductSummary, keys: string[]) =>
+  product.matched_variants.some((variant) =>
+    keys.some((key) =>
+      Object.entries(variant.effective_specs).some(
+        ([name, value]) => name.toLocaleLowerCase() === key && String(value).trim() !== "",
+      ),
+    ),
+  );
+
+const specMatcher = (group: string, ...keys: string[]) =>
+  (product: ProductSummary) =>
+    groupOf(product.category) === group && hasSpecs(product, keys);
+
+// Display taxonomy only; dataset IDs and inferred product-name claims are never used.
+const SOURCE_SUBCATEGORY_KEYS = ["sub_category", "원본 목록 세부 카테고리", "type"];
+const sourceSubcategoryMatcher = (group: string, ...values: string[]) =>
+  (product: ProductSummary) =>
+    groupOf(product.category) === group &&
+    product.matched_variants.some((variant) =>
+      SOURCE_SUBCATEGORY_KEYS.some(key => {
+        const value=variant.effective_specs[key];
+        return typeof value==="string"&&value.split(">").some(part=>values.includes(part.trim()));
+      }),
+    );
+
 export const SUBCATS: Record<string, Subcat[]> = {
   digital: [
-    { id: "earbuds", label: "이어폰", productIds: ["p-d-ear-lite", "p-d-ear-pro", "p-d-ear-ultra"] },
-    { id: "keyboard", label: "키보드", productIds: ["p-d-key-87", "p-d-key-61"] },
-    { id: "battery", label: "보조배터리", productIds: ["p-d-bat-10", "p-d-bat-20"] },
-    { id: "monitor", label: "모니터", productIds: ["p-a", "p-b", "p-c"] },
+    { id: "earbuds", label: "이어폰", matches: specMatcher("digital", "anc", "driver", "codec", "battery_hours", "waterproof") },
+    { id: "keyboard", label: "키보드", matches: specMatcher("digital", "switch", "layout", "keycap") },
+    { id: "battery", label: "보조배터리", matches: specMatcher("digital", "capacity", "output", "ports") },
+    {
+      id: "monitor",
+      label: "모니터",
+      matches: (product) =>
+        product.category === "monitor" ||
+        specMatcher("digital", "screen_size", "resolution", "refresh_rate", "panel")(
+          product,
+        ),
+    },
   ],
   beauty: [
-    { id: "sun", label: "선케어", productIds: ["p-d-sun-mineral", "p-d-sun-aqua", "p-d-sun-stick"] },
-    { id: "cleansing", label: "클렌징", productIds: ["p-d-foam-1", "p-d-foam-2"] },
-    { id: "makeup", label: "메이크업", productIds: ["p-d-lip", "p-d-tone"] },
+    { id: "sun", label: "선케어", matches: (product) => sourceSubcategoryMatcher("beauty", "선케어")(product) || specMatcher("beauty", "spf", "pa", "uv_type")(product) },
+    { id: "skincare", label: "스킨케어", matches: sourceSubcategoryMatcher("beauty", "스킨케어") },
+    { id: "cleansing", label: "클렌징", matches: (product) => sourceSubcategoryMatcher("beauty", "클렌징")(product) || specMatcher("beauty", "skin", "cleanser_type", "cleansing_type")(product) },
+    {
+      id: "makeup",
+      label: "메이크업",
+      matches: (product) =>
+        sourceSubcategoryMatcher("beauty", "메이크업")(product) ||
+        specMatcher("beauty", "finish", "tone", "coverage", "shade")(product),
+    },
   ],
   fashion: [
-    { id: "tee", label: "티셔츠", productIds: ["p-d-tee-1", "p-d-tee-2"] },
-    { id: "shoes", label: "스니커즈", productIds: ["p-d-sn-1", "p-d-sn-2"] },
+    { id: "tee", label: "티셔츠", matches: (product) => sourceSubcategoryMatcher("fashion", "반소매 티셔츠", "긴소매 티셔츠", "후드 티셔츠", "피케/카라 티셔츠")(product) || specMatcher("fashion", "fit", "weight_g_m2", "neck", "sleeve")(product) },
+    { id: "shoes", label: "스니커즈", matches: (product) => sourceSubcategoryMatcher("fashion", "스니커즈")(product) || specMatcher("fashion", "sole", "closure", "shoe_size", "outsole")(product) },
   ],
   living: [
-    { id: "chair", label: "의자", productIds: ["p-d-chair-1", "p-d-chair-2"] },
-    { id: "light", label: "조명", productIds: ["p-d-lamp-1", "p-d-lamp-2"] },
+    { id: "chair", label: "의자", matches: specMatcher("living", "lumbar", "max_load", "armrest", "recline") },
+    { id: "light", label: "조명", matches: specMatcher("living", "light", "dimming", "color_temp") },
   ],
   food: [
-    { id: "coffee", label: "커피", productIds: ["p-d-cof-1", "p-d-cof-2"] },
-    { id: "protein", label: "프로틴", productIds: ["p-d-pro-1"] },
+    { id: "coffee", label: "커피", matches: specMatcher("food", "roast", "origin", "note") },
+    { id: "protein", label: "프로틴", matches: (product) => sourceSubcategoryMatcher("food", "프로틴")(product) || specMatcher("food", "protein_per_serving", "servings")(product) },
   ],
 };
 export const subcatOf = (group: string, sub: string) =>

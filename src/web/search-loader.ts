@@ -5,7 +5,7 @@
 // - has_more=true인데 next_cursor가 없으면 페이지네이션 불가 → 계약 오류
 //   (부분 결과를 '전체'로 적용하지 않는다)
 // - 같은 cursor가 반복되면 무한 요청 위험 → 계약 오류로 즉시 중단
-// - SEARCH_PAGE_MAX 초과도 중단(런어웨이 방지 — 데모 카탈로그는 1~2페이지)
+// - SEARCH_PAGE_MAX 초과도 중단(런어웨이 방지; 1,500개 카탈로그도 완주)
 // - 같은 product_id가 페이지를 넘어 반복되면 첫 등장만 유지 — 개수/React key에
 //   중복 반영하지 않는다
 //
@@ -13,7 +13,7 @@
 import type { SearchResult } from "../contracts.ts";
 import type { ApiResult } from "./api.ts";
 
-export const SEARCH_PAGE_MAX = 20;
+export const SEARCH_PAGE_MAX = 100;
 
 export type SearchLoad =
   | { ok: true; data: SearchResult }

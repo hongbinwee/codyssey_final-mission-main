@@ -273,6 +273,16 @@ main { flex: 1; padding: 0 var(--pad) 110px; }
   background: none; color: var(--text);
   font-size: 14px; font-weight: 600; padding: 13px 0; cursor: pointer;
 }
+.browse-page-more {
+  display: block; width: 100%; margin: 12px 0 20px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: none; color: var(--text);
+  font-size: 14px; font-weight: 600; padding: 13px 0; cursor: pointer;
+}
+.browse-page-more:disabled { opacity: .6; cursor: default; }
+.browse-pager-error, .browse-pager-loading { margin: 8px 0; text-align: center; font-size: 13px; }
+.browse-pager-error { color: var(--danger, var(--text-2)); }
+.browse-pager-loading { color: var(--muted); }
 
 /* 히어로 캐러셀 — 카드형(좌 텍스트+우 이미지), 다크에서도 크림 카드 유지 [Observed] */
 .hero-track {
@@ -409,7 +419,21 @@ main { flex: 1; padding: 0 var(--pad) 110px; }
 }
 .sub-circle.sq { border-radius: 18px; width: 56px; height: 56px; }
 .sub-circle img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sub-icon-fallback {
+  display: flex; width: 100%; height: 100%; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 19px; font-weight: 700;
+}
 .sub-label { font-size: 12.5px; color: var(--text-2); }
+.sub-count { font-size: 11px; line-height: 1; color: var(--muted); }
+.cat-browser, .cat-pane { min-width: 0; }
+.cat-rail { flex-basis: clamp(72px, 24vw, 96px); }
+.sub-grid { grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); }
+.sub-item { min-width: 0; }
+.sub-label { max-width: 100%; overflow-wrap: anywhere; text-align: center; }
+@media (max-width: 360px) {
+  .cat-rail-i { padding-inline: 8px; font-size: 13px; }
+  .sub-grid { gap: 16px 4px; }
+}
 
 /* 특가 탭 — 상단 프로모 카드 + 보조 탭 + 카운트다운 + 딜 카드 [Observed 34/35] */
 .sale-promo {
@@ -1168,6 +1192,22 @@ button.cart-thumb { border: 0; padding: 0; cursor: pointer; }
 .link-chip:hover { border-color: var(--accent); }
 .agent-input { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); flex-shrink: 0; }
 
+/* Brain chat: distinct messages, bounded cards and mobile conversation controls. */
+.brain-conversations { display:flex; gap:8px; padding:10px 16px; border-bottom:1px solid var(--line); }
+.brain-conversations select { flex:1; min-width:0; max-width:100%; }
+.brain-turn { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.brain-turn .msg { overflow-wrap:anywhere; }
+.brain-products { display:flex; flex-direction:column; gap:8px; }
+.brain-products p { margin:0; }
+.brain-product-card { display:flex; gap:12px; padding:12px; border:1px solid var(--line); border-radius:14px; background:var(--card); min-width:0; }
+.brain-product-image { position:relative; width:76px; height:76px; flex-shrink:0; border-radius:10px; overflow:hidden; background:var(--field); display:grid; place-items:center; color:var(--muted); font-size:11px; }
+.brain-product-image img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:var(--card); }
+.brain-product-image img[hidden] { display:none; }
+.brain-product-info { min-width:0; flex:1; overflow-wrap:anywhere; }
+.brain-product-info .chip { display:inline-block; max-width:100%; white-space:normal; margin:4px 4px 0 0; }
+.brain-panel .state-box select { max-width:100%; }
+@media (max-width:380px) { .brain-conversations { flex-wrap:wrap; } .brain-product-image { width:60px; height:60px; } }
+
 /* 토스트 */
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%);
@@ -1769,3 +1809,133 @@ button.cart-thumb { border: 0; padding: 0; cursor: pointer; }
   border: none; background: none; color: var(--accent);
   font: inherit; font-weight: 600; cursor: pointer; padding: 0 4px;
 }
+
+.brain-interview fieldset{border:0;padding:0;margin:0 0 16px;min-width:0}.brain-interview legend{font-weight:600;margin-bottom:10px}.brain-explore{display:flex;gap:8px;flex-wrap:wrap}.brain-explore .btn{flex:1}.brain-product-reason{font-size:13px;line-height:1.55;color:var(--text-2)}.brain-rank{display:inline-block;margin-bottom:6px}
+
+/* Shopping Brain chat surfaces inherit the Commerce light/dark palette. */
+.brain-panel{width:min(560px,100vw);background:var(--bg);font-weight:400}
+.brain-panel .agent-head{padding:20px 22px;background:var(--bg-elev);gap:12px}
+.brain-brand{display:flex;align-items:center;gap:11px;min-width:0}
+.brain-brand b{font-size:17px;letter-spacing:-.4px}.brain-brand .sm{font-size:12px;margin-top:3px}
+.brain-avatar{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;font-size:25px;line-height:1;box-shadow:inset 0 0 0 1px #ffffff1f}
+.brain-panel .brain-conversations{padding:10px 22px;align-items:center;background:var(--bg-elev);gap:10px}
+.brain-conversations .btn{padding:8px 12px;background:transparent;color:var(--text-2);border:1px solid var(--line);font-weight:500;font-size:12px;border-radius:9px}
+.brain-conversations select{padding:9px 10px;background:var(--bg-elev);color:var(--text-2);border:1px solid var(--line);border-radius:9px;font:inherit;font-size:12px}
+.brain-panel .agent-body{padding:24px 22px;gap:22px;overscroll-behavior:contain;scrollbar-gutter:stable}
+.brain-panel .brain-turn{gap:16px}.brain-panel .msg{max-width:86%;padding:13px 16px;font-size:14px;line-height:1.75;font-weight:400;letter-spacing:-.2px}
+.brain-panel .msg.user{border-radius:18px 18px 5px 18px;background:var(--accent-weak);color:var(--text);border:1px solid color-mix(in srgb,var(--accent) 22%,var(--line))}
+.brain-assistant-message{display:flex;align-items:flex-start;gap:10px;min-width:0}
+.brain-assistant-message .brain-avatar{width:30px;height:30px;flex-basis:30px;font-size:22px;margin-top:4px}
+.brain-panel .msg.ai{border:0;border-radius:5px 18px 18px 18px;background:var(--field);max-width:calc(100% - 40px);color:var(--text);padding:13px 16px}
+.brain-panel .state-box{border:1px solid var(--line);text-align:left;color:var(--text);padding:18px;margin:0;border-radius:18px;background:var(--bg-elev)}
+.brain-panel .brain-interview{padding:22px;box-shadow:0 3px 14px #00000008}
+.brain-interview-heading{display:flex;align-items:center;gap:10px;margin-bottom:24px}
+.brain-section-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--accent-weak);color:var(--accent);font-size:24px}
+.brain-eyebrow{display:block;font-size:11px;color:var(--accent);font-weight:600;letter-spacing:.3px;margin-bottom:4px}
+.brain-interview h3{font-size:16px;line-height:1.4;letter-spacing:-.5px;margin:0;color:var(--text);font-weight:650}
+.brain-panel .brain-interview fieldset{padding:0;margin:0 0 24px;min-width:0;border:0}
+.brain-panel .brain-interview legend{display:flex;align-items:center;gap:8px;font-size:14px;line-height:1.6;font-weight:600;color:var(--text);padding:0;margin-bottom:12px;width:100%}
+.brain-question-number{display:inline-grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border-radius:6px;background:var(--field);color:var(--muted);font-size:11px}
+.brain-quick-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;width:100%}
+.brain-panel .brain-choice{display:flex;align-items:center;justify-content:center;min-width:0;min-height:48px;padding:12px 10px;white-space:normal;line-height:1.45;border-radius:11px;background:var(--bg-elev);border:1px solid var(--line);color:var(--text-2);font-size:13px;font-weight:500;transition:border-color .15s,background .15s,color .15s}
+.brain-panel .brain-choice:hover:not(:disabled),.brain-panel .brain-choice:focus-visible{border-color:var(--accent);background:var(--accent-weak);color:var(--text);outline:2px solid transparent;outline-offset:2px}
+.brain-panel .brain-choice:active:not(:disabled){background:var(--sel);border-color:var(--accent)}
+.brain-panel .brain-choice:disabled{opacity:.5;cursor:wait}.brain-panel .brain-interview>.sm{font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:14px;margin:0;color:var(--muted)}
+.brain-panel .brain-products{gap:12px}.brain-panel .brain-products>p{font-size:12px;line-height:1.6}
+.brain-panel .brain-product-card{align-items:flex-start;background:var(--bg-elev);border-radius:16px;padding:14px;gap:14px}
+.brain-panel .brain-product-image{width:96px;height:108px;border-radius:12px;background:var(--field)}
+.brain-panel .brain-product-image img{background:var(--field)}
+.brain-panel .brain-rank{position:absolute;left:6px;top:6px;z-index:1;margin:0;padding:4px 7px;border-radius:7px;background:var(--accent);color:#fff;font-size:11px;font-weight:650;line-height:1.3}
+.brain-panel .brain-product-name{display:block;font-size:14px;line-height:1.5;font-weight:650;letter-spacing:-.3px}
+.brain-panel .brain-product-price{font-size:19px;font-weight:700;letter-spacing:-.6px;padding-top:5px;padding-bottom:8px}
+.brain-panel .brain-product-reason{font-size:12px;line-height:1.7;color:var(--text-2);margin:0 0 9px}
+.brain-panel .brain-product-info .chip{background:var(--field);color:var(--text-2);font-size:11px;padding:4px 7px;border-radius:6px;font-weight:400}
+.brain-panel .brain-product-info .link{font-size:12px;padding:8px 8px 0 0;min-height:32px}
+.brain-panel .brain-memory{background:transparent;font-size:12px;color:var(--text-2);padding:16px;line-height:1.7}.brain-memory b{display:block;font-weight:500;margin-bottom:10px}
+.brain-memory select{font:inherit;background:var(--bg-elev);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;max-width:100%;margin-right:6px}
+.brain-memory .btn{font-size:12px;padding:9px 12px;background:var(--field);color:var(--text);font-weight:500;margin-top:6px}.brain-memory .btn.primary{background:var(--accent);color:#fff}
+.brain-panel .brain-explore{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.brain-explore .btn{min-width:0;min-height:46px;white-space:normal;border:1px solid var(--line);background:var(--bg-elev);color:var(--text-2);font-size:13px;font-weight:500;padding:10px}
+.brain-panel .agent-input{align-items:center;padding:14px 18px max(14px,env(safe-area-inset-bottom));gap:10px;background:var(--bg-elev);border-top:1px solid var(--line)}
+.brain-panel .agent-input input{min-width:0;flex:1;height:48px;background:var(--field);border:1px solid var(--line);border-radius:24px;padding:0 17px;font-size:14px;color:var(--text)}
+.brain-panel .agent-input input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.brain-panel .brain-send{display:grid;place-items:center;width:44px;height:44px;flex:0 0 44px;padding:0;border-radius:50%;background:var(--accent);color:#fff}.brain-panel .brain-send:disabled{background:var(--field);color:var(--muted)}
+@media(max-width:420px){.brain-panel .agent-head{padding:16px}.brain-panel .brain-conversations{padding:9px 16px}.brain-panel .agent-body{padding:20px 14px}.brain-panel .brain-interview{padding:18px 16px}.brain-panel .brain-product-image{width:78px;height:96px}.brain-panel .brain-product-card{padding:12px;gap:11px}.brain-panel .brain-product-price{font-size:18px}}
+@media(prefers-reduced-motion:reduce){.brain-panel .brain-choice{transition:none}}
+
+.brain-product-heading{display:flex;align-items:flex-start;gap:10px}
+.brain-product-summary{flex:1;min-width:0}
+.brain-panel .brain-product-info .brain-product-open{display:inline-flex;align-items:center;justify-content:center;align-self:flex-start;gap:5px;flex-shrink:0;min-height:36px;padding:0 0 0 4px;font-weight:600;white-space:nowrap}
+.brain-product-open svg{flex-shrink:0}
+.brain-product-footer{display:flex;justify-content:flex-end;margin-top:4px}
+.brain-panel .brain-product-info .brain-product-exclude{color:#a94a16;min-height:36px;padding:6px 0 6px 8px;font-weight:500}
+.brain-product-exclude:hover{text-decoration:underline;text-underline-offset:3px}
+.brain-product-exclude:focus-visible{outline:2px solid currentColor;outline-offset:3px;border-radius:4px}
+@media(prefers-color-scheme:dark){.brain-panel .brain-product-info .brain-product-exclude{color:#ffb184}}
+@media(max-width:380px){.brain-product-heading{gap:6px}.brain-panel .brain-product-info .brain-product-open{font-size:11px;gap:3px}.brain-panel .brain-product-open svg{width:13px;height:13px}.brain-panel .brain-product-image{width:64px;height:82px}}
+.brain-panel .brain-answer p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75}
+.brain-panel .brain-answer p+p{margin-top:12px}
+.brain-panel .brain-answer strong{font-weight:700;color:var(--text)}
+.brain-panel .brain-product-reason .brain-answer p+p{margin-top:6px}
+.brain-panel .brain-product-prices{display:grid;gap:2px;padding-top:5px;font-size:11px;line-height:1.45;color:var(--text-2)}
+.brain-panel .brain-product-prices p{display:flex;justify-content:space-between;gap:8px;margin:0}
+.brain-panel .brain-product-prices b{color:var(--text);font-weight:550;text-align:right}
+.brain-panel .brain-product-prices .brain-product-total{border-top:1px solid var(--line);margin-top:3px;padding-top:4px;font-size:12px;font-weight:650}
+.brain-panel .brain-product-prices .brain-product-total b{font-weight:700}
+.brain-panel .brain-review-sort-note{padding:9px 11px;border-radius:10px;background:var(--bg-elev);color:var(--text-2)}
+.brain-panel .brain-product-reason{overflow-wrap:anywhere}
+@media(max-width:380px){.brain-panel .brain-product-prices{font-size:10.5px;gap:1px}.brain-panel .brain-product-prices .brain-product-total{font-size:11px}.brain-panel .brain-rank{font-size:9px;padding:3px 5px}}
+.brain-panel .brain-recovery-actions{display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap;margin:8px 0 12px}
+.brain-panel .brain-recovery-actions .link{min-height:36px;padding:6px 2px;font-weight:600}
+.brain-panel .brain-preference-prompt{display:grid;gap:11px;padding:16px;background:var(--bg-elev)}
+.brain-panel .brain-preference-prompt h3{margin:0;font-size:15px;line-height:1.5;font-weight:650}
+.brain-panel .brain-preference-prompt p{margin:0;line-height:1.6}
+.brain-panel .brain-preference-select{display:grid;gap:6px;font-size:12px;font-weight:600}
+.brain-panel .brain-preference-select select{width:100%;max-width:100%;min-width:0;min-height:44px;margin:0;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--field);color:var(--text);font:inherit}
+.brain-panel .brain-preference-prompt>.btn{width:100%;min-width:0;min-height:44px;white-space:normal;line-height:1.4}
+.brain-panel .brain-preference-prompt>.brain-preference-later{border:1px solid var(--line);background:transparent;color:var(--text-2);font-weight:500}
+.brain-panel .brain-preference-prompt .brain-preference-error{color:var(--danger,#b42318);font-size:12px}
+.brain-panel .brain-review-summary{display:grid;gap:12px;min-width:0}
+.brain-panel .brain-review-summary-product{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;min-width:0;padding:13px;border:1px solid var(--line);border-radius:14px;background:var(--bg-elev)}
+.brain-panel .brain-review-summary-product.has-image{grid-template-columns:76px minmax(0,1fr);align-items:center}
+.brain-panel .brain-review-summary-product img{display:block;width:76px;height:84px;object-fit:cover;border-radius:10px;background:var(--field)}
+.brain-panel .brain-review-summary-product b{display:block;overflow-wrap:anywhere;font-size:14px;line-height:1.5}
+.brain-panel .brain-review-summary-product .brain-review-product-open{display:inline-flex;min-height:38px;align-items:center;padding:7px 0 0;font-weight:600}
+.brain-panel .brain-review-choices,.brain-panel .brain-review-evidence{display:grid;gap:9px;min-width:0}
+.brain-panel .brain-review-choices h3,.brain-panel .brain-review-evidence h3{margin:0;font-size:13px;line-height:1.5}
+.brain-panel .brain-review-choice{width:100%;min-width:0;min-height:44px;white-space:normal;line-height:1.45}
+.brain-panel .brain-review-evidence-scope{display:grid;gap:7px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg-elev)}
+.brain-panel .brain-review-evidence-scope h4{margin:0;font-size:12px;font-weight:650}
+.brain-panel .brain-review-evidence-scope ul{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.brain-panel .brain-review-evidence-scope li{min-width:0}
+.brain-panel .brain-review-evidence-scope blockquote{margin:0 0 5px;padding-left:10px;border-left:2px solid var(--accent);white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7;color:var(--text)}
+@media(max-width:380px){.brain-panel .brain-review-summary-product.has-image{grid-template-columns:60px minmax(0,1fr)}.brain-panel .brain-review-summary-product img{width:60px;height:70px}.brain-panel .brain-preference-prompt{padding:14px}}
+.brain-panel .brain-review-analysis{display:grid;gap:12px;min-width:0;overflow-wrap:anywhere}
+.brain-panel .brain-review-analysis-heading h2,.brain-panel .brain-review-analysis-product h3,.brain-panel .brain-review-analysis-comparison h3{margin:0;font-size:14px;line-height:1.5;font-weight:650}
+.brain-panel .brain-review-analysis-heading p,.brain-panel .brain-review-analysis-product p,.brain-panel .brain-review-analysis-comparison p{margin:0}
+.brain-panel .brain-review-analysis-method,.brain-panel .brain-review-analysis-focus-note{margin:0;padding:10px 12px;border-radius:10px;background:var(--bg-elev);color:var(--text-2);font-size:12px;line-height:1.65}
+.brain-panel .brain-review-analysis-products{display:grid;gap:10px;min-width:0}
+.brain-panel .brain-review-analysis-product,.brain-panel .brain-review-analysis-comparison{display:grid;gap:9px;min-width:0;padding:13px;border:1px solid var(--line);border-radius:14px;background:var(--bg-elev)}
+.brain-panel .brain-review-analysis-product-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}
+.brain-panel .brain-review-analysis-product-head .sm,.brain-panel .brain-review-analysis-product>.sm{font-size:11px;line-height:1.6}
+.brain-panel .brain-review-analysis-scope,.brain-panel .brain-review-analysis-counts{font-size:12px;line-height:1.65;color:var(--text-2)}
+.brain-panel .brain-review-analysis-source-counts{display:grid;gap:6px;margin:0}
+.brain-panel .brain-review-analysis-source-counts>div{display:grid;gap:3px;padding:8px 9px;border-radius:9px;background:var(--field)}
+.brain-panel .brain-review-analysis-source-counts dt{font-size:11px;font-weight:650;color:var(--text)}
+.brain-panel .brain-review-analysis-source-counts dd{margin:0;font-size:10px;line-height:1.55;color:var(--text-2)}
+.brain-panel .brain-review-analysis-limitations{display:grid;gap:4px;margin:0;padding-left:18px;color:var(--text-2);font-size:11px;line-height:1.6}
+.brain-panel .brain-review-analysis-evidence{display:grid;gap:7px;min-width:0}
+.brain-panel .brain-review-analysis-evidence h4{margin:0;font-size:12px;font-weight:650}
+.brain-panel .brain-review-analysis-evidence ul{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.brain-panel .brain-review-analysis-evidence li{min-width:0;padding:9px;border-radius:9px;background:var(--field)}
+.brain-panel .brain-review-analysis-evidence blockquote{margin:0 0 5px;padding-left:9px;border-left:2px solid var(--accent);white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.65;color:var(--text)}
+.brain-panel .brain-review-analysis-evidence .sm{font-size:10px}
+.brain-panel .brain-review-analysis-table-scroll{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.brain-panel .brain-review-analysis-comparison table{width:100%;min-width:540px;border-collapse:collapse;font-size:11px;text-align:right}
+.brain-panel .brain-review-analysis-comparison th,.brain-panel .brain-review-analysis-comparison td{padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.brain-panel .brain-review-analysis-comparison thead th{font-weight:600;color:var(--text-2)}
+.brain-panel .brain-review-analysis-comparison tbody th{max-width:150px;white-space:normal;text-align:left;line-height:1.45}
+.brain-panel .brain-review-analysis-comparison tbody th[scope="rowgroup"]{vertical-align:top}
+.brain-panel .brain-review-analysis-rank{display:block;margin-bottom:2px;color:var(--accent);font-size:10px;font-weight:650}
+.brain-panel .brain-review-analysis-display-index{display:block;font-size:10px}
+.brain-panel .brain-review-analysis-comparison>p{font-size:10px;line-height:1.55}
+@media(max-width:380px){.brain-panel .brain-review-analysis-product,.brain-panel .brain-review-analysis-comparison{padding:11px}.brain-panel .brain-review-analysis-counts{font-size:11px}.brain-panel .brain-review-analysis-source-counts dd{font-size:9.5px}}

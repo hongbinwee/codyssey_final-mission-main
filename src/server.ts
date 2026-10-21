@@ -1,13 +1,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { extname, join, normalize, sep } from "node:path";
+import { extname, isAbsolute, join, normalize, sep } from "node:path";
 import { build } from "esbuild";
 import { config } from "./config.ts";
-import { connectDb, sql, type Q } from "./db.ts";
+import { assertServiceRole, connectDb, sql, type Q } from "./db.ts";
 import { ensureDevDb } from "./devdb.ts";
 import { contextFromRequest, signSession } from "./session.ts";
-import { getProduct, getReviews, searchProducts } from "./catalog.ts";
+import {createQaAuth,readQaAuthFile} from "./qa-auth.ts";
+import {qaCommerceEnabled, qaCommerceRequestAllowed, qaCommerceIdentity, qaCommerceConnectedIdentityMatches} from "./qa-commerce.ts";
+import { catalogRequestAllowed, catalogSource, createCatalog } from "./catalog.ts";
+import {openExternalCatalog} from './external-catalog.ts';
 import { addToCart, getCart, removeCartItem, updateCartQuantity } from "./cart.ts";
 import { getWishlist, parseWishlistPut, setWishlist } from "./wishlist.ts";
 import { checkoutQuote, confirmCheckout } from "./checkout.ts";
@@ -19,6 +22,8 @@ import { getActionResult } from "./actions.ts";
 import { runAgentTurn } from "./agent.ts";
 import { getProvider } from "./llm.ts";
 import { createAiDemoGate } from "./ai-demo-access.ts";
+import {brainMutationAllowed} from "./brain/csrf.ts";
+import {sendBrainReply} from './brain/turn-stream.ts';
 import {
   isolatedEnvTouched,
   planIsolatedConnect,
@@ -115,6 +120,10 @@ const reqCtx = (req: IncomingMessage) =>
   );
 
 export type ServerStartDeps = {
+  openExternalCatalog?:typeof openExternalCatalog;
+  webBundlePath?: string;
+  localRagSearch?:import("./brain/rag-adapter.ts").LocalRagSearch;
+  embedQuery?:(query:string)=>Promise<number[]>;
   env?: Record<string, string | undefined>;
   ensureDevDb?: typeof ensureDevDb;
   connectDb?: typeof connectDb;
@@ -122,15 +131,107 @@ export type ServerStartDeps = {
   createServer?: typeof createServer;
 };
 
+type BrainRagContract = "brain-rag-v1" | "v4";
+type BrainRagConnection = {
+  profile?:string;
+  endpoint: string;
+  mode?:"remote"|"local";
+  dataDir?:string;
+  pythonPath?:string;
+  modelRevision?:string;
+  modelCache?:string;
+  manifestPath?:string;
+  auditId: string;
+  token?: string;
+  contract: BrainRagContract;
+  datasetVersion?: string;
+  category: string;
+  categories?:string[];
+};
+
+export function brainRagConnectionFromEnv(
+  env: Record<string, string | undefined>,
+): BrainRagConnection | undefined {
+  const mode=env.BRAIN_RAG_MODE?.trim()||"remote";
+  if(mode!=="remote"&&mode!=="local")throw new Error("BRAIN_RAG_MODE must be remote or local");
+  const dataDir=mode==="local"?env.BRAIN_RAG_DATA_DIR:undefined;
+  if(mode==="local"&&(!dataDir||!isAbsolute(dataDir)))
+    throw new Error("local RAG requires absolute BRAIN_RAG_DATA_DIR");
+  const manifestPath=env.BRAIN_RAG_MANIFEST_PATH?.trim();
+  if(manifestPath&&(mode!=="local"||!isAbsolute(manifestPath)))
+    throw new Error("BRAIN_RAG_MANIFEST_PATH requires local mode and an absolute path");
+  // Local mode never connects to this sentinel URL; only an in-process fetcher is allowed.
+  const endpoint = mode==="local"?"http://127.0.0.1/v4-local":env.BRAIN_RAG_URL;
+  if (!endpoint) return undefined;
+
+  const configuredContract = env.BRAIN_RAG_CONTRACT?.trim() || (mode==="local"?"v4":"legacy");
+  const contract = configuredContract === "legacy" ? "brain-rag-v1" : configuredContract;
+  if (contract !== "brain-rag-v1" && contract !== "v4")
+    throw new Error("BRAIN_RAG_CONTRACT must be v4 or legacy");
+  if(mode==="local"&&contract!=="v4")throw new Error("local RAG requires v4 contract");
+
+  const datasetVersion = env.BRAIN_RAG_DATASET_VERSION;
+  if (contract === "v4" && !datasetVersion?.trim())
+    throw new Error("BRAIN_RAG_DATASET_VERSION is required for v4 RAG");
+
+  const categories=env.BRAIN_RAG_CATEGORIES?.split(",").map(c=>c.trim());
+  if(categories&&(!categories.length||categories.some(c=>!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(c))||new Set(categories).size!==categories.length))throw Error("invalid BRAIN_RAG_CATEGORIES");
+  return {
+    endpoint,
+    ...(env.BRAIN_RAG_PROFILE?.trim()?{profile:env.BRAIN_RAG_PROFILE.trim()}:{}),
+    ...(mode==="local"?{mode,dataDir,pythonPath:env.BRAIN_RAG_PYTHON,
+      modelRevision:env.BRAIN_RAG_MODEL_REVISION,modelCache:env.BRAIN_RAG_MODEL_CACHE,manifestPath}:{}),
+    auditId: env.BRAIN_RAG_AUDIT_ID ?? "",
+    token: env.BRAIN_RAG_TOKEN,
+    contract,
+    datasetVersion,
+    category: env.BRAIN_RAG_CATEGORY?.trim() || (categories?"":"beauty"),
+    ...(categories?{categories}:{}),
+  };
+}
+
 export async function start(port = config.port, deps: ServerStartDeps = {}) {
   const env = deps.env ?? process.env;
+  if(env.QA_AUTH_ENABLED&&!["0","1"].includes(env.QA_AUTH_ENABLED))throw new Error("invalid QA_AUTH_ENABLED");
+  const qa=env.QA_AUTH_ENABLED==="1";
+  const qaCommerce = qaCommerceEnabled(env);
+  let qaAuth:ReturnType<typeof createQaAuth>|undefined;
+  if(qa){
+    const qaIdentity=qaCommerceIdentity(env);
+    const url=new URL(env.DATABASE_URL??"");
+    if(!["test_items","test_items2"].includes(env.COMMERCE_CATALOG_SOURCE??"")||env.COMMERCE_CATALOG_SOURCE==="test_items2"&&!qaCommerce||url.hostname!=="127.0.0.1"||url.port!==String(qaIdentity.port)||
+      url.pathname!=="/"+(qaCommerce?qaIdentity.database:"toss_v4_test_items_20261018_w01")||decodeURIComponent(url.username)!==(qaCommerce?qaIdentity.role:"commerce_v4_reader")||url.search||
+      !env.SESSION_SECRET?.trim()||!env.QA_AUTH_FILE)throw new Error("QA auth requires the approved local read-only catalog");
+    if(env.BRAIN_ENABLED==="1"){
+      const brainUrl=new URL(env.BRAIN_DATABASE_URL??"");
+      if(brainUrl.hostname!=="127.0.0.1"||brainUrl.port!==String(qaIdentity.port)||brainUrl.pathname!=="/"+qaIdentity.brainDatabase||
+        decodeURIComponent(brainUrl.username)!==qaIdentity.brainRole||brainUrl.search)
+        throw new Error("QA auth requires the approved isolated Brain database");
+    }
+    const publicOrigin=env.BRAIN_PUBLIC_ORIGIN;
+    if(publicOrigin){const u=new URL(publicOrigin);if(u.protocol!=="https:"||u.origin!==publicOrigin)throw new Error("invalid QA public origin");}
+    await readQaAuthFile(env.QA_AUTH_FILE);
+    qaAuth=createQaAuth({secret:env.SESSION_SECRET,load:()=>readQaAuthFile(env.QA_AUTH_FILE!),secure:!!publicOrigin});
+  }
+  const requestContext=async(req:IncomingMessage)=>{
+    if(!qaAuth)return reqCtx(req);
+    const actorUserId=await qaAuth.actor(req.headers.cookie);
+    return actorUserId?{actorUserId,origin:"UI" as const}:null;
+  };
   const ensure = deps.ensureDevDb ?? ensureDevDb;
   const connect = deps.connectDb ?? connectDb;
   const buildBundle = deps.build ?? build;
   const createHttpServer = deps.createServer ?? createServer;
   const isolated = isolatedStartContract(env);
+  const source = catalogSource(env.COMMERCE_CATALOG_SOURCE);
+  const catalogReadOnly = source !== "public";
+  const ragConnection=env.BRAIN_ENABLED==="1"?brainRagConnectionFromEnv(env):undefined;
+  if(ragConnection?.mode==="local"&&!catalogReadOnly)
+    throw new Error("local RAG requires the read-only test_items catalog");
+  let businessDb: ReturnType<typeof connectDb>;
   if (isolated) {
-    const pool = connect(isolated.dbUrl);
+    const pool = connect(isolated.dbUrl, {readOnly: catalogReadOnly && !qaCommerce});
+    businessDb = pool;
     const owned = await verifyOwnedTransaction(
       pool as unknown as Parameters<typeof verifyOwnedTransaction>[0],
       isolated,
@@ -141,18 +242,50 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
     }
   } else {
     await ensure();
-    connect(env.DATABASE_URL!);
+    businessDb = connect(env.DATABASE_URL!, {readOnly: catalogReadOnly && !qaCommerce});
   }
+  if (catalogReadOnly) {
+    try { await assertServiceRole(businessDb, !qaCommerce); }
+    catch (error) { await businessDb.end(); throw error; }
+  }
+  if(qa){
+    const [identity]=await businessDb.unsafe("SELECT current_database() AS db,current_user AS role,inet_server_port() AS port,current_setting('transaction_read_only') AS read_only");
+    if(!identity||!qaCommerceConnectedIdentityMatches(env,identity as unknown as {
+      db?:unknown;role?:unknown;port?:unknown;read_only?:unknown;
+    },qaCommerce)){
+      await businessDb.end();throw new Error("QA database identity mismatch");
+    }
+  }
+  let externalCatalog:Awaited<ReturnType<typeof openExternalCatalog>>;
+  try{externalCatalog=await (deps.openExternalCatalog??openExternalCatalog)(env,source);}
+  catch(error){await businessDb.end();throw error;}
+  const catalog = externalCatalog?.catalog??createCatalog(source, businessDb);
   await buildBundle({
     entryPoints: ["src/web/app.tsx"],
     bundle: true,
-    outfile: "web/app.js",
+    outfile: deps.webBundlePath ?? "web/app.js",
     jsx: "automatic",
     format: "esm",
     logLevel: "silent",
   });
   const provider = getProvider();
   const aiDemo = env.AI_LIVE_DEMO === "1";
+  if (aiDemo && env.BRAIN_ENABLED === "1")
+    throw new Error("new Brain API cannot run in the existing read-only live demo");
+  // Never open AI storage unless explicitly enabled. No edits to Commerce DB.
+  const brainRuntime = env.BRAIN_ENABLED === "1"
+    ? await (await import("./brain/runtime.ts")).createBrainRuntime({
+        brainDatabaseUrl: env.BRAIN_DATABASE_URL ?? "",
+        commerceDatabaseUrl: env.DATABASE_URL,
+        provider,
+        rag: ragConnection,
+        catalogSource: source,
+        catalog,
+        qaEnvironment: env.QA_ENVIRONMENT,
+        localRagSearch: deps.localRagSearch,
+        embedQuery: deps.embedQuery,
+      })
+    : null;
   const aiGate = createAiDemoGate();
   const aiCalls = createAiDemoGate(30, 15);
 
@@ -170,6 +303,16 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
       if (p === "/api/session") {
         if (req.method === "POST") {
           const b = (await body(req)) as { code?: string };
+          if(qaAuth){
+            if(!brainMutationAllowed(req.headers,env.BRAIN_PUBLIC_ORIGIN))
+              return json(res,403,{ok:false,error:{code:"CSRF_REJECTED",message:"허용되지 않은 요청 출처"}});
+            const result=await qaAuth.login(b.code,req.socket.remoteAddress??"unknown");
+            if(!result.ok)return json(res,result.status,{ok:false,error:{code:result.status===503?"LOGIN_BUSY":result.status===429?"LOGIN_RETRY_LATER":"INVALID_CODE",message:result.status===503?"로그인 요청을 처리 중이에요. 잠시 후 다시 시도해 주세요.":"접근 코드를 확인해 주세요. 잘못된 시도가 누적되면 잠시 후 다시 시도해 주세요."}},
+              result.retryAfter?{"retry-after":String(result.retryAfter)}:{});
+            const [user]=await businessDb.unsafe("SELECT id,display_name FROM users WHERE id=$1 AND auth_subject=$1",[result.userId]);
+            if(!user)return json(res,401,{ok:false,error:{code:"INVALID_CODE",message:"사용자를 찾을 수 없습니다"}});
+            return json(res,200,{ok:true,user:{id:user.id,display_name:user.display_name}},{"set-cookie":result.cookie});
+          }
           const subject = b.code ? config.testUserCodes[b.code] : undefined;
           if (!subject) return json(res, 401, { ok: false, error: { code: "INVALID_CODE", message: "접근 코드가 올바르지 않습니다" } });
           const [u] = await sql.unsafe("SELECT id, display_name FROM users WHERE auth_subject=$1", [subject]);
@@ -180,19 +323,22 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
           });
         }
         if (req.method === "GET") {
-          const ctx = reqCtx(req);
+          const ctx = await requestContext(req);
           if (!ctx) return json(res, 401, { ok: false, error: { code: "UNAUTHENTICATED", message: "로그인이 필요합니다" } });
-          const [u] = await sql.unsafe("SELECT id, display_name FROM users WHERE id=$1", [ctx.actorUserId]);
+          const [u] = await (qaAuth?businessDb:sql).unsafe("SELECT id, display_name FROM users WHERE id=$1", [ctx.actorUserId]);
           if (!u) return json(res, 401, { ok: false, error: { code: "UNAUTHENTICATED", message: "세션 만료" } });
           return json(res, 200, { ok: true, user: { id: u.id, display_name: u.display_name } });
         }
         if (req.method === "DELETE") {
-          return json(res, 200, { ok: true }, { "set-cookie": "session=; HttpOnly; Path=/; Max-Age=0" });
+          if(qaAuth&&!brainMutationAllowed(req.headers,env.BRAIN_PUBLIC_ORIGIN))
+            return json(res,403,{ok:false,error:{code:"CSRF_REJECTED",message:"허용되지 않은 요청 출처"}});
+          return json(res, 200, { ok: true }, { "set-cookie": qaAuth?qaAuth.clearCookie():"session=; HttpOnly; Path=/; Max-Age=0" });
         }
       }
 
       // 정적 자산은 인증 없이 서빙한다.
-      const file = req.method === "GET" && !p.startsWith("/api/") ? STATIC[p] : undefined;
+      const file = req.method === "GET" && !p.startsWith("/api/") ?
+        (p === "/web/app.js" && deps.webBundlePath ? deps.webBundlePath : STATIC[p]) : undefined;
       if (file) {
         res.writeHead(200, { "content-type": MIME[extname(file)] ?? "text/plain" });
         return res.end(await readFile(file));
@@ -208,8 +354,9 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
           return res.end("Not found");
         }
         try {
+          const bytes = await readFile(filePath);
           res.writeHead(200, { "content-type": MIME[extname(filePath)] ?? "application/octet-stream" });
-          return res.end(await readFile(filePath));
+          return res.end(bytes);
         } catch {
           res.writeHead(404);
           return res.end("Not found");
@@ -217,14 +364,40 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
       }
 
       // 아래부터는 인증 필요
-      const ctx = reqCtx(req);
+      const ctx = await requestContext(req);
       if (!ctx) return json(res, 401, { ok: false, error: { code: "UNAUTHENTICATED", message: "로그인이 필요합니다" } });
+      if (!catalogRequestAllowed(source, req.method ?? "", p) && !(qaCommerce && qaCommerceRequestAllowed(req.method ?? "", p)))
+        return json(res, 403, {ok:false,error:{code:"READ_ONLY_CATALOG",
+          message:qaCommerce?"v4 QA에서는 찜·장바구니 저장만 지원하며 주문·결제는 제공하지 않습니다.":"v4 테스트 상품은 시연용 가격·재고이며 장바구니·찜·주문·결제를 제공하지 않습니다."}});
+      if(externalCatalog&&req.method!=='GET'&&qaCommerceRequestAllowed(req.method??'',p))
+        return json(res,403,{ok:false,error:{code:'CATALOG_WRITES_PAUSED',message:'외부 상품과 로컬 저장소의 정합성 확인 전에는 찜·장바구니 변경을 잠시 지원하지 않습니다.'}});
+      if (qaCommerce && qaCommerceRequestAllowed(req.method ?? "", p) && req.method !== "GET" &&
+          !brainMutationAllowed(req.headers, env.BRAIN_PUBLIC_ORIGIN))
+        return json(res,403,{ok:false,error:{code:"CSRF_REJECTED",message:"허용되지 않은 요청 출처"}});
+      if (p === "/api/catalog/context" && req.method === "GET")
+        return json(res,200,{ok:true,data:{source,read_only:catalogReadOnly,is_simulated:catalogReadOnly,
+          ...(qaCommerce?{cart_enabled:!externalCatalog,wishlist_enabled:!externalCatalog,checkout_enabled:false}:{})}});
       if (aiDemo && p.startsWith("/api/") && p !== "/api/agent/turn" &&
           !(req.method === "GET" && /^\/api\/products(?:\/[^/]+(?:\/reviews)?)?$/.test(p)))
         return json(res, 403, { ok: false, error: { code: "READ_ONLY_DEMO", message: "이 AI 시연에서는 상품·리뷰 조회만 제공해요. 일반 쇼핑은 기존 3105 앱을 이용해 주세요." } });
 
+      if (p === "/api/brain" || p.startsWith("/api/brain/")) {
+        if (!brainRuntime)
+          return json(res, 404, { ok: false, error: { code: "NOT_FOUND", message: "Brain API is disabled" } });
+        const mutating = req.method === "POST" || req.method === "DELETE";
+        if(mutating&&!brainMutationAllowed(req.headers,env.BRAIN_PUBLIC_ORIGIN))
+          return json(res,403,{ok:false,error:{code:"CSRF_REJECTED",message:"허용되지 않은 요청 출처"}});
+        const submitted = req.method === "POST" ? await body(req) : {};
+        await sendBrainReply(req,res,onPreview=>brainRuntime.handle(req.method??'',p,ctx.actorUserId,submitted,
+          onPreview?{onPreview}:undefined),req.method==='POST'&&/^\/api\/brain\/conversations\/[a-fA-F0-9-]+\/turn$/.test(p));
+        return;
+      }
+
       if (p === "/api/products" && req.method === "GET") {
-        return send(res, await searchProducts({
+        return send(res, await catalog.searchProducts({
+          browse: url.searchParams.get("browse") === "1",
+          browse_group: url.searchParams.get("browse_group") ?? undefined,
+          browse_sub: url.searchParams.get("browse_sub") ?? undefined,
           query: url.searchParams.get("query") ?? undefined,
           category: url.searchParams.get("category") ?? undefined,
           max_unit_price_won: url.searchParams.get("max_unit_price_won") ? Number(url.searchParams.get("max_unit_price_won")) : undefined,
@@ -234,10 +407,10 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         }));
       }
       let m = p.match(/^\/api\/products\/([^/]+)$/);
-      if (m && req.method === "GET") return send(res, await getProduct({ product_id: decodeURIComponent(m[1]) }));
+      if (m && req.method === "GET") return send(res, await catalog.getProduct({ product_id: decodeURIComponent(m[1]) }));
       m = p.match(/^\/api\/products\/([^/]+)\/reviews$/);
       if (m && req.method === "GET")
-        return send(res, await getReviews({
+        return send(res, await catalog.getReviews({
           product_id: decodeURIComponent(m[1]),
           variant_id: url.searchParams.get("variant_id") ?? undefined,
           query: url.searchParams.get("query") ?? undefined,
@@ -401,6 +574,9 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
       res.writeHead(404);
       res.end("Not found");
     } catch {
+      // Static asset read failures may happen after writeHead(200). Never send
+      // a second header: close the incomplete response instead.
+      if (res.headersSent) { res.destroy(); return; }
       json(res, 500, { ok: false, error: { code: "INTERNAL", message: "요청을 처리하지 못했습니다" } });
     }
   });
@@ -412,6 +588,8 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         ? server.listen(port, host, resolve)
         : server.listen(port, resolve),
   );
+  if (brainRuntime) server.on("close", () => { void brainRuntime.close(); });
+  if (externalCatalog) server.on('close',()=>{void externalCatalog.close();});
   return server;
 }
 

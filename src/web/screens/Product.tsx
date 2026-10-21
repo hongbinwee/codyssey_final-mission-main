@@ -23,16 +23,17 @@
 // - 리뷰 행은 카드 대신 flat row + divider — variant id가 아니라 옵션 라벨로 표시.
 // - 하단 바는 Ref04 구조 [카트 아이콘][N원 담기(보조)][구매하기(주 CTA)] —
 //   옵션 진입은 본문 .optline 행이 담당하고 하단 바에 별도 옵션 버튼을 두지
-//   않는다. 찜·뽑기 등 미지원 기능은 없다 [PMQA-067, 이전 3버튼 구조는 Superseded].
+//   않는다. 찜은 공용 WishButton의 서버 저장 계약을 재사용하고 뽑기는 제공하지 않는다.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiSafe, fmtWon, newActionKey, shipFeeLabel, AMBIGUOUS_CODES, type ApiResult } from "../api.ts";
 import type {
-  CartView, MatchedVariant, ProductDetail, ProductSummary, ReviewsResult, SearchResult,
+  CartView, MatchedVariant, ProductDetail, ProductSummary, ReviewsResult,
 } from "../../contracts.ts";
-import { Empty, ErrorState, Loading } from "../components/CommerceState.tsx";
+import { CatalogNotice, Empty, ErrorState, Loading } from "../components/CommerceState.tsx";
 import { BottomSheet } from "../components/BottomSheet.tsx";
 import { ReviewRow, Stars } from "../components/ReviewBits.tsx";
 import { PRODUCT_META, SPEC_LABEL, productImg } from "../display-meta.ts";
+import { stockSafeErrorMessage, variantStockLabel } from "../commerce-ui.ts";
 import {
   listCartPending, putPending, removePending, lookupAction,
   type PendingWrite,
@@ -42,11 +43,13 @@ import { WishButton } from "../components/WishButton.tsx";
 
 import {
   resolveDetailResume,
+  resolveInitialVariant,
   saveDetailResume,
   takeDetailResumeIfFresh,
 } from "../detail-resume.ts";
 import { recordRecentView } from "../recent-viewed.ts";
 import { createReviewPager } from "../review-pager.ts";
+import { fetchProductsByIds } from "../catalog-lookup.ts";
 
 type RatingLoad =
   | { state: "loading" }
@@ -56,6 +59,7 @@ type RatingLoad =
 
 export function Product({
   productId,
+  initialVariantId,
   userId,
   onBack,
   onOpenSearch,
@@ -65,8 +69,11 @@ export function Product({
   cartCount,
   onBuyNow,
   onOpenWish,
+  commerceEnabled,
+  checkoutEnabled = commerceEnabled,
 }: {
   productId: string;
+  initialVariantId?: string;
   userId: string | null;
   onBack: () => void;
   onOpenSearch: () => void;
@@ -79,6 +86,8 @@ export function Product({
   onBuyNow: (target: { variant_id: string; quantity: number }) => void;
   // 찜 진입 — Ref08 하단 하트 CTA와 저장 시트의 '바로가기' 목적지 [PMQA-070].
   onOpenWish: () => void;
+  commerceEnabled: boolean;
+  checkoutEnabled?: boolean;
 }) {
   const [detail, setDetail] = useState<ApiResult<ProductDetail> | null>(null);
   const [reviews, setReviews] = useState<ApiResult<ReviewsResult> | null>(null);
@@ -120,8 +129,7 @@ export function Product({
     return () => removeEventListener("pending-writes", on);
   }, []);
 
-  const pickDefault = (d: ProductDetail) =>
-    d.variants.find((v) => v.availability === "AVAILABLE")?.variant_id ?? null;
+  const pickDefault = (d: ProductDetail) => resolveInitialVariant(d.variants).variantId;
 
   // 초기 로드: detail+reviews. 재시도도 같은 경로를 타야 초기화 규칙이 동일하다.
   const loadInitial = useCallback(
@@ -152,11 +160,14 @@ export function Product({
         else if (plan.notice === "QTY_REDUCED")
           setFeedback("선택한 수량이 현재 재고에 맞춰 조정됐어요.");
       } else {
-        setVariantId(pickDefault(r.data));
+        const initial = resolveInitialVariant(r.data.variants, initialVariantId);
+        setVariantId(initial.variantId);
         setQty(1);
+        if (initial.unavailable)
+          setFeedback("선택한 옵션은 지금 구매할 수 없어요. 옵션을 다시 선택해 주세요.");
       }
     },
-    [userId],
+    [userId, initialVariantId],
   );
   const loadReviews = useCallback(async (pid: string, my: number, limit = 4) => {
     const r = await apiSafe<ReviewsResult>(
@@ -169,14 +180,15 @@ export function Product({
   // 실패와 미포함은 별도 상태로 보존해 빈 리뷰와 혼동하지 않는다.
   const loadSummary = useCallback(async (pid: string, my: number) => {
     setSummary({ state: "loading" });
-    const r = await apiSafe<SearchResult>("/api/products?limit=50");
+    const r = await fetchProductsByIds([pid]);
     if (seq.current !== my) return;
     if (!r.ok) {
       setSummary({ state: "error" });
       return;
     }
-    const match = r.data.items.find((x) => x.product_id === pid);
-    setSummary(match ? { state: "loaded", summary: match } : { state: "unmatched" });
+    const match = r.found.find((x) => x.product_id === pid);
+    if (match) setSummary({ state: "loaded", summary: match });
+    else setSummary(r.unread.includes(pid) ? { state: "error" } : { state: "unmatched" });
   }, []);
 
   // 플로팅 내비 → 이미지 일부와 정보 영역이 함께 보이는 시점에 solid 바로
@@ -284,7 +296,7 @@ export function Product({
       revSeq.current++;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId]);
+  }, [productId, initialVariantId]);
 
   // 이 상품의 미확정 담기 + actor의 모든 미확정 cart write (전역 잠금)
   const pendingAdd =
@@ -312,7 +324,7 @@ export function Product({
   }
 
   async function add() {
-    if (!selected || adding || busyRef.current || anyPending || !detail?.ok)
+    if (!commerceEnabled || !selected || adding || busyRef.current || anyPending || !detail?.ok)
       return;
     busyRef.current = true;
     setAdding(true);
@@ -365,7 +377,7 @@ export function Product({
     // 확정 거절(VERSION_CONFLICT/OUT_OF_STOCK 등) — 자동 재실행 없이
     // 최신 상태를 다시 읽고 사용자 재확인을 요구한다.
     removePending(key);
-    setFeedback("담기 실패: " + r.error.message);
+    setFeedback("담기 실패: " + stockSafeErrorMessage(r.error.code, r.error.message));
     await refreshDetail(productId);
     await syncCart();
   }
@@ -441,7 +453,7 @@ export function Product({
       return;
     }
     removePending(p.uiKey);
-    setFeedback("담기 실패: " + r.error.message);
+    setFeedback("담기 실패: " + stockSafeErrorMessage(r.error.code, r.error.message));
     await refreshDetail(productId);
     await syncCart();
   }
@@ -496,10 +508,12 @@ export function Product({
         <button className="dn-btn" aria-label="검색" onClick={onOpenSearch}>
           <IcSearch size={20} />
         </button>
-        <button className="dn-btn" aria-label="장바구니" onClick={onOpenCart}>
-          <IcCart size={21} />
-          {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
-        </button>
+        {(
+          <button className="dn-btn" aria-label="장바구니" onClick={onOpenCart}>
+            <IcCart size={21} />
+            {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
+          </button>
+        )}
       </div>
     </nav>
   );
@@ -626,6 +640,7 @@ export function Product({
       </div>
 
       <h2 className="detail-name">{p.name}</h2>
+      {detail.data.catalog_context?.read_only && <CatalogNotice />}
       <div className="muted">
         {p.brand} · {p.description}
       </div>
@@ -655,7 +670,7 @@ export function Product({
               )}
             </span>
             <small className="review-provenance-note">
-              실사용·시연 리뷰 기준
+              {detail.data.catalog_context?.source === "test_items" ? "합성 시연 리뷰 기준" : "수집·합성 리뷰 기준"}
             </small>
           </span>
           <IcChevronRight size={15} className="info-next" />
@@ -729,7 +744,9 @@ export function Product({
               +
             </button>
           </div>
-          <span className="muted">재고 {selected.stock_qty}개</span>
+          <span className="muted">
+            {variantStockLabel(selected.availability, selected.stock_qty, !!detail.data.catalog_context?.read_only)}
+          </span>
         </div>
       )}
 
@@ -783,7 +800,7 @@ export function Product({
                   <span className="muted">({reviewTotal}개)</span>
                 </div>
               )}
-              <small className="review-provenance-note">실사용·시연 리뷰 기준</small>
+              <small className="review-provenance-note">{detail.data.catalog_context?.source === "test_items" ? "합성 시연 리뷰 기준" : "수집·합성 리뷰 기준"}</small>
               <ul className="review-list">
                 {reviews.data.reviews.map((rv) => (
                   <ReviewRow
@@ -825,7 +842,10 @@ export function Product({
         </section>
       )}
 
-      <div className={"bottom-bar" + (anyPending ? " has-note" : "")}>
+      {<div className={"bottom-bar" + (anyPending || !commerceEnabled || detail.data.catalog_context?.read_only ? " has-note" : "")}>
+        {(!commerceEnabled || detail.data.catalog_context?.read_only) && <p className="muted sm" role="note">{detail.data.catalog_context?.read_only
+          ? commerceEnabled ? "시연 상품 · 찜·장바구니 저장 가능 · 주문·결제 불가" : "테스트 상품 · 조회 전용 · 주문·결제 불가"
+          : "쇼핑 기능을 확인하고 있어요"}</p>}
         {anyPending && (
           // 미확정 write가 있으면 고정 바 최상단에서 바로 복구로 진입 — 상세
           // state-box는 문서 하단이라 첫 화면에서 발견되지 않는다.
@@ -843,6 +863,7 @@ export function Product({
           <WishButton
             className="detail-heart"
             userId={userId}
+            commerceEnabled={commerceEnabled}
             product={{
               product_id: productId,
               name: p.name,
@@ -861,7 +882,8 @@ export function Product({
           <button
             className="btn ghost"
             aria-label={soldOutAll ? "품절" : adding ? "담는 중" : fmtWon(totalWon) + " 담기"}
-            disabled={!selected || adding || anyPending || soldOutAll}
+            disabled={!commerceEnabled || !selected || adding || anyPending || soldOutAll}
+            title={!commerceEnabled ? "현재 조회 전용 QA 환경에서는 장바구니에 저장할 수 없어요" : undefined}
             onClick={add}
           >
             {soldOutAll ? "품절" : adding ? "담는 중…" : fmtWon(totalWon) + " 담기"}
@@ -871,7 +893,7 @@ export function Product({
           <button
             className="btn primary"
             aria-label="구매하기"
-            disabled={!selected || adding || anyPending || soldOutAll}
+            disabled={!checkoutEnabled || !!detail.data.catalog_context?.read_only || !selected || adding || anyPending || soldOutAll}
             onClick={() =>
               selected &&
               onBuyNow({ variant_id: selected.variant_id, quantity: qty })
@@ -880,7 +902,7 @@ export function Product({
             구매하기
           </button>
         </div>
-      </div>
+      </div>}
 
       {sheetOpen && detail.ok && (
         <BottomSheet title="옵션 한번에 보기" onClose={() => setSheetOpen(false)}>
@@ -911,7 +933,7 @@ export function Product({
                       ? v.availability === "SOLD_OUT"
                         ? "품절"
                         : "판매 중단"
-                      : "재고 " + v.stock_qty + "개"}
+                      : variantStockLabel(v.availability, v.stock_qty, !!detail.data.catalog_context?.read_only)}
                   </span>
                 </button>
               );

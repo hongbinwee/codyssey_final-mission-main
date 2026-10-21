@@ -45,11 +45,128 @@ export async function api<T>(path: string, init?: RequestInit): Promise<ApiResul
   const r = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...init,
-    signal: withTimeout(init?.signal, path === "/api/agent/turn" ? AGENT_TIMEOUT_MS : API_TIMEOUT_MS),
+    signal: withTimeout(init?.signal, (path === "/api/agent/turn" || /^\/api\/brain\/conversations\/[^/]+\/turn$/.test(path)) ? AGENT_TIMEOUT_MS : API_TIMEOUT_MS),
   });
   const j: unknown = await r.json();
   if (!isEnvelope(j)) throw new Error("BAD_ENVELOPE");
   return j as ApiResult<T>;
+}
+
+const MAX_TURN_RESPONSE_BYTES = 4 * 1024 * 1024;
+const badTurnResponse = (): ApiResult<never> => ({
+  ok: false,
+  error: { code: "BAD_RESPONSE", message: "서버 응답 형식을 확인하지 못했어요." },
+});
+
+function turnConversationId<T>(result: ApiResult<T>): string | undefined {
+  if (!result.ok || !result.data || typeof result.data !== "object") return;
+  const id = (result.data as { conversation_id?: unknown }).conversation_id;
+  return typeof id === "string" && id.trim() ? id : undefined;
+}
+
+async function readTurnResponse<T>(response: Response, onPreview?: (value: T) => void): Promise<ApiResult<T>> {
+  const ndjson = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() === "application/x-ndjson";
+  const reader = response.body?.getReader();
+  if (!reader) return badTurnResponse();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let buffer = "";
+  let complete: ApiResult<T> | undefined;
+  let conversationId: string | undefined;
+  let sawPreview = false;
+  let sawComplete = false;
+
+  const readEvent = (line: string) => {
+    const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (!normalized.trim()) throw new Error("BAD_RESPONSE");
+    let event: unknown;
+    try {
+      event = JSON.parse(normalized);
+    } catch {
+      throw new Error("BAD_RESPONSE");
+    }
+    if (!event || typeof event !== "object" || Array.isArray(event)) throw new Error("BAD_RESPONSE");
+    const row = event as Record<string, unknown>;
+    if (Object.keys(row).length !== 2 || !("type" in row) || !("response" in row) ||
+      (row.type !== "preview" && row.type !== "complete") || !isEnvelope(row.response)) throw new Error("BAD_RESPONSE");
+
+    if (row.type === "preview") {
+      if (sawPreview || sawComplete || !row.response.ok) throw new Error("BAD_RESPONSE");
+      const id = turnConversationId(row.response as ApiResult<T>);
+      if (!id || (conversationId && conversationId !== id)) throw new Error("BAD_RESPONSE");
+      conversationId = id;
+      sawPreview = true;
+      onPreview?.((row.response as { ok: true; data: T }).data);
+      return;
+    }
+
+    if (sawComplete) throw new Error("BAD_RESPONSE");
+    if (row.response.ok) {
+      const id = turnConversationId(row.response as ApiResult<T>);
+      if (!id || (conversationId && conversationId !== id)) throw new Error("BAD_RESPONSE");
+      conversationId = id;
+    }
+    complete = row.response as ApiResult<T>;
+    sawComplete = true;
+  };
+
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytesRead += chunk.value.byteLength;
+      if (bytesRead > MAX_TURN_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {});
+        return badTurnResponse();
+      }
+      buffer += decoder.decode(chunk.value, { stream: true });
+      if (!ndjson) continue;
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        readEvent(line);
+        newline = buffer.indexOf("\n");
+      }
+    }
+    buffer += decoder.decode();
+    if (!ndjson) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(buffer);
+      } catch {
+        return badTurnResponse();
+      }
+      return isEnvelope(parsed) ? (parsed as ApiResult<T>) : badTurnResponse();
+    }
+    if (buffer.length) readEvent(buffer);
+    return sawComplete && complete ? complete : badTurnResponse();
+  } catch {
+    await reader.cancel().catch(() => {});
+    return badTurnResponse();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/** One-fetch turn request that accepts preview events while retaining JSON fallback. */
+export async function apiTurnSafe<T>(path: string, init?: RequestInit, onPreview?: (value: T) => void): Promise<ApiResult<T>> {
+  try {
+    const headers = new Headers({ "content-type": "application/json" });
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
+    headers.set("accept", "application/x-ndjson");
+    const response = await fetch(path, {
+      ...init,
+      headers,
+      signal: withTimeout(init?.signal, AGENT_TIMEOUT_MS),
+    });
+    return await readTurnResponse<T>(response, onPreview);
+  } catch {
+    return {
+      ok: false,
+      error: { code: "NETWORK", message: "서버에 연결하지 못했어요. 결과를 확인해 주세요." },
+    };
+  }
 }
 
 // transport·timeout·JSON 파싱/봉투 형식 실패를 NETWORK 봉투로 변환한다.

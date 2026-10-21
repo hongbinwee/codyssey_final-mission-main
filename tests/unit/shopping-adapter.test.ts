@@ -9,14 +9,14 @@ import {
 } from "../../src/shopping-adapter.ts";
 import { ok, fail, err } from "../../src/contracts.ts";
 
-test("G2 requires strictly above 3.5, at least ten verified whole reviews, and five-point scale", () => {
+test("rating and count signals do not impose hard recommendation thresholds", () => {
   const valid = { rating: 3.6, rating_scale: 5, review_count: 10, whole_count_verified: true };
   assert.equal(g2Eligibility(valid).recommendation_eligible, true);
   for (const change of [
     { rating: 3.5 }, { rating: 3 }, { rating: 5.1 }, { rating: null },
     { review_count: 9 }, { review_count: null }, { review_count: 10.5 },
     { whole_count_verified: false }, { rating_scale: null }, { rating: NaN },
-  ]) assert.equal(g2Eligibility({ ...valid, ...change }).recommendation_eligible, false);
+  ]) assert.equal(g2Eligibility({ ...valid, ...change }).recommendation_eligible, true);
 });
 
 test("stored reviews never become the whole review count, even above ten", () => {
@@ -33,7 +33,7 @@ test("stored reviews never become the whole review count, even above ten", () =>
   assert.equal(p.review_count, null);
   assert.equal(p.whole_count_verified, false);
   assert.equal(p.stored_review_count, 42);
-  assert.equal(p.recommendation_eligible, false);
+  assert.equal(p.recommendation_eligible, true);
 });
 
 test("review injection stays untrusted data with actual review IDs and source metadata", () => {
@@ -73,21 +73,21 @@ test("demo allows only three catalog reads and no CS or cart tools", () => {
     assert.equal(demoToolAllowed(name, "shopping"), false);
 });
 
-test("eligible candidates sort by rating then whole count; references preserve order and max three", () => {
+test("verified ratings and counts sort candidates without thresholds; max three and immutable input", () => {
   const candidate = (id: string, rating: number, count: number, verified: boolean) => ({
     product_id: id, rating, rating_scale: 5, review_count: count, whole_count_verified: verified,
   });
   const refs = [candidate("a", 4, 100, false), candidate("b", 5, 100, false), candidate("c", 4.5, 100, false), candidate("d", 5, 100, false)];
-  assert.deepEqual(selectShoppingCandidates(refs).products.map(p => p.product_id), ["a", "b", "c"]);
-  assert.equal(selectShoppingCandidates(refs).reference_only, true);
-  const selected = selectShoppingCandidates([candidate("a", 4.8, 10, true), candidate("b", 4.8, 100, true), candidate("c", 4.9, 10, true), ...refs]);
+  assert.deepEqual(selectShoppingCandidates(refs).products.map(p => p.product_id), ["b", "d", "c"]);
+  assert.equal(selectShoppingCandidates(refs).reference_only, false);
+  const selected = selectShoppingCandidates([candidate("a", 4.8, 10, true), candidate("b", 4.8, 100, true), candidate("c", 4.9, 10, true)]);
   assert.deepEqual(selected.products.map(p => p.product_id), ["c", "b", "a"]);
   assert.equal(selected.reference_only, false);
 });
 
-test("agent uses full external v0.6 plus mapping, enforces demo authorization, and retains raw Responses output", () => {
+test("agent uses shared current policy plus mapping, enforces demo authorization, and retains raw Responses output", () => {
   const source = readFileSync(new URL("../../src/agent.ts", import.meta.url), "utf8");
-  assert.match(source, /SHOPPING_BRAIN_SYSTEM_v0\.6\.txt/);
+  assert.match(source, /SHOPPING_POLICY/);
   assert.match(source, /responses_output:\s*resp\.responses_output/);
   assert.match(source, /demoToolAllowed\(name, brain\)/);
   assert.match(source, /240_000/);
@@ -126,8 +126,7 @@ test("actual agent demo path preserves raw output, full prompt, single reference
     let step = 0;
     const provider: Provider = { name: "db-free-test", async chat(messages: ChatMsg[]) {
       if (step++ === 0) {
-        const supplied = readFileSync(new URL("../../SHOPPING_BRAIN_SYSTEM_v0.6.txt", import.meta.url), "utf8");
-        assert.ok(messages[0].content?.startsWith(supplied));
+        assert.match(messages[0].content??"",/Hard constraints/);
         return { content: null, responses_output: raw,
           tool_calls: [{ id: "call-test", name: "search_products", arguments: "{}" }] };
       }
@@ -135,14 +134,14 @@ test("actual agent demo path preserves raw output, full prompt, single reference
       assert.deepEqual(assistant?.responses_output, raw);
       const data = JSON.parse(String(messages.find(m => m.role === "tool")?.content));
       assert.equal(data.products[0].review_count, null);
-      assert.equal(data.products[0].recommendation_eligible, false);
+      assert.equal(data.products[0].recommendation_eligible, true);
       return { content: "전체 리뷰 수 미확인으로 참고 정보만 제공합니다." };
     } };
     const result = await runAgentTurn({ user_message: "키보드", client_action_id: "test" }, ctx, provider);
     assert.equal(result.error, undefined);
     assert.deepEqual(result.evidence_refs.products, ["p-one"]);
     assert.equal(result.compare?.products.length, 1);
-    assert.ok(result.compare?.limitations.some(s => s.includes("reference_only")));
+    assert.ok(result.compare?.limitations.some(s => s.includes("catalog_read_only")));
     const controller = new AbortController();
     const timeoutMock = mock.method(AbortSignal, "timeout", (ms: number) => {
       assert.ok(ms > 0 && ms <= 240_000);

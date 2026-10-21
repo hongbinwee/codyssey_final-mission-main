@@ -15,7 +15,7 @@ const mkDb = (reviewRows: unknown[] = []) => {
   const db = {
     unsafe: async (q: string, params?: unknown[]) => {
       calls.push({ q, params });
-      if (q.includes("FROM reviews")) return reviewRows;
+      if (q.includes("FROM public.reviews")) return reviewRows;
       return [{ id: "x" }];
     },
   };

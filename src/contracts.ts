@@ -51,6 +51,12 @@ export const err = (
 
 export type Availability = "AVAILABLE" | "SOLD_OUT" | "UNAVAILABLE";
 
+export interface CatalogContext {
+  source: "test_items" | "test_items2";
+  read_only: true;
+  is_simulated: true;
+}
+
 export interface MatchedVariant {
   variant_id: string;
   option_values: Record<string, string>;
@@ -73,13 +79,21 @@ export interface ProductSummary {
 }
 
 export interface SearchResult {
+  catalog_context?: CatalogContext;
   items: ProductSummary[];
   shipping_fee_won: number;
   next_cursor: string | null;
   has_more: boolean;
+  browse_summary?: {
+    total_count: number;
+    group_counts: Record<string, number>;
+    subcategory_counts: Record<string, Record<string, number>>;
+    max_discount_rate: number;
+  };
 }
 
 export interface ProductDetail {
+  catalog_context?: CatalogContext;
   product: {
     id: string;
     name: string;
@@ -108,6 +122,7 @@ export interface ReviewItem {
 }
 
 export interface ReviewsResult {
+  catalog_context?: CatalogContext;
   reviews: ReviewItem[];
   total_matching: number;
   returned_count: number;

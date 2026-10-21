@@ -33,6 +33,7 @@ export async function fetchProductsByIds(
 ): Promise<ProductLookup> {
   const wanted = new Set(ids);
   const found = new Map<string, ProductSummary>();
+  const seenCursors = new Set<string>();
   let cursor: string | null = null;
   let finished = false; // 카탈로그 끝까지 실제로 읽었는가
   for (let pages = 0; wanted.size > 0 && pages < MAX_PAGES; pages++) {
@@ -43,11 +44,14 @@ export async function fetchProductsByIds(
         found.set(p.product_id, p);
         wanted.delete(p.product_id);
       }
-    if (!r.data.has_more || !r.data.next_cursor) {
+    if (!r.data.has_more) {
       finished = true;
       break;
     }
-    cursor = r.data.next_cursor;
+    const next = r.data.next_cursor;
+    if (!next || seenCursors.has(next)) break;
+    seenCursors.add(next);
+    cursor = next;
   }
   const ordered = ids
     .filter((id) => found.has(id))

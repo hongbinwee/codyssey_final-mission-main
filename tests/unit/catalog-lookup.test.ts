@@ -92,6 +92,31 @@ describe("fetchProductsByIds", () => {
     }
   });
 
+  test("반복 커서는 즉시 멈추고 남은 id를 unread로 보존한다", async () => {
+    let calls = 0;
+    const r = await fetchProductsByIds(["p-never"], async () => {
+      calls++;
+      return mkPage(["p-other"], "repeat", true);
+    });
+    assert.equal(calls, 2, "반복 커서에서 세 번째 페이지를 요청하지 않는다");
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.deepEqual(r.missing, []);
+      assert.deepEqual(r.unread, ["p-never"]);
+    }
+  });
+
+  test("has_more인데 next_cursor가 없으면 미완료로 분류한다", async () => {
+    const r = await fetchProductsByIds(["p-never"], async () =>
+      mkPage(["p-other"], null, true),
+    );
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.deepEqual(r.missing, []);
+      assert.deepEqual(r.unread, ["p-never"]);
+    }
+  });
+
   test("조회 실패는 ok:false — found/missing과 구분된다", async () => {
     const r = await fetchProductsByIds(["p-a"], async () => ({
       ok: false as const,

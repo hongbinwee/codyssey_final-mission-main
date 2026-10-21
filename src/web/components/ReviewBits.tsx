@@ -35,7 +35,7 @@ export function ReviewRow({
             "src-chip" + (rv.source_kind === "SYNTHETIC" ? " syn" : "")
           }
         >
-          {rv.source_kind === "SYNTHETIC" ? "시연 리뷰" : "실사용 리뷰"}
+          {rv.source_kind === "SYNTHETIC" ? "시연 리뷰" : "수집 리뷰"}
         </span>
         <time className="review-date" dateTime={rv.written_at}>
           {dateText}

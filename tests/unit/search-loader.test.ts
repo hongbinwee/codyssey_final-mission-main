@@ -53,6 +53,14 @@ const fetcher = (pages: ApiResult<SearchResult>[]) => {
 };
 
 describe("loadSearchPages", () => {
+  test("1,500개 상품의 30페이지를 누락 없이 적재한다", async () => {
+    const pages=Array.from({length:30},(_,p)=>page(Array.from({length:50},(_,i)=>`p-${p*50+i}`),p<29?`cursor-${p+1}`:null,p<29));
+    const {fn,urls}=fetcher(pages);
+    const result=await loadSearchPages("/api/products?limit=50",fn,()=>false);
+    assert.ok("ok" in result&&result.ok);
+    assert.equal(result.data.items.length,1500);
+    assert.equal(urls.length,30);
+  });
   test("2페이지 — 커서를 따라가 전체를 모으고 has_more=false로 닫는다", async () => {
     const { fn, urls } = fetcher([
       page(["a", "b"], "c1", true),

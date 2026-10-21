@@ -37,6 +37,24 @@ export function takeDetailResumeIfFresh(
 }
 
 export type ResumeNotice = "OPTION_UNAVAILABLE" | "QTY_REDUCED";
+export type InitialVariant = { variantId: string | null; unavailable: boolean };
+
+// Explicit product links select that exact available option; ordinary links
+// retain the existing first-available default. An invalid explicit target has
+// no selection so the caller can ask the user to choose again.
+export function resolveInitialVariant(
+  variants: { variant_id: string; availability: string }[],
+  requestedVariantId?: string,
+): InitialVariant {
+  const selected = requestedVariantId === undefined
+    ? variants.find((v) => v.availability === "AVAILABLE")
+    : variants.find((v) => v.variant_id === requestedVariantId && v.availability === "AVAILABLE");
+  return {
+    variantId: selected?.variant_id ?? null,
+    unavailable: requestedVariantId !== undefined && !selected,
+  };
+}
+
 export type ResumePlan = {
   // true면 스냅샷을 적용 — variantId/qty/scrollY를 화면에 반영한다.
   apply: boolean;

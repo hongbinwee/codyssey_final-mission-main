@@ -30,6 +30,7 @@ export function MyShop({
   onOpenOrder,
   onOpenProduct,
   onOpenShop,
+  commerceEnabled,
 }: {
   userId: string | null;
   onOpenRecent: () => void;
@@ -38,6 +39,7 @@ export function MyShop({
   onOpenOrder: (orderId: string) => void;
   onOpenProduct: (productId: string) => void;
   onOpenShop: () => void;
+  commerceEnabled: boolean;
 }) {
   const [orders, setOrders] = useState<ApiResult<OrdersPage> | null>(null);
   const [lookup, setLookup] = useState<ProductLookup | null>(null);
@@ -49,7 +51,7 @@ export function MyShop({
   const recentIds = listRecentViews(userId);
   // 찜 건수는 서버 확정 목록 기준 — useWishlist 내부가 scope 확정 후
   // 적재를 보장한다(미확정이면 0으로 표시하지 않고 칩을 숨긴다).
-  const wishCount = useWishlist(userId).count;
+  const wishCount = useWishlist(commerceEnabled ? userId : null).count;
 
   async function loadOrders() {
     const live = ordGate.begin();
