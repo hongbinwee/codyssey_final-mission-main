@@ -128,14 +128,14 @@ test('recommendation explanation defaults to a configurable 120 second deadline'
 });
 
 test('normal recommendations use one LLM call, stay ranked and cannot fabricate catalog reasons',async()=>{
- let calls=0;
- const respond=createLlmGroundedResponder({async chat(messages,tools){calls++;assert.deepEqual(tools,[]);
+ let calls=0;const efforts:unknown[]=[];
+ const respond=createLlmGroundedResponder({async chat(messages,tools,options){calls++;efforts.push(options?.reasoningEffort);assert.deepEqual(tools,[]);
    const data=JSON.parse(messages[1].content!);assert.equal(data.candidates[0].evidence.length,0);
    assert.equal(data.shoppingPlan.maxTotalWon,20000);
    return {content:JSON.stringify({recommendations:[{productId:'p-mask',variantId:'v-mask',factIds:['budget'],reviewClaims:[]}]})};
  }});
  const result=await respond({originalQuestion:'2만원 이하 마스크팩 추천',ranking:ranking(),evidence:[],plan,mode:'RECOMMEND'} as never);
- assert.equal(calls,1);assert.equal(result.kind,'LLM_GROUNDED');assert.equal(result.items.length,1);
+ assert.equal(calls,1);assert.deepEqual(efforts,['low']);assert.equal(result.kind,'LLM_GROUNDED');assert.equal(result.items.length,1);
  assert.match(result.items[0].reason!,/13,000원|예산/);assert.deepEqual(result.citations,[]);
  assert.doesNotMatch(JSON.stringify(result),/보습|미백|실제 구매/);
 });

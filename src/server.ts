@@ -23,6 +23,7 @@ import { runAgentTurn } from "./agent.ts";
 import { getProvider } from "./llm.ts";
 import { createAiDemoGate } from "./ai-demo-access.ts";
 import {brainMutationAllowed} from "./brain/csrf.ts";
+import {sendBrainReply} from './brain/turn-stream.ts';
 import {
   isolatedEnvTouched,
   planIsolatedConnect,
@@ -387,8 +388,9 @@ export async function start(port = config.port, deps: ServerStartDeps = {}) {
         if(mutating&&!brainMutationAllowed(req.headers,env.BRAIN_PUBLIC_ORIGIN))
           return json(res,403,{ok:false,error:{code:"CSRF_REJECTED",message:"허용되지 않은 요청 출처"}});
         const submitted = req.method === "POST" ? await body(req) : {};
-        const reply = await brainRuntime.handle(req.method ?? "", p, ctx.actorUserId, submitted);
-        return json(res, reply.status, reply.body);
+        await sendBrainReply(req,res,onPreview=>brainRuntime.handle(req.method??'',p,ctx.actorUserId,submitted,
+          onPreview?{onPreview}:undefined),req.method==='POST'&&/^\/api\/brain\/conversations\/[a-fA-F0-9-]+\/turn$/.test(p));
+        return;
       }
 
       if (p === "/api/products" && req.method === "GET") {

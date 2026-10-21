@@ -9,7 +9,7 @@ import type {PreparedTurn,ResearchDeps,ResearchResult} from "./read-flow.ts";
 import {prepareTurn,resolveTurnPlan,retrieveTurn,RetrievalUnavailableError} from "./read-flow.ts";
 import type {ShoppingPlan} from "./shopping-plan.ts";
 import {buildGroundedExplanation,type GroundedExplanation,type GroundedResponder} from "./grounded-response.ts";
-import type {BrainGraphPort} from "./api.ts";
+import type {BrainGraphPort,BrainTurnObserver} from "./api.ts";
 import type {TurnLock,TurnLease} from "./turn-lock.ts";
 import type {FencedTurns} from "./fenced-turns.ts";
 import type {BrainRoute} from "./routing.ts";
@@ -99,6 +99,7 @@ export function createPersistentResearchGraph(
  // may run concurrently without sharing lock ownership.
  if(fencing&&!turnLock)throw Error("fenced Brain requires distributed turn lock");
  const activeLease=new AsyncLocalStorage<TurnLease>();
+ const activeObserver=new AsyncLocalStorage<BrainTurnObserver>();
  const verify=async()=>{await activeLease.getStore()?.assertHeld();};
  const compiled=new StateGraph(State)
    .addNode("prepare",async state=>{
@@ -294,6 +295,19 @@ export function createPersistentResearchGraph(
    })
    .addNode("respond",async state=>{
      const started=performance.now();
+     const useModel=!!groundedResponder&&(!deps.fastResponses||state.intentRoute.kind==="REVIEW_COMPARE");
+     const onPreview=activeObserver.getStore()?.onPreview;
+     if(useModel&&onPreview){
+       const ranked=state.researchResult.ranking.ranked.filter(row=>row.candidate.commerceVerified===true);
+       const ranking={...state.researchResult.ranking,ranked,referenceOnly:[]};
+       const explanation=buildGroundedExplanation(ranking,state.evidence,state.shoppingPlan);
+       if(explanation.items.length){
+         await verify();
+         // Per-request transport only: never checkpoint the observer or publish this as a final receipt.
+         try{onPreview({...state.researchResult,ranking,explanation,datasetVersion:deps.datasetVersion,
+           trace:{...state.researchResult.trace,routeMs:state.routeMs,candidatesReadyMs:performance.now()-state.prepared.startedAt}});}catch{}
+       }
+     }
      const researchResult={
        ...state.researchResult,datasetVersion:deps.datasetVersion,
        explanation:groundedResponder&&(!deps.fastResponses||state.intentRoute.kind==="REVIEW_COMPARE")
@@ -348,7 +362,7 @@ export function createPersistentResearchGraph(
  // The map is scoped to one compiled graph instance and never authorizes a user.
  const inFlight=new Map<string,{actorUserId:string;clientActionId:string;userMessage:string;pageContextKey:string;promise:Promise<ResearchResult>}>();
  return {
-   async invoke(input:GraphRequest){
+   async invoke(input:GraphRequest,observer?:BrainTurnObserver){
      await deps.conversations.assertOwned(input.actorUserId,input.conversationId);
      const pending=inFlight.get(input.conversationId);
      if(pending){
@@ -409,7 +423,8 @@ export function createPersistentResearchGraph(
        return run.researchResult;
        };
        try{
-         return lease?await activeLease.run(lease,execute):await execute();
+         const observed=()=>activeObserver.run(observer??{},execute);
+         return lease?await activeLease.run(lease,observed):await observed();
        }finally{if(lease)await lease.release();}
      })();
      inFlight.set(input.conversationId,{

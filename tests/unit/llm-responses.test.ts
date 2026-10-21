@@ -227,16 +227,20 @@ test("Anthropic Messages converts legacy assistant tool calls and groups adjacen
   ]);
 });
 
-test("Anthropic adaptive thinking is opt-in and sends only adaptive high", async () => {
+test("Anthropic adaptive thinking keeps configured high by default and accepts per-call low effort", async () => {
   Object.assign(config, {
     llmApiFormat: "anthropic_messages", llmModel: "claude-sonnet-4",
     llmAnthropicThinking: "adaptive", llmAnthropicEffort: "high",
   });
-  const requests = capture([Response.json({ id: "msg_test", type: "message", role: "assistant", model: "claude-sonnet-4-6",
-    content: [{ type: "text", text: "Ready" }], stop_reason: "end_turn", usage: { input_tokens: 2, output_tokens: 1 } })]);
+  const answer=()=>Response.json({ id: "msg_test", type: "message", role: "assistant", model: "claude-sonnet-4-6",
+    content: [{ type: "text", text: "Ready" }], stop_reason: "end_turn", usage: { input_tokens: 2, output_tokens: 1 } });
+  const requests = capture([answer(),answer()]);
   await liveProvider().chat([{ role: "user", content: "Run a brief catalog lookup." }], []);
+  await liveProvider().chat([{ role: "user", content: "Run a brief catalog lookup." }], [], {reasoningEffort:"low"});
   assert.deepEqual(requests[0].body.thinking, { type: "adaptive" });
   assert.deepEqual(requests[0].body.output_config, { effort: "high" });
+  assert.deepEqual(requests[1].body.thinking, { type: "adaptive" });
+  assert.deepEqual(requests[1].body.output_config, { effort: "low" });
   assert.equal(requests[0].body.model, "claude-sonnet-4");
   assert.equal("reasoning" in requests[0].body, false);
   assert.equal("reasoning_effort" in requests[0].body, false);

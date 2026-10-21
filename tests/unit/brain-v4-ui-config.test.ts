@@ -81,6 +81,18 @@ test("BrainAnswer renders safe bold text, preserves paragraphs and line breaks, 
  assert.match(preview,/토스쇼핑 AI Brain/);
 });
 
+test("BrainPreview keeps a streamed preview inside its entry until the final reply arrives",()=>{
+ const preview=readFileSync(new URL("../../src/web/components/BrainPreview.tsx",import.meta.url),"utf8");
+ assert.match(preview,/preview\?:BrainReply/);
+ assert.match(preview,/apiTurnSafe<BrainReply>/);
+ assert.match(preview,/preview\.conversation_id!==id/);
+ assert.match(preview,/const turnReply=e\.preview\?\?e\.reply/);
+ assert.match(preview,/추천 상품 정보는 확인했고 설명을 정리하고 있어요…/);
+ assert.match(preview,/setSourceMessage\(r\.data\.message_id\)/);
+ assert.match(preview,/onExcludeProduct=\{i===entries\.length-1&&!e\.preview&&e\.status==="completed"&&!busy/);
+ assert.match(preview,/setEntries\(data\.entries\.map\(entry=>\(\{\.\.\.entry,status:"completed"\}\)\)\)/);
+});
+
 test("retrieval retry creates a fresh action while generic follow-ups are available only for safe result states",()=>{
  const pageContext={screen:"reviews",product_id:"page-product-one"};
  const retry=createRetrievalRetryEntry({text:"상품 찾아줘",clientActionId:"failed-action",conversationId:"conversation-one",pageContext},"other-conversation");

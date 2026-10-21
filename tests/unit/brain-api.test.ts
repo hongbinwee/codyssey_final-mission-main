@@ -78,3 +78,17 @@ test("state endpoint returns metadata only, never raw checkpoint",async()=>{
  assert.equal(res.status,200);
  assert.doesNotMatch(JSON.stringify(res.body),/NEVER RETURN/);
 });
+
+test('turn progress uses the same response envelope without exposing raw graph context',async()=>{
+ const previews:unknown[]=[];
+ const result={conversationId:id,messageId:mid,ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},trace:{totalMs:5},secret:'never expose'};
+ const api=createBrainApi({conversations:{} as never,preferences:{} as never,graph:{
+  async invoke(_input,observer){observer?.onPreview?.(result);return result;},async getOwnedState(){return {values:{}};},
+ }});
+ const response=await api('POST','/api/brain/conversations/'+id+'/turn','user-a',{user_message:'상품 추천',client_action_id:'stream'},
+  {onPreview:reply=>previews.push(reply)});
+ assert.equal(previews.length,1);assert.doesNotMatch(JSON.stringify(previews),/never expose|secret/);
+ assert.equal(response.status,200);
+ const data=(previews[0] as {body:{ok:true;data:{conversation_id:string;read_only:boolean}}}).body.data;
+ assert.equal(data.conversation_id,id);assert.equal(data.read_only,true);
+});

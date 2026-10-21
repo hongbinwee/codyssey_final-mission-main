@@ -7,11 +7,14 @@ import type {BrainIntentKind} from "./routing.ts";
 import {executionMode} from "./execution-mode.ts";
 import {sanitizePageContext,type SafePageContext} from './page-context.ts';
 
-export interface BrainGraphPort {
-  invoke(input:{actorUserId:string;conversationId:string;requestId:string;clientActionId:string;userMessage:string;pageContext?:SafePageContext}):Promise<{
+export type BrainGraphResult={
     conversationId:string;messageId:string;ranking:RankingResult;trace:Record<string,number>;
     shoppingPlan?:ShoppingPlan;explanation?:GroundedExplanation;intentKind?:BrainIntentKind;datasetVersion?:string;
-  }>;
+    pendingReview?:import('./contracts.ts').ReviewSummaryRequest;
+};
+export type BrainTurnObserver={onPreview?:(result:BrainGraphResult)=>void};
+export interface BrainGraphPort {
+  invoke(input:{actorUserId:string;conversationId:string;requestId:string;clientActionId:string;userMessage:string;pageContext?:SafePageContext},observer?:BrainTurnObserver):Promise<BrainGraphResult>;
   getOwnedState(actorUserId:string,conversationId:string):Promise<{values?:Record<string,unknown>}>;
 }
 export interface BrainApiDeps {
@@ -35,7 +38,7 @@ export const brainPath=(p:string):boolean=>p==="/api/brain"||p.startsWith("/api/
  * must pass an already verified session actor. No global Commerce mutations.
  */
 export function createBrainApi(deps:BrainApiDeps) {
-  return async function handle(method:string,path:string,actorUserId:string,rawBody:unknown):Promise<BrainApiResponse> {
+  return async function handle(method:string,path:string,actorUserId:string,rawBody:unknown,observer?:{onPreview?:(reply:BrainApiResponse)=>void}):Promise<BrainApiResponse> {
     if(!required(actorUserId,256))return fail(401,"UNAUTHENTICATED","로그인이 필요합니다");
     const body=rec(rawBody);
     try {
@@ -93,13 +96,15 @@ export function createBrainApi(deps:BrainApiDeps) {
         if(executionMode(body.execution_mode)==="DEEP")return fail(501,"DEEP_NOT_AVAILABLE","꼼꼼한 비교 모드는 아직 준비 중입니다. 현재 상품 검색과 리뷰 비교를 이용해 주세요.");
         const started=performance.now();
         const pageContext=sanitizePageContext(body.page_context);
+        const replyData=(result:BrainGraphResult)=>({conversation_id:result.conversationId,message_id:result.messageId,
+          ranking:result.ranking,trace:{...result.trace,graphWallMs:performance.now()-started},read_only:true,intent_kind:result.intentKind,
+          shopping_plan:result.shoppingPlan??null,explanation:result.explanation??null});
         const result=await deps.graph.invoke({actorUserId,conversationId:turn[1],
           requestId:crypto.randomUUID(),clientActionId:body.client_action_id,userMessage:body.user_message,
-          ...(pageContext?{pageContext}:{})});
-        const graphWallMs=performance.now()-started;
-        return success({conversation_id:result.conversationId,message_id:result.messageId,
-          ranking:result.ranking,trace:{...result.trace,graphWallMs},read_only:true,intent_kind:result.intentKind,
-          shopping_plan:result.shoppingPlan??null,explanation:result.explanation??null});
+          ...(pageContext?{pageContext}:{})},observer?.onPreview?{onPreview:preview=>{
+            if(preview.conversationId===turn[1])observer.onPreview!(success(replyData(preview)));
+          }}:undefined);
+        return success(replyData(result));
       }
       const state=path.match(/^\/api\/brain\/conversations\/([a-fA-F0-9-]+)\/state$/);
       if(method==="GET"&&state){

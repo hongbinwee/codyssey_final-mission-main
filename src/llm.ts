@@ -52,6 +52,7 @@ export interface Provider {
   name: string;
   chat(messages: ChatMsg[], tools: unknown[], options?: {
     signal?: AbortSignal; requestId?: string; operation?: "recommendation";
+    reasoningEffort?: "low" | "medium" | "high";
   }): Promise<ChatResponse>;
 }
 
@@ -297,7 +298,7 @@ export function liveProvider(): Provider {
                 ...(tools.length ? { tools: anthropicTools(tools) } : {}),
                 ...(config.llmAnthropicThinking === "adaptive" ? {
                   thinking: { type: "adaptive" },
-                  output_config: { effort: config.llmAnthropicEffort },
+                  output_config: { effort: options?.reasoningEffort ?? config.llmAnthropicEffort },
                 } : {}),
               }
             : chatCompletions

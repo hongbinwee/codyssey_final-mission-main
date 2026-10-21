@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from "react";
-import {apiSafe,newActionKey,fmtWon} from "../api.ts";
+import {apiSafe,apiTurnSafe,newActionKey,fmtWon} from "../api.ts";
 import {resolveBrainInterviewState} from "../brain-interview-state.ts";
 import {BrainAnswer} from './BrainAnswer.tsx';
 import {reviewSortAspectLabel} from "../../brain/review-sort.ts";
@@ -28,7 +28,7 @@ type BrainReply={
 type MemoryItem={key:string;value:string;updatedAt:string};
 type PricePreference="value"|"balanced"|"performance";
 type PreferencePromptStatus="idle"|"requesting"|"confirming"|"saving"|"saved"|"failed";
-type Entry={text:string;clientActionId?:string;conversationId?:string;pageContext?:SafePageContext;reply?:BrainReply;status?:"sending"|"failed"|"completed";failure?:string};
+type Entry={text:string;clientActionId?:string;conversationId?:string;pageContext?:SafePageContext;preview?:BrainReply;reply?:BrainReply;status?:"sending"|"failed"|"completed";failure?:string};
 type History={conversationId:string|null;entries:Entry[]};
 type Conversation={id:string;title:string|null;createdAt:string};
 const priceLabels:Record<string,string>={value:"가성비 중심",balanced:"균형",performance:"성능 중심",important:"중요",normal:"보통"};
@@ -247,7 +247,7 @@ export function BrainPreview({onClose,onOpenProduct,pageContext}:{onClose:()=>vo
    if(generation===epoch.current&&r.ok)setConversations(r.data.conversations);
  };
  const applyHistory=(data:History)=>{
-   setConversation(data.conversationId);setEntries(data.entries);
+   setConversation(data.conversationId);setEntries(data.entries.map(entry=>({...entry,status:"completed"})));
    setSourceMessage(data.entries.at(-1)?.reply?.message_id??null);
    setPending(null);setPendingValue(null);setPreferenceStatus("idle");setPreferenceError("");setDeferredSourceMessage(null);setInput("");
  };
@@ -289,13 +289,17 @@ export function BrainPreview({onClose,onOpenProduct,pageContext}:{onClose:()=>vo
        if(generation!==epoch.current)return;
        initialCreation.current=null;id=created.data.id;setConversation(id);update({conversationId:id});
      }
-     const r=await apiSafe<BrainReply>("/api/brain/conversations/"+encodeURIComponent(id)+"/turn",
+     const r=await apiTurnSafe<BrainReply>("/api/brain/conversations/"+encodeURIComponent(id)+"/turn",
         {method:"POST",body:JSON.stringify({user_message:entry.text,client_action_id:entry.clientActionId,
-          ...(entry.pageContext?{page_context:entry.pageContext}:{})})});
+          ...(entry.pageContext?{page_context:entry.pageContext}:{})})},preview=>{
+       if(generation!==epoch.current)return;
+       if(preview.conversation_id!==id)throw new Error("BAD_RESPONSE");
+       update({preview});
+     });
      if(generation!==epoch.current)return;
      if(!r.ok){update({status:"failed",failure:friendlyFailure(r.error.code)});return;}
      if(r.data.conversation_id!==id){update({status:"failed",failure:"대화 결과를 확인하지 못했어요. 다시 시도해 주세요."});return;}
-     update({reply:r.data,status:"completed",failure:undefined,conversationId:id});setSourceMessage(r.data.message_id);
+     update({preview:undefined,reply:r.data,status:"completed",failure:undefined,conversationId:id});setSourceMessage(r.data.message_id);
      await listConversations(generation);
    }finally{if(generation===epoch.current){lock.current=false;setBusy(false);}}
  };
@@ -390,29 +394,29 @@ export function BrainPreview({onClose,onOpenProduct,pageContext}:{onClose:()=>vo
    </div>
    <div className="agent-body">
      {entries.length===0&&<p className="muted sm">찾는 상품과 원하는 조건을 알려주세요. 새 대화에서도 직접 저장한 장기 선호는 유지돼요.</p>}
-     {entries.map((e,i)=><div className="brain-turn" key={e.clientActionId??i}>
+     {entries.map((e,i)=>{const turnReply=e.preview??e.reply;return <div className="brain-turn" key={e.clientActionId??i}>
         <div className="msg user"><p>{userFacingMessage(e.text)}</p></div>
-       {e.status==="sending"&&<p role="status" className="muted sm">토스쇼핑 AI Brain이 요청을 살펴보고 있어요…</p>}
+       {e.status==="sending"&&<p role="status" className="muted sm">{e.preview?"추천 상품 정보는 확인했고 설명을 정리하고 있어요…":"토스쇼핑 AI Brain이 요청을 살펴보고 있어요…"}</p>}
        {e.status==="failed"&&<div className="state-box error"><p role="alert">{e.failure}</p>
          <button className="link" disabled={busy} onClick={()=>retry(e)}>{isRetrievalUnavailable(e)?"다시 검색":"다시 시도"}</button>
          <button className="link" disabled={busy} onClick={()=>editQuestion(e)}>{isRetrievalUnavailable(e)?"조건 바꾸기":"질문 수정"}</button>
        </div>}
-       {e.reply&&<><div className="brain-assistant-message"><span className="brain-avatar" aria-hidden="true">✦</span><div className="msg ai"><BrainAnswer text={e.reply.explanation?.failure
-         ?e.reply.explanation.failure.code==="RETRIEVAL_UNAVAILABLE"
-           ?e.reply.explanation.text.trim()||friendlyFailure(e.reply.explanation.failure.code)
-           :e.reply.explanation.items.length>0?"AI 설명이 지연되어 확인된 상품 정보로 먼저 추천드려요. "+e.reply.explanation.text
-             :friendlyFailure(e.reply.explanation.failure.code)+((e.reply.ranking.ranked.length+e.reply.ranking.referenceOnly.length)>0?" 아래 검색 결과는 확인할 수 있어요.":"")
-         :e.reply.explanation?.text??"상품 정보를 확인했어요."}/></div></div>
+       {turnReply&&<><div className="brain-assistant-message"><span className="brain-avatar" aria-hidden="true">✦</span><div className="msg ai"><BrainAnswer text={turnReply.explanation?.failure
+         ?turnReply.explanation.failure.code==="RETRIEVAL_UNAVAILABLE"
+           ?turnReply.explanation.text.trim()||friendlyFailure(turnReply.explanation.failure.code)
+           :turnReply.explanation.items.length>0?"AI 설명이 지연되어 확인된 상품 정보로 먼저 추천드려요. "+turnReply.explanation.text
+             :friendlyFailure(turnReply.explanation.failure.code)+((turnReply.ranking.ranked.length+turnReply.ranking.referenceOnly.length)>0?" 아래 검색 결과는 확인할 수 있어요.":"")
+         :turnReply.explanation?.text??"상품 정보를 확인했어요."}/></div></div>
          {isRetrievalUnavailable(e)&&<div className="brain-recovery-actions">
            <button className="link" disabled={busy} onClick={()=>retry(e)}>다시 검색</button>
            <button className="link" disabled={busy} onClick={()=>editQuestion(e)}>조건 바꾸기</button>
          </div>}
-          {e.reply.explanation?.kind==="REVIEW_SUMMARY"&&e.reply.explanation.reviewSummary&&<BrainReviewSummary
-            summary={e.reply.explanation.reviewSummary} onOpenProduct={onOpenProduct} onChooseProduct={sendChoice}/>}
-          {e.reply.explanation?.kind==="REVIEW_ANALYSIS"&&e.reply.explanation.reviewAnalysis&&<BrainReviewAnalysis analysis={e.reply.explanation.reviewAnalysis}/>}
-          {e.reply.explanation?.kind!=="CONVERSATION"&&e.reply.explanation?.kind!=="CLARIFICATION"&&e.reply.explanation?.kind!=="REVIEW_SUMMARY"&&e.reply.explanation?.kind!=="REVIEW_ANALYSIS"&&<BrainRanking explanation={e.reply.explanation} ranking={e.reply.ranking} onOpenProduct={onOpenProduct} onExcludeProduct={i===entries.length-1&&!busy?(id)=>sendChoice(`이 상품 제외: ${id}`):undefined}/>}
+          {turnReply.explanation?.kind==="REVIEW_SUMMARY"&&turnReply.explanation.reviewSummary&&<BrainReviewSummary
+            summary={turnReply.explanation.reviewSummary} onOpenProduct={onOpenProduct} onChooseProduct={sendChoice}/>}
+          {turnReply.explanation?.kind==="REVIEW_ANALYSIS"&&turnReply.explanation.reviewAnalysis&&<BrainReviewAnalysis analysis={turnReply.explanation.reviewAnalysis}/>}
+          {turnReply.explanation?.kind!=="CONVERSATION"&&turnReply.explanation?.kind!=="CLARIFICATION"&&turnReply.explanation?.kind!=="REVIEW_SUMMARY"&&turnReply.explanation?.kind!=="REVIEW_ANALYSIS"&&<BrainRanking explanation={turnReply.explanation} ranking={turnReply.ranking} onOpenProduct={onOpenProduct} onExcludeProduct={i===entries.length-1&&!e.preview&&e.status==="completed"&&!busy?(id)=>sendChoice(`이 상품 제외: ${id}`):undefined}/>}
        </>}
-     </div>)}
+     </div>;})}
       {showPreferencePrompt&&<BrainPreferencePrompt selected={selected} storedValue={storedPricePreference} status={preferenceStatus}
         pending={!!pending} busy={busy} error={preferenceError}
         onSelect={value=>{selectionTouched.current=true;setSelected(value);setPending(null);setPendingValue(null);setPreferenceStatus("idle");setPreferenceError("");setNotice("");}}

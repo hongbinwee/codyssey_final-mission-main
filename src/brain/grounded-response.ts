@@ -351,7 +351,7 @@ Select 1-3 supplied factIds per product to explain its fit and differences for t
      {role:'user',content:JSON.stringify({originalQuestion:input.originalQuestion.slice(0,1000),shoppingPlan:input.plan,
        ...(input.context?{untrusted_dialogue_context:input.context}:{}),
        candidates:prepared.map(row=>({...row.prompt,facts:[...facts.get(row.prompt.productId)!].map(([id,text])=>({id,text}))}))})}],[],
-       {signal:AbortSignal.timeout(timeoutMs),requestId,operation:'recommendation'});
+       {signal:AbortSignal.timeout(timeoutMs),requestId,operation:'recommendation',reasoningEffort:'low'});
    responseReceived=true;
    content=response.content;tools=response.tool_calls;
  }catch(error){
