@@ -72,12 +72,25 @@ export function parseHermesToolArgs(name:HermesToolName,raw:string,planning?:{me
  return {query:typeof input.query==="string"?input.query:"",...(product?{productId:input.product_id as string}:{}),
   ...(order?{orderId:input.order_id as string}:{})};
 }
+/** The Agent can end its own turn; these are semantic actions, not Commerce permissions. */
+const agentOutcomeDefinitions=[
+ {type:"function",function:{name:"respond_to_user",
+  description:"Respond conversationally without retrieving data. Use for greetings, capabilities, small talk, unsupported write requests, or when existing verified context is sufficient. Never claim a Tool result you did not receive.",
+  parameters:{type:"object",properties:{text:{type:"string",minLength:1,maxLength:800},
+    intent_kind:{type:"string",enum:["GREETING","SOCIAL","CAPABILITY","UNCERTAIN"]}},
+   required:["text"],additionalProperties:false}}},
+ {type:"function",function:{name:"ask_user",
+  description:"Ask one specific question only when necessary to continue the current user goal; do not require optional budget for a concrete product search.",
+  parameters:{type:"object",properties:{question:{type:"string",minLength:1,maxLength:140}},
+   required:["question"],additionalProperties:false}}}
+];
 /** Shared authoritative tool catalogue for both the original bounded loop and LangGraph H4. */
 export function hermesToolDefinitions(tools:HermesToolPort,offerSearch=true,agentPlanning=false){
  const defs=agentPlanning?HERMES_BASE_DEFINITIONS.map(d=>d.function.name==="search_products"?
   definition("search_products","Propose current shopping intent and call Commerce-verified RAG. Preserve the confirmed plan: query/budget/requirements modes must reflect the CURRENT user message; never invent a hard constraint.",agentSearchSchema):d):HERMES_BASE_DEFINITIONS;
  return [...(offerSearch?defs:defs.filter(d=>d.function.name!=="search_products")),
-  ...conditionalDefs.filter(d=>typeof tools[d.key]==="function").map(d=>definition(d.name,d.description,d.schema))];
+  ...conditionalDefs.filter(d=>typeof tools[d.key]==="function").map(d=>definition(d.name,d.description,d.schema)),
+  ...(agentPlanning?agentOutcomeDefinitions:[])];
 }
 /** The model can make a second selection after it reads the first real Tool observation. */
 export async function runHermesReadLoop(

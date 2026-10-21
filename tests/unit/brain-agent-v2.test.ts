@@ -240,3 +240,91 @@ test("V2 follow-up reads only the first displayed product's reviews and retains 
  assert.deepEqual(second.shoppingPlan?.lastDisplayedProductIds,["p-serum"]);
  assert.match(second.explanation?.text??"",/향이 강해요/);
 });
+
+test("V2 Agent, not the regex router, answers arbitrary capability phrasing",async()=>{
+ let routed=0,planned=0,retrieved=0,chatCalls=0;
+ const data={
+  agentPlanning:true,
+  route:async()=>{routed++;throw Error("semantic router must not execute");},
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},
+  intent:{extract:async()=>{planned++;throw Error("separate intent planner must not execute");}},
+  retriever:{search:async()=>{retrieved++;throw Error("RAG must not execute");}},
+  hermes:{provider:{chat:async(messages:import("../../src/llm.ts").ChatMsg[],defs:unknown)=>{
+    chatCalls++;
+    const data=JSON.parse(messages.find(m=>m.role==="user")?.content??"{}");
+    assert.equal(data.user_message,"넌 뭘할수있어?");
+    assert.ok((defs as Array<{function:{name:string}}>).some(d=>d.function.name==="respond_to_user"));
+    assert.ok((defs as Array<{function:{name:string}}>).some(d=>d.function.name==="ask_user"));
+    return {content:null,tool_calls:[{id:"answer",name:"respond_to_user",
+     arguments:JSON.stringify({text:"상품 검색과 리뷰 비교, 찜 목록 조회를 도와드릴 수 있어요.",intent_kind:"CAPABILITY"})}]};
+   }},
+   history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const result=await createPersistentResearchGraph(data,new MemorySaver() as never)
+  .invoke(request("넌 뭘할수있어?"));
+ assert.equal(result.intentKind,"CAPABILITY");
+ assert.equal(result.explanation?.text,"상품 검색과 리뷰 비교, 찜 목록 조회를 도와드릴 수 있어요.");
+ assert.deepEqual([routed,planned,retrieved,chatCalls],[0,0,0,1]);
+ assert.equal(result.trace.hermesToolCalls,0);
+});
+test("V2 combines greeting and wishlist read through one Agent rather than an early GREETING route",async()=>{
+ let routes=0,rag=0,tool=0;
+ const data={
+  agentPlanning:true,
+  route:async()=>{routes++;throw Error("no router");},
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},intent:{extract:async()=>{throw Error("no planner");}},
+  retriever:{search:async()=>{rag++;throw Error("no RAG");}},
+  wishlist:async()=>{tool++;return [{productId:"owned-1",name:"무선 이어폰",active:true,minPriceWon:18000}];},
+  hermes:{provider:{chat:async(messages:import("../../src/llm.ts").ChatMsg[])=>{
+   const tools=messages.filter(m=>m.role==="tool");
+   if(!tools.length)return {content:null,tool_calls:[{id:"wish",name:"get_wishlist",arguments:"{}"}]};
+   assert.equal(tools[0].tool_call_id,"wish");
+   assert.match(tools[0].content??"",/owned-1/);
+   return {content:"조회한 찜 목록을 알려드릴게요."};
+  }},history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const result=await createPersistentResearchGraph(data,new MemorySaver() as never)
+  .invoke(request("안녕! 내가 찜한 상품도 보여줄래?"));
+ assert.equal(routes,0);assert.equal(rag,0);assert.equal(tool,1);
+ assert.match(result.explanation?.text??"",/무선 이어폰/);
+ assert.equal(result.taskState?.kind,"WISHLIST");
+ assert.equal(result.trace.hermesToolCalls,1);
+});
+test("V2 Agent asks a question directly and keeps prior shopping state across small talk",async()=>{
+ const conversationId=crypto.randomUUID();
+ const data={
+  agentPlanning:true,route:async()=>{throw Error("no intent routing");},
+  conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},intent:{extract:async()=>{throw Error("no planner");}},
+  retriever:{search:async()=>{throw Error("no RAG");}},
+  hermes:{provider:{chat:async(messages:import("../../src/llm.ts").ChatMsg[])=>{
+   const text=JSON.parse(messages.find(m=>m.role==="user")?.content??"{}").user_message;
+   if(text==="상품을 좀 찾아줘")return {content:null,tool_calls:[{id:"ask",name:"ask_user",
+     arguments:'{"question":"어떤 종류의 상품을 찾으세요?"}'}]};
+   return {content:"안녕하세요! 이전 조건도 기억하고 있어요."};
+  }},history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const g=createPersistentResearchGraph(data,new MemorySaver() as never);
+ const first=await g.invoke({...request("상품을 좀 찾아줘"),conversationId});
+ assert.equal(first.explanation?.text,"어떤 종류의 상품을 찾으세요?");
+ assert.equal(first.taskState?.phase,"AWAITING_INPUT");
+ const second=await g.invoke({...request("안녕, 고마워"),conversationId});
+ assert.match(second.explanation?.text??"",/안녕하세요/);
+ assert.equal(second.taskState?.phase,"AWAITING_INPUT");
+});
+test("V2 cannot treat a model-requested write as a callable Commerce Tool",async()=>{
+ const data={
+  agentPlanning:true,conversations:{assertOwned:async()=>{},appendUserMessage:async()=>crypto.randomUUID()},
+  memory:{list:async()=>[]},intent:{extract:async()=>{throw Error("no intent planner");}},
+  retriever:{search:async()=>{throw Error("RAG not allowed");}},
+  hermes:{provider:{chat:async()=>({content:null,tool_calls:[{id:"bad",
+    name:"cancel_order",arguments:'{"order_id":"owned-1"}'}]})},
+   history:async()=>[],reviewCount:async()=>null}
+ } as unknown as ResearchDeps;
+ const result=await createPersistentResearchGraph(data,new MemorySaver() as never)
+  .invoke(request("내 주문 취소해줘"));
+ assert.equal(result.trace.hermesToolCalls,0);
+ assert.match(result.explanation?.text??"",/확인된 조회 결과가 없어요/);
+});

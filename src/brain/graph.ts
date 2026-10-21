@@ -38,7 +38,7 @@ const State=Annotation.Root({
  activeTask:Annotation<AgentTaskState|null>(),
  agentRead:Annotation<boolean>(),agentAction:Annotation<AgentAction|null>(),
  agentObservations:Annotation<AgentObservation[]>(),agentTranscript:Annotation<ChatMsg[]>(),agentStart:Annotation<number>(),
- agentSearched:Annotation<boolean>(),agentStop:Annotation<string|null>(),agentQuestion:Annotation<string|null>(),
+ agentSearched:Annotation<boolean>(),agentStop:Annotation<string|null>(),agentQuestion:Annotation<string|null>(),agentAnswer:Annotation<string|null>(),agentAnswerIntent:Annotation<BrainRoute["kind"]|null>(),
  agentDecisionMs:Annotation<number>(),agentToolMs:Annotation<number>(),agentDecisionCount:Annotation<number>()
 });
 /**
@@ -77,13 +77,20 @@ export function createPersistentResearchGraph(
      const prepared=await prepareTurn(state.request,deps);
      await verify();
      return {prepared,agentRead:false,agentAction:null,agentObservations:[],agentTranscript:[],agentStart:0,
-       agentSearched:false,agentStop:null,agentQuestion:null,
+       agentSearched:false,agentStop:null,agentQuestion:null,agentAnswer:null,agentAnswerIntent:null,
        agentDecisionMs:0,agentToolMs:0,agentDecisionCount:0};
    })
    .addNode("route",async state=>{
      const started=performance.now();
      const previous=state.researchResult?.shoppingPlan;
      const activeTask=ownedTask(state.researchResult?.taskState,taskScope(state.request));
+     // V2: the Agent, not regex routing, first interprets EVERY user request.
+     // This neutral route does not assert shopping intent or authorize execution.
+     if(deps.agentPlanning&&deps.hermes){
+       await verify();return {activeTask,agentRead:true,priorExplanation:null,wishlistRequest:null,
+         reviewSummaryRequest:null,intentRoute:{kind:"UNCERTAIN" as const,search:true},
+         routeMs:performance.now()-started};
+     }
      if(resetTaskRequested(state.request.userMessage)){
        await verify();return {activeTask:null,priorExplanation:null,wishlistRequest:null,
          intentRoute:{kind:"UNCERTAIN" as const,search:false,
@@ -229,8 +236,16 @@ export function createPersistentResearchGraph(
      const metrics={agentDecisionMs:(state.agentDecisionMs??0)+performance.now()-decisionStarted,
        agentDecisionCount:(state.agentDecisionCount??0)+1};
      await verify();
-     return decision.kind==="CALL"?{...metrics,agentStart:startAt,agentAction:decision.action,agentStop:null,agentQuestion:null}:
-       {...metrics,agentStart:startAt,agentAction:null,agentStop:decision.reason,agentQuestion:decision.question??null};
+     return decision.kind==="CALL"?
+       {...metrics,agentStart:startAt,agentAction:decision.action,agentStop:null,agentQuestion:null,agentAnswer:null,agentAnswerIntent:null}:
+       decision.kind==="RESPOND"?
+       {...metrics,agentStart:startAt,agentAction:null,agentStop:"DONE",agentQuestion:null,agentAnswer:decision.answer,
+        agentAnswerIntent:decision.intent??"UNCERTAIN"}:
+       decision.kind==="ASK_USER"?
+       {...metrics,agentStart:startAt,agentAction:null,agentStop:"DONE",agentQuestion:decision.question,agentAnswer:null,
+        agentAnswerIntent:"UNCERTAIN"}:
+       {...metrics,agentStart:startAt,agentAction:null,agentStop:decision.reason,agentQuestion:decision.question??null,
+        agentAnswer:null,agentAnswerIntent:null};
    })
    .addNode("agent_execute",async state=>{
      const action=state.agentAction;
@@ -286,7 +301,10 @@ export function createPersistentResearchGraph(
              reviewCount:x.candidate.wholeReviewCountVerified?x.candidate.wholeReviewCount:null
            }))
          }};
-         return {shoppingPlan:plan,researchResult:{...fetched.result,intentKind:state.intentRoute.kind},
+         const searchKind=deps.agentPlanning?
+           (previous?"SHOPPING_FOLLOWUP" as const:"SHOPPING_SEARCH" as const):state.intentRoute.kind;
+         return {shoppingPlan:plan,intentRoute:{kind:searchKind,search:true},
+           researchResult:{...fetched.result,intentKind:searchKind},
            evidence:fetched.evidence,agentSearched:true,agentObservations:[...observations,observation],
            agentTranscript:deps.agentPlanning?appendAgentToolTranscript(state.agentTranscript??[],action,observation):[],agentAction:null,
            agentToolMs:(state.agentToolMs??0)+performance.now()-toolStarted};
@@ -357,24 +375,31 @@ export function createPersistentResearchGraph(
      const ids=lastWish?(observations.find(o=>o.tool==="get_wishlist"&&o.ok)?.data as
        {saved_products?:Array<{productId:string}>})?.saved_products?.map(x=>x.productId)??[]
        :reviewRead?state.researchResult?.shoppingPlan?.lastDisplayedProductIds??state.activeTask?.displayedProductIds??[]:[];
+     const noTools=observations.length===0&&!state.agentSearched;
      const text=state.agentStop==="RETRIEVAL_UNAVAILABLE"?
        "상품 검색 연결에 문제가 생겼어요. 확인되지 않은 상품은 추천하지 않을게요.":
-       summarizeAgentObservations(observations,state.agentQuestion??undefined);
+       noTools?(state.agentQuestion??state.agentAnswer??summarizeAgentObservations(observations)):
+       summarizeAgentObservations(observations)+(state.agentQuestion?"\n\n"+state.agentQuestion:"");
      const result:ResearchResult={
        conversationId:state.request.conversationId,messageId:state.prepared.messageId,
-       clientActionId:state.request.clientActionId,intentKind:state.intentRoute.kind,
+       clientActionId:state.request.clientActionId,
+       intentKind:state.agentAnswerIntent??
+         (lastOrder?"CS_REQUEST":lastCart||lastWish?"SHOPPING_FOLLOWUP":reviewRead?"REVIEW_SUMMARY":state.intentRoute.kind),
        ...(state.intentRoute.search&&state.shoppingPlan?{shoppingPlan:state.shoppingPlan}:state.researchResult?.shoppingPlan?{shoppingPlan:state.researchResult.shoppingPlan}:{}),
        ranking:{ranked:[],referenceOnly:[],rejected:[],evaluatedCount:0},datasetVersion:deps.datasetVersion,
        shoppingHandoffs:validatedShoppingHandoffs({observations}),
-       taskState:nextTask(taskScope(state.request),taskKind,state.activeTask,{
-         phase:state.agentStop==="RETRIEVAL_UNAVAILABLE"?"UNAVAILABLE":state.agentQuestion?"AWAITING_INPUT":"ACTIVE",
-         pendingQuestion:state.agentQuestion?"agent_followup":undefined,displayedProductIds:ids,
-       }),
+       taskState:noTools&&!state.agentQuestion?
+         retainTask(state.activeTask,taskScope(state.request)):
+         nextTask(taskScope(state.request),noTools&&state.activeTask?state.activeTask.kind:taskKind,state.activeTask,{
+           phase:state.agentStop==="RETRIEVAL_UNAVAILABLE"?"UNAVAILABLE":state.agentQuestion?"AWAITING_INPUT":"ACTIVE",
+           pendingQuestion:state.agentQuestion?"agent_followup":undefined,
+           displayedProductIds:noTools?state.activeTask?.displayedProductIds??[]:ids,
+         }),
        explanation:{kind:"CONVERSATION",items:[],limitations:[],text},
        trace:{memoryMs:state.prepared.memoryMs,routeMs:state.routeMs,intentMs:0,retrievalMs:0,rankMs:0,
          hermesToolCalls:observations.length,hermesDecisions:state.agentDecisionCount??0,
          hermesDecisionMs:Math.round(state.agentDecisionMs??0),hermesToolMs:Math.round(state.agentToolMs??0),
-         hermesFailedTools:observations.filter(o=>!o.ok).length,
+         hermesFailedTools:observations.filter(o=>!o.ok).length,agentV2:deps.agentPlanning?1:0,
          responseMs:performance.now()-start,
          totalMs:performance.now()-state.prepared.startedAt}
      };
